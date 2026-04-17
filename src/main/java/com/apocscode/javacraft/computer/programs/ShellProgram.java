@@ -126,6 +126,7 @@ public class ShellProgram extends OSProgram {
             case "shutdown" -> os.shutdown();
             case "bt" -> cmdBluetooth(args);
             case "run" -> cmdRun(args);
+            case "mkshortcut" -> cmdMkshortcut(args);
             case "exit" -> running = false;
             default -> appendOutput("Unknown command: " + cmd + "\nType 'help' for commands.\n");
         }
@@ -151,6 +152,7 @@ public class ShellProgram extends OSProgram {
         appendOutput(" id            Show computer ID\n");
         appendOutput(" bt <args>     Bluetooth commands\n");
         appendOutput(" run <file>    Run a program file\n");
+        appendOutput(" mkshortcut    Create desktop shortcut\n");
         appendOutput(" reboot        Reboot the computer\n");
         appendOutput(" shutdown      Shut down\n");
         appendOutput(" exit          Close shell\n");
@@ -334,7 +336,52 @@ public class ShellProgram extends OSProgram {
             if (!content.endsWith("\n")) appendOutput("\n");
         }
     }
+    private void cmdMkshortcut(String args) {
+        if (args.isEmpty()) {
+            appendOutput("Usage: mkshortcut <name> <target> [icon] [color]\n");
+            appendOutput("  mkshortcut icons   \u2014 list available icons\n");
+            appendOutput("  mkshortcut colors  \u2014 list available colors\n");
+            return;
+        }
+        String[] parts = args.split("\\s+");
+        if (parts[0].equalsIgnoreCase("icons")) {
+            appendOutput("Available icons (0-15):\n");
+            for (int i = 0; i < DesktopProgram.ICON_CHARS.length; i++) {
+                appendOutput("  " + i + ": " + DesktopProgram.ICON_CHARS[i]
+                    + " " + DesktopProgram.ICON_LABELS[i] + "\n");
+            }
+            return;
+        }
+        if (parts[0].equalsIgnoreCase("colors")) {
+            appendOutput("Available colors (0-15):\n");
+            String[] names = {"White","Orange","Magenta","L.Blue","Yellow","Lime",
+                "Pink","Gray","L.Gray","Cyan","Purple","Blue","Brown","Green","Red","Black"};
+            for (int i = 0; i < 16; i++) {
+                appendOutput("  " + i + ": " + names[i] + "\n");
+            }
+            return;
+        }
+        if (parts.length < 2) {
+            appendOutput("Usage: mkshortcut <name> <target> [icon] [color]\n");
+            return;
+        }
+        String name = parts[0];
+        String target = parts[1];
+        int icon = parts.length > 2 ? parseIntSafe(parts[2], 0) : 0;
+        int color = parts.length > 3 ? parseIntSafe(parts[3], 0) : 0;
+        icon = Math.max(0, Math.min(15, icon));
+        color = Math.max(0, Math.min(15, color));
+        String safeName = name.replaceAll("[^a-zA-Z0-9_\\-]", "_").toLowerCase();
+        String content = "name=" + name + "\ntarget=" + target
+            + "\nicon=" + icon + "\ncolor=" + color + "\n";
+        os.getFileSystem().writeFile("/desktop/" + safeName + ".lnk", content);
+        appendOutput("Shortcut created: " + name + " -> " + target + "\n");
+    }
 
+    private int parseIntSafe(String s, int def) {
+        try { return Integer.parseInt(s.trim()); }
+        catch (NumberFormatException e) { return def; }
+    }
     private String resolvePath(String input) {
         input = input.trim();
         if (input.startsWith("/")) return input;

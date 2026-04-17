@@ -183,6 +183,7 @@ public class EditProgram extends OSProgram {
         if (keyCode == 290) save();       // F1 = Save
         if (keyCode == 291) saveAs();     // F2 = Save As (prompt in status)
         if (keyCode == 292) running = false; // F3 = Exit
+        if (keyCode == 293) createDesktopShortcut(); // F4 = Desktop shortcut
 
         ensureCursorVisible();
     }
@@ -215,6 +216,20 @@ public class EditProgram extends OSProgram {
         save();
     }
 
+    private void createDesktopShortcut() {
+        save();
+        String name = filePath;
+        int lastSlash = filePath.lastIndexOf('/');
+        if (lastSlash >= 0) name = filePath.substring(lastSlash + 1);
+        int dot = name.lastIndexOf('.');
+        if (dot > 0) name = name.substring(0, dot);
+        String safeName = name.replaceAll("[^a-zA-Z0-9_\\-]", "_").toLowerCase();
+        String content = "name=" + name + "\ntarget=" + filePath + "\nicon=2\ncolor=9\n";
+        os.getFileSystem().writeFile("/desktop/" + safeName + ".lnk", content);
+        statusMessage = "Shortcut created: " + name;
+        statusTicks = 60;
+    }
+
     private void ensureCursorVisible() {
         int visibleRows = TerminalBuffer.HEIGHT - HEADER_HEIGHT - FOOTER_HEIGHT;
         int visibleCols = TerminalBuffer.WIDTH - LINE_NUM_WIDTH;
@@ -237,7 +252,7 @@ public class EditProgram extends OSProgram {
         buf.setBackgroundColor(11); // blue
         buf.hLine(0, TerminalBuffer.WIDTH - 1, 0, ' ');
         String header = " Edit: " + shortPath(filePath) + (modified ? " *" : "") +
-                         "  F1=Save F3=Exit";
+                         "  F1:Save F3:Exit F4:Link";
         buf.writeAt(0, 0, header.substring(0, Math.min(header.length(), TerminalBuffer.WIDTH)));
 
         // Editor area
