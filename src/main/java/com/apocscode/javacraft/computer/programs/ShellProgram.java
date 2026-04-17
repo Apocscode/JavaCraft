@@ -126,6 +126,7 @@ public class ShellProgram extends OSProgram {
             case "shutdown" -> os.shutdown();
             case "bt" -> cmdBluetooth(args);
             case "run" -> cmdRun(args);
+            case "lua" -> cmdLua(args);
             case "mkshortcut" -> cmdMkshortcut(args);
             case "exit" -> running = false;
             default -> appendOutput("Unknown command: " + cmd + "\nType 'help' for commands.\n");
@@ -152,6 +153,7 @@ public class ShellProgram extends OSProgram {
         appendOutput(" id            Show computer ID\n");
         appendOutput(" bt <args>     Bluetooth commands\n");
         appendOutput(" run <file>    Run a program file\n");
+        appendOutput(" lua [file]    Open Lua shell / run .lua\n");
         appendOutput(" mkshortcut    Create desktop shortcut\n");
         appendOutput(" reboot        Reboot the computer\n");
         appendOutput(" shutdown      Shut down\n");
@@ -329,11 +331,22 @@ public class ShellProgram extends OSProgram {
         String content = os.getFileSystem().readFile(path);
         if (content == null) {
             appendOutput("File not found: " + path + "\n");
+        } else if (path.endsWith(".lua")) {
+            os.launchProgram(new LuaShellProgram(path));
         } else {
-            appendOutput("(Script execution not yet available — Groovy engine pending)\n");
+            appendOutput("(Script execution not yet available \u2014 Groovy engine pending)\n");
             appendOutput("File contents (" + content.length() + " bytes):\n");
             appendOutput(content);
             if (!content.endsWith("\n")) appendOutput("\n");
+        }
+    }
+
+    private void cmdLua(String args) {
+        if (args.isEmpty()) {
+            os.launchProgram(new LuaShellProgram());
+        } else {
+            String path = resolvePath(args);
+            os.launchProgram(new LuaShellProgram(path));
         }
     }
     private void cmdMkshortcut(String args) {

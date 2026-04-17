@@ -43,7 +43,7 @@ public class DesktopProgram extends OSProgram {
 
     // Start menu items
     private static final String[] START_ITEMS = {
-        "Shell", "Edit", "Explorer", "Paint", "Settings", "New Shortcut", "Shutdown", "Reboot"
+        "Shell", "Lua", "Edit", "Explorer", "Paint", "Settings", "New Shortcut", "Shutdown", "Reboot"
     };
     private int startHoverIndex = -1;
 
@@ -294,13 +294,14 @@ public class DesktopProgram extends OSProgram {
     private void launchStartMenuItem(int index) {
         switch (index) {
             case 0 -> openWindow("Shell", new ShellProgram(), 2, 1, 47, 16);
-            case 1 -> openWindow("Edit", new EditProgram("/home/new.txt"), 5, 2, 42, 15);
-            case 2 -> openWindow("Explorer", new ExplorerProgram(), 3, 1, 45, 16);
-            case 3 -> openWindow("Paint", new PaintProgram(), 1, 1, 49, 17);
-            case 4 -> openWindow("Settings", new SettingsProgram(), 10, 3, 30, 12);
-            case 5 -> startWizard();
-            case 6 -> os.shutdown();
-            case 7 -> os.reboot();
+            case 1 -> openWindow("Lua", new LuaShellProgram(), 2, 1, 47, 16);
+            case 2 -> openWindow("Edit", new EditProgram("/home/new.txt"), 5, 2, 42, 15);
+            case 3 -> openWindow("Explorer", new ExplorerProgram(), 3, 1, 45, 16);
+            case 4 -> openWindow("Paint", new PaintProgram(), 1, 1, 49, 17);
+            case 5 -> openWindow("Settings", new SettingsProgram(), 10, 3, 30, 12);
+            case 6 -> startWizard();
+            case 7 -> os.shutdown();
+            case 8 -> os.reboot();
         }
     }
 
@@ -311,9 +312,12 @@ public class DesktopProgram extends OSProgram {
             case "builtin:explorer" -> openWindow("Explorer", new ExplorerProgram(), 3, 1, 45, 16);
             case "builtin:settings" -> openWindow("Settings", new SettingsProgram(), 10, 3, 30, 12);
             case "builtin:paint" -> openWindow("Paint", new PaintProgram(), 1, 1, 49, 17);
+            case "builtin:lua" -> openWindow("Lua", new LuaShellProgram(), 2, 1, 47, 16);
             default -> {
                 if (s.target.endsWith(".pxl")) {
                     openWindow("Paint", new PaintProgram(s.target), 1, 1, 49, 17);
+                } else if (s.target.endsWith(".lua")) {
+                    openWindow(s.name, new LuaShellProgram(s.target), 2, 1, 47, 16);
                 } else {
                     openWindow(s.name, new EditProgram(s.target), 5, 2, 42, 15);
                 }
@@ -509,6 +513,7 @@ public class DesktopProgram extends OSProgram {
         createShortcutFile("Edit", "builtin:edit", 2, 9);
         createShortcutFile("Paint", "builtin:paint", 0, 2);
         createShortcutFile("Settings", "builtin:settings", 10, 8);
+        createShortcutFile("Lua", "builtin:lua", 9, 4);
     }
 
     public void createShortcutFile(String name, String target, int icon, int color) {

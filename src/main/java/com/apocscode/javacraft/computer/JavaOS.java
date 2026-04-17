@@ -69,6 +69,7 @@ public class JavaOS {
         fileSystem.installSystemFile("/system/programs/explorer", "Built-in file explorer");
         fileSystem.installSystemFile("/system/programs/settings", "Built-in settings");
         fileSystem.installSystemFile("/system/programs/paint", "Built-in paint program");
+        fileSystem.installSystemFile("/system/programs/lua", "Built-in Lua 5.2 shell");
 
         // Create default startup file
         if (!fileSystem.exists("/home/startup")) {
