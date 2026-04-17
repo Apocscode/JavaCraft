@@ -108,9 +108,15 @@ public class ExplorerProgram extends OSProgram {
             scrollOffset = 0;
             refreshListing();
         } else {
-            // File — open in editor
+            // File — open in appropriate program
             String fullPath = currentPath.equals("/") ? "/" + name : currentPath + "/" + name;
-            os.launchProgram(new EditProgram(fullPath));
+            if (fullPath.endsWith(".pzl")) {
+                os.launchProgram(new PuzzleProgram(fullPath));
+            } else if (fullPath.endsWith(".pxl")) {
+                os.launchProgram(new PaintProgram(fullPath));
+            } else {
+                os.launchProgram(new EditProgram(fullPath));
+            }
         }
     }
 

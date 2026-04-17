@@ -128,6 +128,8 @@ public class ShellProgram extends OSProgram {
             case "run" -> cmdRun(args);
             case "lua" -> cmdLua(args);
             case "mkshortcut" -> cmdMkshortcut(args);
+            case "puzzle" -> cmdPuzzle(args);
+            case "ide" -> cmdIde(args);
             case "exit" -> running = false;
             default -> appendOutput("Unknown command: " + cmd + "\nType 'help' for commands.\n");
         }
@@ -155,6 +157,8 @@ public class ShellProgram extends OSProgram {
         appendOutput(" run <file>    Run a program file\n");
         appendOutput(" lua [file]    Open Lua shell / run .lua\n");
         appendOutput(" mkshortcut    Create desktop shortcut\n");
+        appendOutput(" puzzle [file] Open puzzle IDE\n");
+        appendOutput(" ide [file]    Open text IDE\n");
         appendOutput(" reboot        Reboot the computer\n");
         appendOutput(" shutdown      Shut down\n");
         appendOutput(" exit          Close shell\n");
@@ -347,6 +351,24 @@ public class ShellProgram extends OSProgram {
         } else {
             String path = resolvePath(args);
             os.launchProgram(new LuaShellProgram(path));
+        }
+    }
+
+    private void cmdPuzzle(String args) {
+        if (args.isEmpty()) {
+            os.launchProgram(new PuzzleProgram());
+        } else {
+            String path = resolvePath(args);
+            os.launchProgram(new PuzzleProgram(path));
+        }
+    }
+
+    private void cmdIde(String args) {
+        if (args.isEmpty()) {
+            os.launchProgram(new TextIDEProgram());
+        } else {
+            String path = resolvePath(args);
+            os.launchProgram(new TextIDEProgram(path));
         }
     }
     private void cmdMkshortcut(String args) {
