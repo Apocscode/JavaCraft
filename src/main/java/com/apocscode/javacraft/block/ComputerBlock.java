@@ -49,7 +49,7 @@ public class ComputerBlock extends Block implements EntityBlock {
 
     @Override
     public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) {
-        if (level.isClientSide()) return null;
+        // Tick on both client and server — OS needs to run client-side for screen rendering
         return type == ModBlockEntities.COMPUTER.get()
                 ? (lvl, pos, st, be) -> ((ComputerBlockEntity) be).serverTick()
                 : null;
@@ -57,10 +57,11 @@ public class ComputerBlock extends Block implements EntityBlock {
 
     @Override
     protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hitResult) {
-        if (!level.isClientSide()) {
+        if (level.isClientSide()) {
             BlockEntity be = level.getBlockEntity(pos);
             if (be instanceof ComputerBlockEntity computer) {
-                computer.openTerminal(player);
+                net.minecraft.client.Minecraft.getInstance().setScreen(
+                    new com.apocscode.javacraft.client.ComputerScreen(computer.getOS()));
             }
         }
         return InteractionResult.sidedSuccess(level.isClientSide());

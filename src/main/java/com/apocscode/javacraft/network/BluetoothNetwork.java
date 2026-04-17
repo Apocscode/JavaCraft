@@ -62,6 +62,32 @@ public class BluetoothNetwork {
     }
 
     /**
+     * Broadcast a message by sender device UUID (looks up sender position from registry).
+     */
+    public static void broadcastFromDevice(UUID senderId, int channel, String message) {
+        // Find the sender's position and dimension from the registry
+        for (Map.Entry<String, List<DeviceEntry>> entry : devices.entrySet()) {
+            List<DeviceEntry> dimDevices = entry.getValue();
+            synchronized (dimDevices) {
+                BlockPos senderPos = null;
+                for (DeviceEntry d : dimDevices) {
+                    if (d.deviceId.equals(senderId)) { senderPos = d.pos; break; }
+                }
+                if (senderPos != null) {
+                    for (DeviceEntry device : dimDevices) {
+                        if (device.channel == channel && isInRange(senderPos, device.pos)) {
+                            inbox.computeIfAbsent(device.deviceId, k -> new LinkedList<>());
+                            Queue<Message> queue = inbox.get(device.deviceId);
+                            queue.add(new Message(channel, message, senderPos, 0));
+                            while (queue.size() > 64) queue.poll();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * Send a direct message to a specific device ID on its channel.
      */
     public static void send(Level level, BlockPos senderPos, UUID targetId, String message) {
