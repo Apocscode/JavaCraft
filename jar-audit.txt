@@ -1,0 +1,19 @@
+﻿=== org/luaj entries ===
+=== script entries ===
+META-INF/services/javax.script.ScriptEngineFactory
+com/apocscode/byteblock/shadow/luaj/vm2/script/LuaScriptEngine$1.class
+com/apocscode/byteblock/shadow/luaj/vm2/script/LuaScriptEngine$BindingsMetatable$1.class
+com/apocscode/byteblock/shadow/luaj/vm2/script/LuaScriptEngine$BindingsMetatable$2.class
+com/apocscode/byteblock/shadow/luaj/vm2/script/LuaScriptEngine$BindingsMetatable.class
+com/apocscode/byteblock/shadow/luaj/vm2/script/LuaScriptEngine$LuajCompiledScript.class
+com/apocscode/byteblock/shadow/luaj/vm2/script/LuaScriptEngine$Utf8Encoder.class
+com/apocscode/byteblock/shadow/luaj/vm2/script/LuaScriptEngine.class
+com/apocscode/byteblock/shadow/luaj/vm2/script/LuaScriptEngineFactory.class
+com/apocscode/byteblock/shadow/luaj/vm2/script/LuajContext$ReaderInputStream.class
+com/apocscode/byteblock/shadow/luaj/vm2/script/LuajContext$WriterOutputStream.class
+com/apocscode/byteblock/shadow/luaj/vm2/script/LuajContext.class
+com/apocscode/byteblock/shadow/luaj/vm2/script/
+=== META-INF/services ===
+META-INF/services/javax.script.ScriptEngineFactory
+META-INF/services/
+=== module-info ===

@@ -195,9 +195,6 @@ public class LuaShellProgram extends OSProgram {
 
     @Override
     public void render(TerminalBuffer buf) {
-        if (!needsRedraw) return;
-        needsRedraw = false;
-
         buf.setTextColor(0);  // white
         buf.setBackgroundColor(15); // black
         buf.clear();

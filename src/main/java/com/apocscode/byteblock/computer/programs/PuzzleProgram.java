@@ -406,8 +406,6 @@ public class PuzzleProgram extends OSProgram {
 
     @Override
     public void render(TerminalBuffer buf) {
-        if (!needsRedraw) return;
-        needsRedraw = false;
         int vis = TerminalBuffer.HEIGHT - HDR - FTR;
 
         // ── Header ──

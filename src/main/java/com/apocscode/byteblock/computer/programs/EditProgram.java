@@ -241,9 +241,6 @@ public class EditProgram extends OSProgram {
 
     @Override
     public void render(TerminalBuffer buf) {
-        if (!needsRedraw) return;
-        needsRedraw = false;
-
         int visibleRows = TerminalBuffer.HEIGHT - HEADER_HEIGHT - FOOTER_HEIGHT;
         int visibleCols = TerminalBuffer.WIDTH - LINE_NUM_WIDTH;
 

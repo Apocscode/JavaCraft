@@ -61,12 +61,18 @@ public class DesktopProgram extends OSProgram {
     static class Shortcut {
         String name, target, lnkFile;
         int iconIndex, colorIndex;
-        Shortcut(String name, String target, int icon, int color, String lnkFile) {
+        int posX, posY; // desktop position (cell coords)
+        Shortcut(String name, String target, int icon, int color, int px, int py, String lnkFile) {
             this.name = name; this.target = target;
-            this.iconIndex = icon; this.colorIndex = color; this.lnkFile = lnkFile;
+            this.iconIndex = icon; this.colorIndex = color;
+            this.posX = px; this.posY = py; this.lnkFile = lnkFile;
         }
     }
     private final List<Shortcut> shortcuts = new ArrayList<>();
+
+    // Icon dragging state
+    private Shortcut draggingIcon;
+    private int iconDragOffsetX, iconDragOffsetY;
 
     // Shortcut creation wizard overlay
     private enum WizardState { NONE, NAME_INPUT, TARGET_INPUT, ICON_PICK, COLOR_PICK }
@@ -76,6 +82,13 @@ public class DesktopProgram extends OSProgram {
     private int wizardIcon = 0;
     private int wizardColor = 0;
 
+    // Desktop customization — persisted to /system/desktop.cfg
+    private int wallpaperColor = 11;  // default blue
+    private int iconTextColor = 0;    // default white
+    private int taskbarColor = 7;     // default gray
+    private int taskbarTextColor = 0; // default white
+    private static final String DESKTOP_CFG = "/system/desktop.cfg";
+
     public DesktopProgram() {
         super("Desktop");
     }
@@ -83,9 +96,40 @@ public class DesktopProgram extends OSProgram {
     @Override
     public void init(JavaOS os) {
         this.os = os;
+        loadDesktopConfig();
         loadShortcuts();
         needsRedraw = true;
     }
+
+    private void loadDesktopConfig() {
+        String cfg = os.getFileSystem().readFile(DESKTOP_CFG);
+        if (cfg == null) return;
+        for (String line : cfg.split("\n")) {
+            line = line.trim();
+            try {
+                if (line.startsWith("wallpaper=")) wallpaperColor = Integer.parseInt(line.substring(10).trim()) & 0xF;
+                else if (line.startsWith("iconText=")) iconTextColor = Integer.parseInt(line.substring(9).trim()) & 0xF;
+                else if (line.startsWith("taskbar=")) taskbarColor = Integer.parseInt(line.substring(8).trim()) & 0xF;
+                else if (line.startsWith("taskbarText=")) taskbarTextColor = Integer.parseInt(line.substring(12).trim()) & 0xF;
+            } catch (NumberFormatException ignored) {}
+        }
+    }
+
+    public void saveDesktopConfig() {
+        String cfg = "wallpaper=" + wallpaperColor + "\niconText=" + iconTextColor
+                + "\ntaskbar=" + taskbarColor + "\ntaskbarText=" + taskbarTextColor + "\n";
+        os.getFileSystem().writeFile(DESKTOP_CFG, cfg);
+    }
+
+    // Getters/setters for Settings program
+    public int getWallpaperColor() { return wallpaperColor; }
+    public void setWallpaperColor(int c) { wallpaperColor = c & 0xF; }
+    public int getIconTextColor() { return iconTextColor; }
+    public void setIconTextColor(int c) { iconTextColor = c & 0xF; }
+    public int getTaskbarColor() { return taskbarColor; }
+    public void setTaskbarColor(int c) { taskbarColor = c & 0xF; }
+    public int getTaskbarTextColor() { return taskbarTextColor; }
+    public void setTaskbarTextColor(int c) { taskbarTextColor = c & 0xF; }
 
     @Override
     public boolean tick() {
@@ -112,7 +156,14 @@ public class DesktopProgram extends OSProgram {
         switch (event.getType()) {
             case MOUSE_CLICK -> handleMouseClick(event.getInt(0), event.getInt(1), event.getInt(2));
             case MOUSE_DRAG -> handleMouseDrag(event.getInt(0), event.getInt(1), event.getInt(2));
-            case MOUSE_UP -> { dragging = false; needsRedraw = true; }
+            case MOUSE_UP -> {
+                if (draggingIcon != null) {
+                    saveShortcutPosition(draggingIcon);
+                    draggingIcon = null;
+                }
+                dragging = false;
+                needsRedraw = true;
+            }
             case KEY -> handleKey(event.getInt(0));
             case CHAR -> {
                 // Forward to active window's program
@@ -140,12 +191,6 @@ public class DesktopProgram extends OSProgram {
             return;
         }
 
-        // Desktop icon click (top area, when no window covers it)
-        if (windows.isEmpty() || activeWindow == null) {
-            handleDesktopClick(mx, my);
-            return;
-        }
-
         // Window title bar / content click (iterate top to bottom in z-order)
         for (int i = windows.size() - 1; i >= 0; i--) {
             Window w = windows.get(i);
@@ -169,7 +214,7 @@ public class DesktopProgram extends OSProgram {
             }
         }
 
-        // Click on desktop background
+        // Click on desktop background / icons
         startMenuOpen = false;
         handleDesktopClick(mx, my);
     }
@@ -220,7 +265,11 @@ public class DesktopProgram extends OSProgram {
     }
 
     private void handleMouseDrag(int button, int mx, int my) {
-        if (dragging && activeWindow != null && !activeWindow.maximized) {
+        if (draggingIcon != null) {
+            draggingIcon.posX = Math.max(0, Math.min(TerminalBuffer.WIDTH - draggingIcon.name.length() - 3, mx - iconDragOffsetX));
+            draggingIcon.posY = Math.max(0, Math.min(TerminalBuffer.HEIGHT - 2, my - iconDragOffsetY));
+            needsRedraw = true;
+        } else if (dragging && activeWindow != null && !activeWindow.maximized) {
             activeWindow.x = Math.max(0, Math.min(TerminalBuffer.WIDTH - activeWindow.width, mx - dragOffsetX));
             activeWindow.y = Math.max(0, Math.min(TerminalBuffer.HEIGHT - 2 - activeWindow.height, my - dragOffsetY));
             needsRedraw = true;
@@ -281,11 +330,14 @@ public class DesktopProgram extends OSProgram {
     }
 
     private void handleDesktopClick(int mx, int my) {
-        for (int i = 0; i < shortcuts.size(); i++) {
-            int iconY = 1 + i * 2;
-            if (iconY >= TerminalBuffer.HEIGHT - 1) break;
-            if (my == iconY && mx >= 1 && mx < 1 + shortcuts.get(i).name.length() + 3) {
-                launchShortcut(shortcuts.get(i));
+        for (Shortcut s : shortcuts) {
+            int iconW = s.name.length() + 3; // icon char + space + name
+            if (my == s.posY && mx >= s.posX && mx < s.posX + iconW) {
+                // Start icon drag (launch on double-click is hard in terminal, so single click launches)
+                draggingIcon = s;
+                iconDragOffsetX = mx - s.posX;
+                iconDragOffsetY = my - s.posY;
+                launchShortcut(s);
                 return;
             }
         }
@@ -300,7 +352,7 @@ public class DesktopProgram extends OSProgram {
             case 4 -> openWindow("IDE", new TextIDEProgram(), 1, 1, 49, 17);
             case 5 -> openWindow("Explorer", new ExplorerProgram(), 3, 1, 45, 16);
             case 6 -> openWindow("Paint", new PaintProgram(), 1, 1, 49, 17);
-            case 7 -> openWindow("Settings", new SettingsProgram(), 10, 3, 30, 12);
+            case 7 -> openWindow("Settings", new SettingsProgram(), 5, 1, 45, 16);
             case 8 -> startWizard();
             case 9 -> os.shutdown();
             case 10 -> os.reboot();
@@ -312,7 +364,7 @@ public class DesktopProgram extends OSProgram {
             case "builtin:shell" -> openWindow("Shell", new ShellProgram(), 2, 1, 47, 16);
             case "builtin:edit" -> openWindow("Edit", new EditProgram("/home/new.txt"), 5, 2, 42, 15);
             case "builtin:explorer" -> openWindow("Explorer", new ExplorerProgram(), 3, 1, 45, 16);
-            case "builtin:settings" -> openWindow("Settings", new SettingsProgram(), 10, 3, 30, 12);
+            case "builtin:settings" -> openWindow("Settings", new SettingsProgram(), 5, 1, 45, 16);
             case "builtin:paint" -> openWindow("Paint", new PaintProgram(), 1, 1, 49, 17);
             case "builtin:lua" -> openWindow("Lua", new LuaShellProgram(), 2, 1, 47, 16);
             case "builtin:puzzle" -> openWindow("Puzzle", new PuzzleProgram(), 1, 1, 49, 17);
@@ -342,22 +394,20 @@ public class DesktopProgram extends OSProgram {
 
     @Override
     public void render(TerminalBuffer buf) {
-        buf.setTextColor(0);
-        buf.setBackgroundColor(11); // blue desktop background
+        buf.setTextColor(iconTextColor);
+        buf.setBackgroundColor(wallpaperColor);
         buf.clear();
 
         // Desktop shortcuts
-        for (int i = 0; i < shortcuts.size(); i++) {
-            Shortcut s = shortcuts.get(i);
-            int y = 1 + i * 2;
-            if (y >= TerminalBuffer.HEIGHT - 1) break;
+        for (Shortcut s : shortcuts) {
+            if (s.posY >= TerminalBuffer.HEIGHT - 1) continue;
             char icon = (s.iconIndex >= 0 && s.iconIndex < ICON_CHARS.length) ?
                 ICON_CHARS[s.iconIndex] : '\u25A0';
             buf.setTextColor(s.colorIndex);
-            buf.setBackgroundColor(11);
-            buf.writeAt(1, y, String.valueOf(icon) + " ");
-            buf.setTextColor(0);
-            buf.writeAt(3, y, s.name);
+            buf.setBackgroundColor(wallpaperColor);
+            buf.writeAt(s.posX, s.posY, String.valueOf(icon) + " ");
+            buf.setTextColor(iconTextColor);
+            buf.writeAt(s.posX + 2, s.posY, s.name);
         }
 
         // Render windows (back to front)
@@ -427,22 +477,22 @@ public class DesktopProgram extends OSProgram {
     }
 
     private void renderTaskbar(TerminalBuffer buf) {
-        buf.setTextColor(0); // white
-        buf.setBackgroundColor(7); // gray taskbar
+        buf.setTextColor(taskbarTextColor);
+        buf.setBackgroundColor(taskbarColor);
         int y = TerminalBuffer.HEIGHT - 1;
         buf.hLine(0, TerminalBuffer.WIDTH - 1, y, ' ');
 
         // Start button
-        buf.setTextColor(0);
+        buf.setTextColor(taskbarTextColor);
         buf.setBackgroundColor(startMenuOpen ? 5 : 13); // lime when open, green normally
         buf.writeAt(0, y, "[Start]");
 
         // Window entries
-        buf.setBackgroundColor(7);
+        buf.setBackgroundColor(taskbarColor);
         int offset = 8;
         for (Window w : windows) {
             boolean isActive = (w == activeWindow && !w.minimized);
-            buf.setBackgroundColor(isActive ? 8 : 7);
+            buf.setBackgroundColor(isActive ? 8 : taskbarColor);
             buf.setTextColor(isActive ? 0 : 8);
             String label = " " + truncate(w.title, 8) + " ";
             buf.writeAt(offset, y, label);
@@ -450,8 +500,8 @@ public class DesktopProgram extends OSProgram {
         }
 
         // Clock (right side)
-        buf.setBackgroundColor(7);
-        buf.setTextColor(0);
+        buf.setBackgroundColor(taskbarColor);
+        buf.setTextColor(taskbarTextColor);
         long ticks = os.getTickCount();
         int seconds = (int)(ticks / 20) % 3600;
         String clock = String.format("%02d:%02d", seconds / 60, seconds % 60);
@@ -485,18 +535,19 @@ public class DesktopProgram extends OSProgram {
             files = os.getFileSystem().list("/desktop");
             if (files == null) return;
         }
+        int idx = 0;
         for (String entry : files) {
             if (!entry.endsWith(".lnk")) continue;
             String content = os.getFileSystem().readFile("/desktop/" + entry);
             if (content == null) continue;
-            Shortcut s = parseShortcut(content, entry);
-            if (s != null) shortcuts.add(s);
+            Shortcut s = parseShortcut(content, entry, 1 + idx * 2);
+            if (s != null) { shortcuts.add(s); idx++; }
         }
     }
 
-    private Shortcut parseShortcut(String content, String fileName) {
+    private Shortcut parseShortcut(String content, String fileName, int defaultY) {
         String target = "", name = fileName.replace(".lnk", "");
-        int icon = 0, color = 0;
+        int icon = 0, color = 0, posX = 1, posY = defaultY;
         for (String line : content.split("\n")) {
             line = line.trim();
             if (line.startsWith("target=")) target = line.substring(7);
@@ -507,10 +558,18 @@ public class DesktopProgram extends OSProgram {
                 try { color = Integer.parseInt(line.substring(6).trim()); }
                 catch (NumberFormatException ignored) {}
             } else if (line.startsWith("name=")) name = line.substring(5);
+            else if (line.startsWith("posX=")) {
+                try { posX = Integer.parseInt(line.substring(5).trim()); }
+                catch (NumberFormatException ignored) {}
+            } else if (line.startsWith("posY=")) {
+                try { posY = Integer.parseInt(line.substring(5).trim()); }
+                catch (NumberFormatException ignored) {}
+            }
         }
         if (target.isEmpty()) return null;
         return new Shortcut(name, target,
-            Math.max(0, Math.min(15, icon)), Math.max(0, Math.min(15, color)), fileName);
+            Math.max(0, Math.min(15, icon)), Math.max(0, Math.min(15, color)),
+            posX, posY, fileName);
     }
 
     private void createDefaultShortcuts() {
@@ -526,8 +585,16 @@ public class DesktopProgram extends OSProgram {
 
     public void createShortcutFile(String name, String target, int icon, int color) {
         String safeName = name.replaceAll("[^a-zA-Z0-9_\\-]", "_").toLowerCase();
-        String content = "name=" + name + "\ntarget=" + target + "\nicon=" + icon + "\ncolor=" + color + "\n";
+        int posY = 1 + shortcuts.size() * 2;
+        String content = "name=" + name + "\ntarget=" + target + "\nicon=" + icon
+                + "\ncolor=" + color + "\nposX=1\nposY=" + posY + "\n";
         os.getFileSystem().writeFile("/desktop/" + safeName + ".lnk", content);
+    }
+
+    private void saveShortcutPosition(Shortcut s) {
+        String content = "name=" + s.name + "\ntarget=" + s.target + "\nicon=" + s.iconIndex
+                + "\ncolor=" + s.colorIndex + "\nposX=" + s.posX + "\nposY=" + s.posY + "\n";
+        os.getFileSystem().writeFile("/desktop/" + s.lnkFile, content);
     }
 
     // --- Shortcut Creation Wizard ---

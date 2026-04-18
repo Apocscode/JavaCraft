@@ -441,8 +441,6 @@ public class TextIDEProgram extends OSProgram {
 
     @Override
     public void render(TerminalBuffer buf) {
-        if (!needsRedraw) return;
-        needsRedraw = false;
         Tab t = tab();
         int visW = TerminalBuffer.WIDTH - LINE_W;
 

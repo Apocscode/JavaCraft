@@ -160,9 +160,6 @@ public class ExplorerProgram extends OSProgram {
 
     @Override
     public void render(TerminalBuffer buf) {
-        if (!needsRedraw) return;
-        needsRedraw = false;
-
         int maxVisible = TerminalBuffer.HEIGHT - HEADER_HEIGHT - FOOTER_HEIGHT;
 
         // Header — path bar
