@@ -9,6 +9,8 @@
 
   "item.byteblock.disk": "Floppy Disk",
   "item.byteblock.glasses": "Smart Glasses",
+  "item.byteblock.robot_spawn_egg": "Robot",
+  "item.byteblock.drone_spawn_egg": "Drone",
   "entity.byteblock.drone": "Drone",
   "entity.byteblock.robot": "Robot"
 }

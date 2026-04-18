@@ -28,5 +28,8 @@ public class ModCreativeTabs {
                         // Items
                         output.accept(ModItems.DISK.get());
                         output.accept(ModItems.GLASSES.get());
+                        // Entities
+                        output.accept(ModItems.ROBOT_SPAWN_EGG.get());
+                        output.accept(ModItems.DRONE_SPAWN_EGG.get());
                     }).build());
 }
