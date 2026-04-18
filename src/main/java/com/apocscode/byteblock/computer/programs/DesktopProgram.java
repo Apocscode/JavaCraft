@@ -41,6 +41,9 @@ public class DesktopProgram extends OSProgram {
     private boolean dragging;
     private int dragOffsetX, dragOffsetY;
 
+    // Mouse tracking for window resizing
+    private boolean resizing;
+
     // Start menu items
     private static final String[] START_ITEMS = {
         "Shell", "Lua", "Puzzle", "Edit", "IDE", "Explorer", "Paint", "Settings", "New Shortcut", "Shutdown", "Reboot"
@@ -111,13 +114,15 @@ public class DesktopProgram extends OSProgram {
                 else if (line.startsWith("iconText=")) iconTextColor = Integer.parseInt(line.substring(9).trim()) & 0xF;
                 else if (line.startsWith("taskbar=")) taskbarColor = Integer.parseInt(line.substring(8).trim()) & 0xF;
                 else if (line.startsWith("taskbarText=")) taskbarTextColor = Integer.parseInt(line.substring(12).trim()) & 0xF;
+                else if (line.startsWith("textScale=")) os.setTextScale(Float.parseFloat(line.substring(10).trim()));
             } catch (NumberFormatException ignored) {}
         }
     }
 
     public void saveDesktopConfig() {
         String cfg = "wallpaper=" + wallpaperColor + "\niconText=" + iconTextColor
-                + "\ntaskbar=" + taskbarColor + "\ntaskbarText=" + taskbarTextColor + "\n";
+                + "\ntaskbar=" + taskbarColor + "\ntaskbarText=" + taskbarTextColor
+                + "\ntextScale=" + os.getTextScale() + "\n";
         os.getFileSystem().writeFile(DESKTOP_CFG, cfg);
     }
 
@@ -162,6 +167,7 @@ public class DesktopProgram extends OSProgram {
                     draggingIcon = null;
                 }
                 dragging = false;
+                resizing = false;
                 needsRedraw = true;
             }
             case KEY -> handleKey(event.getInt(0));
@@ -204,6 +210,9 @@ public class DesktopProgram extends OSProgram {
                 // Title bar?
                 if (my == w.y) {
                     handleTitleBarClick(w, mx, my);
+                } else if (my == w.y + w.height - 1 && mx >= w.x + w.width - 2) {
+                    // Resize handle (bottom-right corner)
+                    resizing = true;
                 } else if (w.program != null) {
                     // Pass click to program (translated to window-local coords)
                     int localX = mx - w.x - 1;
@@ -268,6 +277,10 @@ public class DesktopProgram extends OSProgram {
         if (draggingIcon != null) {
             draggingIcon.posX = Math.max(0, Math.min(TerminalBuffer.WIDTH - draggingIcon.name.length() - 3, mx - iconDragOffsetX));
             draggingIcon.posY = Math.max(0, Math.min(TerminalBuffer.HEIGHT - 2, my - iconDragOffsetY));
+            needsRedraw = true;
+        } else if (resizing && activeWindow != null && !activeWindow.maximized) {
+            activeWindow.width = Math.max(10, Math.min(TerminalBuffer.WIDTH - activeWindow.x, mx - activeWindow.x + 1));
+            activeWindow.height = Math.max(4, Math.min(TerminalBuffer.HEIGHT - 1 - activeWindow.y, my - activeWindow.y + 1));
             needsRedraw = true;
         } else if (dragging && activeWindow != null && !activeWindow.maximized) {
             activeWindow.x = Math.max(0, Math.min(TerminalBuffer.WIDTH - activeWindow.width, mx - dragOffsetX));
@@ -394,6 +407,7 @@ public class DesktopProgram extends OSProgram {
 
     @Override
     public void render(TerminalBuffer buf) {
+        buf.setCursorBlink(false);
         buf.setTextColor(iconTextColor);
         buf.setBackgroundColor(wallpaperColor);
         buf.clear();
@@ -460,7 +474,21 @@ public class DesktopProgram extends OSProgram {
             TerminalBuffer sub = new TerminalBuffer();
             w.program.render(sub);
             blitSubBuffer(buf, sub, w.x, w.y + 1, w.width, w.height - 1);
+            // Propagate cursor from active window's sub-buffer
+            if (w == activeWindow && sub.isCursorBlink()) {
+                int curX = w.x + sub.getCursorX();
+                int curY = w.y + 1 + sub.getCursorY();
+                if (curX >= w.x && curX < w.x + w.width
+                        && curY > w.y && curY < w.y + w.height) {
+                    buf.setCursorPos(curX, curY);
+                    buf.setCursorBlink(true);
+                }
+            }
         }
+        // Resize handle (bottom-right corner)
+        buf.setTextColor(active ? 8 : 7);
+        buf.setBackgroundColor(15);
+        buf.writeAt(w.x + w.width - 1, w.y + w.height - 1, "/");
     }
 
     private void blitSubBuffer(TerminalBuffer dest, TerminalBuffer src, int dx, int dy, int w, int h) {
@@ -543,6 +571,26 @@ public class DesktopProgram extends OSProgram {
             Shortcut s = parseShortcut(content, entry, 1 + idx * 2);
             if (s != null) { shortcuts.add(s); idx++; }
         }
+        fixOverlappingPositions();
+    }
+
+    private void fixOverlappingPositions() {
+        if (shortcuts.size() < 3) return;
+        int maxOverlap = 0;
+        for (int i = 0; i < shortcuts.size(); i++) {
+            int count = 0;
+            for (Shortcut s : shortcuts) {
+                if (shortcuts.get(i).posX == s.posX && shortcuts.get(i).posY == s.posY) count++;
+            }
+            maxOverlap = Math.max(maxOverlap, count);
+        }
+        if (maxOverlap >= 3) {
+            for (int i = 0; i < shortcuts.size(); i++) {
+                shortcuts.get(i).posX = 1;
+                shortcuts.get(i).posY = 1 + i * 2;
+                saveShortcutPosition(shortcuts.get(i));
+            }
+        }
     }
 
     private Shortcut parseShortcut(String content, String fileName, int defaultY) {
@@ -584,10 +632,18 @@ public class DesktopProgram extends OSProgram {
     }
 
     public void createShortcutFile(String name, String target, int icon, int color) {
+        List<String> existing = os.getFileSystem().list("/desktop");
+        int count = 0;
+        if (existing != null) {
+            for (String f : existing) if (f.endsWith(".lnk")) count++;
+        }
+        createShortcutFile(name, target, icon, color, 1, 1 + count * 2);
+    }
+
+    public void createShortcutFile(String name, String target, int icon, int color, int posX, int posY) {
         String safeName = name.replaceAll("[^a-zA-Z0-9_\\-]", "_").toLowerCase();
-        int posY = 1 + shortcuts.size() * 2;
         String content = "name=" + name + "\ntarget=" + target + "\nicon=" + icon
-                + "\ncolor=" + color + "\nposX=1\nposY=" + posY + "\n";
+                + "\ncolor=" + color + "\nposX=" + posX + "\nposY=" + posY + "\n";
         os.getFileSystem().writeFile("/desktop/" + safeName + ".lnk", content);
     }
 

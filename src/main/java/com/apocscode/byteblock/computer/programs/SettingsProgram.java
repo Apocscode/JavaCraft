@@ -22,10 +22,14 @@ public class SettingsProgram extends OSProgram {
         "Icon Text Color",
         "Taskbar Color",
         "Taskbar Text Color",
+        "Text Scale",
         "Reboot Computer",
         "Shutdown",
         "Close Settings"
     };
+
+    private static final float[] SCALE_OPTIONS = { 1.5f, 2.0f, 2.5f, 3.0f };
+    private static final String[] SCALE_LABELS = { "1.5x Small", "2x Default", "2.5x Large", "3x XL" };
 
     // Color names for display
     private static final String[] COLOR_NAMES = {
@@ -100,9 +104,18 @@ public class SettingsProgram extends OSProgram {
             case 3 -> { if (desktop != null) { desktop.setIconTextColor((desktop.getIconTextColor() + 1) & 0xF); desktop.saveDesktopConfig(); } }
             case 4 -> { if (desktop != null) { desktop.setTaskbarColor((desktop.getTaskbarColor() + 1) & 0xF); desktop.saveDesktopConfig(); } }
             case 5 -> { if (desktop != null) { desktop.setTaskbarTextColor((desktop.getTaskbarTextColor() + 1) & 0xF); desktop.saveDesktopConfig(); } }
-            case 6 -> os.reboot();
-            case 7 -> os.shutdown();
-            case 8 -> running = false;
+            case 6 -> {
+                float current = os.getTextScale();
+                int idx = 0;
+                for (int i = 0; i < SCALE_OPTIONS.length; i++) {
+                    if (Math.abs(SCALE_OPTIONS[i] - current) < 0.01f) { idx = i; break; }
+                }
+                os.setTextScale(SCALE_OPTIONS[(idx + 1) % SCALE_OPTIONS.length]);
+                if (desktop != null) desktop.saveDesktopConfig();
+            }
+            case 7 -> os.reboot();
+            case 8 -> os.shutdown();
+            case 9 -> running = false;
         }
     }
 
@@ -187,6 +200,14 @@ public class SettingsProgram extends OSProgram {
                         buf.writeAt(25, y, " " + COLOR_NAMES[c] + " ");
                         buf.setBackgroundColor(selected ? 11 : 15);
                     }
+                }
+                case 6 -> {
+                    float s = os.getTextScale();
+                    String label = String.format("%.1fx", s);
+                    for (int si = 0; si < SCALE_OPTIONS.length; si++) {
+                        if (Math.abs(SCALE_OPTIONS[si] - s) < 0.01f) { label = SCALE_LABELS[si]; break; }
+                    }
+                    buf.writeAt(25, y, label);
                 }
             }
         }

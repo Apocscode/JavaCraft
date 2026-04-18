@@ -27,6 +27,7 @@ public class JavaOS {
     private final UUID computerId;
     private String label;
     private int bluetoothChannel;
+    private float textScale = 2.0f;
 
     // Process management
     private final List<OSProgram> processes;
@@ -293,6 +294,9 @@ public class JavaOS {
 
     public int getBluetoothChannel() { return bluetoothChannel; }
     public void setBluetoothChannel(int ch) { this.bluetoothChannel = ch; }
+
+    public float getTextScale() { return textScale; }
+    public void setTextScale(float s) { this.textScale = Math.max(1.0f, Math.min(3.0f, s)); }
 
     public boolean isRunning() { return state == State.RUNNING; }
     public boolean isBooting() { return state == State.BOOT; }

@@ -14,14 +14,13 @@ import net.minecraft.network.chat.Component;
  */
 public class ComputerScreen extends Screen {
 
-    private static final int CELL_WIDTH = 12;   // pixels per character cell (doubled)
-    private static final int CELL_HEIGHT = 18;  // pixels per character cell (doubled)
-    private static final int BORDER = 12;       // border around terminal area
-    private static final int HEADER_HEIGHT = 20;
-    private static final float SCALE = 2.0f;    // text scale factor
+    private static final int BASE_CELL_W = 6;
+    private static final int BASE_CELL_H = 9;
 
     private final JavaOS os;
-    private int termX, termY; // Top-left of terminal grid in screen coords
+    private float scale;
+    private int cellW, cellH, border, headerH;
+    private int termX, termY;
 
     public ComputerScreen(JavaOS os) {
         super(Component.literal("ByteBlock Computer"));
@@ -31,11 +30,19 @@ public class ComputerScreen extends Screen {
     @Override
     protected void init() {
         super.init();
-        // Center the terminal on screen (force even coords for clean 2x scaling)
-        int gridW = TerminalBuffer.WIDTH * CELL_WIDTH;
-        int gridH = TerminalBuffer.HEIGHT * CELL_HEIGHT;
+        recalcLayout();
+    }
+
+    private void recalcLayout() {
+        scale = os.getTextScale();
+        cellW = Math.round(BASE_CELL_W * scale);
+        cellH = Math.round(BASE_CELL_H * scale);
+        border = Math.round(6 * scale);
+        headerH = Math.round(10 * scale);
+        int gridW = TerminalBuffer.WIDTH * cellW;
+        int gridH = TerminalBuffer.HEIGHT * cellH;
         termX = ((this.width - gridW) / 2) & ~1;
-        termY = (((this.height - gridH - HEADER_HEIGHT) / 2) & ~1) + HEADER_HEIGHT;
+        termY = (((this.height - gridH - headerH) / 2) & ~1) + headerH;
     }
 
     @Override
@@ -43,21 +50,24 @@ public class ComputerScreen extends Screen {
         // Dark background
         renderBackground(gfx, mouseX, mouseY, partialTick);
 
-        int gridW = TerminalBuffer.WIDTH * CELL_WIDTH;
-        int gridH = TerminalBuffer.HEIGHT * CELL_HEIGHT;
+        // Dynamic scale update
+        if (os.getTextScale() != scale) recalcLayout();
+
+        int gridW = TerminalBuffer.WIDTH * cellW;
+        int gridH = TerminalBuffer.HEIGHT * cellH;
 
         // Monitor bezel (dark gray border)
-        gfx.fill(termX - BORDER, termY - BORDER - HEADER_HEIGHT,
-                  termX + gridW + BORDER, termY + gridH + BORDER, 0xFF333333);
+        gfx.fill(termX - border, termY - border - headerH,
+                  termX + gridW + border, termY + gridH + border, 0xFF333333);
 
         // Header bar (computer label)
-        gfx.fill(termX - 4, termY - HEADER_HEIGHT,
+        gfx.fill(termX - 4, termY - headerH,
                   termX + gridW + 4, termY, 0xFF222222);
         String headerText = os.getLabel() + " [" + os.getComputerId().toString().substring(0, 8) + "]";
         gfx.pose().pushPose();
-        gfx.pose().scale(SCALE, SCALE, 1.0f);
+        gfx.pose().scale(scale, scale, 1.0f);
         gfx.drawString(this.font, headerText,
-                (int)(termX / SCALE), (int)((termY - HEADER_HEIGHT + 4) / SCALE), 0xAAAAAA, false);
+                (int)(termX / scale), (int)((termY - headerH + 4) / scale), 0xAAAAAA, false);
         gfx.pose().popPose();
 
         // Render terminal grid
@@ -66,40 +76,40 @@ public class ComputerScreen extends Screen {
         // Pass 1: Background cells (no scaling needed)
         for (int y = 0; y < TerminalBuffer.HEIGHT; y++) {
             for (int x = 0; x < TerminalBuffer.WIDTH; x++) {
-                int px = termX + x * CELL_WIDTH;
-                int py = termY + y * CELL_HEIGHT;
+                int px = termX + x * cellW;
+                int py = termY + y * cellH;
                 int bgColor = TerminalBuffer.PALETTE[terminal.getBg(x, y)];
-                gfx.fill(px, py, px + CELL_WIDTH, py + CELL_HEIGHT, bgColor);
+                gfx.fill(px, py, px + cellW, py + cellH, bgColor);
             }
         }
 
-        // Pass 2: Characters (scaled 2x to fill doubled cells)
+        // Pass 2: Characters (scaled to fill cells)
         gfx.pose().pushPose();
-        gfx.pose().scale(SCALE, SCALE, 1.0f);
+        gfx.pose().scale(scale, scale, 1.0f);
         for (int y = 0; y < TerminalBuffer.HEIGHT; y++) {
             for (int x = 0; x < TerminalBuffer.WIDTH; x++) {
                 char c = terminal.getChar(x, y);
                 if (c != ' ') {
                     int fgColor = TerminalBuffer.PALETTE[terminal.getFg(x, y)] & 0x00FFFFFF;
-                    int sx = (int)((termX + x * CELL_WIDTH) / SCALE);
-                    int sy = (int)((termY + y * CELL_HEIGHT) / SCALE);
+                    int sx = (int)((termX + x * cellW) / scale);
+                    int sy = (int)((termY + y * cellH) / scale);
                     gfx.drawString(this.font, String.valueOf(c), sx, sy, fgColor, false);
                 }
             }
         }
         gfx.pose().popPose();
 
-        // Cursor blink (scaled to match doubled cells)
+        // Cursor blink (scaled to match cells)
         if (terminal.isCursorBlink() && (System.currentTimeMillis() / 500) % 2 == 0) {
-            int cx = termX + terminal.getCursorX() * CELL_WIDTH;
-            int cy = termY + terminal.getCursorY() * CELL_HEIGHT;
-            gfx.fill(cx, cy + CELL_HEIGHT - 3, cx + CELL_WIDTH, cy + CELL_HEIGHT, 0xFFFFFFFF);
+            int cx = termX + terminal.getCursorX() * cellW;
+            int cy = termY + terminal.getCursorY() * cellH;
+            gfx.fill(cx, cy + cellH - 3, cx + cellW, cy + cellH, 0xFFFFFFFF);
         }
 
         // Power indicator
         int indicatorColor = os.isRunning() ? 0xFF00FF00 : (os.isBooting() ? 0xFFFFAA00 : 0xFF555555);
-        gfx.fill(termX + gridW - 10, termY - HEADER_HEIGHT + 5,
-                  termX + gridW - 4, termY - HEADER_HEIGHT + 13, indicatorColor);
+        gfx.fill(termX + gridW - 10, termY - headerH + 5,
+                  termX + gridW - 4, termY - headerH + 13, indicatorColor);
     }
 
     // --- Input handling ---
@@ -205,8 +215,8 @@ public class ComputerScreen extends Screen {
      * Returns null if outside the terminal grid.
      */
     private int[] screenToCell(double mouseX, double mouseY) {
-        int cx = (int)((mouseX - termX) / CELL_WIDTH);
-        int cy = (int)((mouseY - termY) / CELL_HEIGHT);
+        int cx = (int)((mouseX - termX) / cellW);
+        int cy = (int)((mouseY - termY) / cellH);
         if (cx >= 0 && cx < TerminalBuffer.WIDTH && cy >= 0 && cy < TerminalBuffer.HEIGHT) {
             return new int[]{cx, cy};
         }
