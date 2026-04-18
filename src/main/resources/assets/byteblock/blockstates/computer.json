@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "ByteBlock:block/computer" },
+    "facing=south": { "model": "ByteBlock:block/computer", "y": 180 },
+    "facing=west": { "model": "ByteBlock:block/computer", "y": 270 },
+    "facing=east": { "model": "ByteBlock:block/computer", "y": 90 }
+  }
+}

@@ -7,19 +7,19 @@ loaderVersion="${loader_version_range}" #mandatory
 
 license="${mod_license}"
 
-#issueTrackerURL="https://github.com/Apocscode/JavaCraft/issues"
+#issueTrackerURL="https://github.com/Apocscode/ByteBlock/issues"
 
 [[mods]] #mandatory
 modId="${mod_id}" #mandatory
 version="${mod_version}" #mandatory
 displayName="${mod_name}" #mandatory
 #updateJSONURL=""
-#displayURL="https://github.com/Apocscode/JavaCraft"
-#logoFile="javacraft.png"
+#displayURL="https://github.com/Apocscode/ByteBlock"
+#logoFile="ByteBlock.png"
 #credits=""
 authors="Apocscode"
 description='''
-JavaCraft - A Minecraft mod built with NeoForge.
+ByteBlock - A Minecraft mod built with NeoForge.
 Compatible with All the Mods 10 (ATM10).
 '''
 

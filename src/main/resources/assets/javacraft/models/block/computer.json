@@ -1,8 +1,0 @@
-{
-  "parent": "minecraft:block/orientable",
-  "textures": {
-    "top": "javacraft:block/computer_top",
-    "front": "javacraft:block/computer_front",
-    "side": "javacraft:block/computer_side"
-  }
-}

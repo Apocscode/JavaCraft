@@ -109,7 +109,7 @@ tasks.withType(JavaCompile).configureEach {
 shadowJar {
     archiveClassifier.set('')
     configurations = [project.configurations.shadow]
-    relocate 'org.luaj', 'com.apocscode.javacraft.shadow.luaj'
+    relocate 'org.luaj', 'com.apocscode.byteblock.shadow.luaj'
     exclude 'luajc*'
 }
 

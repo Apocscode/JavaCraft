@@ -1,0 +1,17 @@
+{
+  "itemGroup.byteblock": "ByteBlock",
+
+  "block.byteblock.computer": "Computer Terminal",
+  "block.byteblock.peripheral": "Universal Peripheral",
+  "block.byteblock.gps": "GPS Beacon",
+  "block.byteblock.scanner": "Scanner",
+  "block.byteblock.drive": "Disk Drive",
+
+  "item.byteblock.disk": "Floppy Disk",
+  "item.byteblock.glasses": "Smart Glasses",
+  "item.byteblock.drone_spawn_egg": "Drone",
+  "item.byteblock.robot_spawn_egg": "Robot",
+
+  "entity.byteblock.drone": "Drone",
+  "entity.byteblock.robot": "Robot"
+}

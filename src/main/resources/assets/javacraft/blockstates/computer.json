@@ -1,8 +1,0 @@
-{
-  "variants": {
-    "facing=north": { "model": "javacraft:block/computer" },
-    "facing=south": { "model": "javacraft:block/computer", "y": 180 },
-    "facing=west": { "model": "javacraft:block/computer", "y": 270 },
-    "facing=east": { "model": "javacraft:block/computer", "y": 90 }
-  }
-}
