@@ -21,6 +21,10 @@ public class ComputerScreen extends Screen {
     private float scale;
     private int cellW, cellH, border, headerH;
     private int termX, termY;
+    private boolean dragging, resizing;
+    private double dragOffX, dragOffY;
+    private float userScale;
+    private boolean positioned;
 
     public ComputerScreen(JavaOS os) {
         super(Component.literal("ByteBlock Computer"));
@@ -34,15 +38,18 @@ public class ComputerScreen extends Screen {
     }
 
     private void recalcLayout() {
-        scale = os.getTextScale();
+        scale = userScale > 0 ? userScale : os.getTextScale();
         cellW = Math.round(BASE_CELL_W * scale);
         cellH = Math.round(BASE_CELL_H * scale);
         border = Math.round(6 * scale);
         headerH = Math.round(10 * scale);
-        int gridW = TerminalBuffer.WIDTH * cellW;
-        int gridH = TerminalBuffer.HEIGHT * cellH;
-        termX = ((this.width - gridW) / 2) & ~1;
-        termY = (((this.height - gridH - headerH) / 2) & ~1) + headerH;
+        if (!positioned) {
+            int gridW = TerminalBuffer.WIDTH * cellW;
+            int gridH = TerminalBuffer.HEIGHT * cellH;
+            termX = ((this.width - gridW) / 2) & ~1;
+            termY = (((this.height - gridH - headerH) / 2) & ~1) + headerH;
+            positioned = true;
+        }
     }
 
     @Override
@@ -51,7 +58,8 @@ public class ComputerScreen extends Screen {
         renderBackground(gfx, mouseX, mouseY, partialTick);
 
         // Dynamic scale update
-        if (os.getTextScale() != scale) recalcLayout();
+        float effectiveScale = userScale > 0 ? userScale : os.getTextScale();
+        if (effectiveScale != scale) recalcLayout();
 
         int gridW = TerminalBuffer.WIDTH * cellW;
         int gridH = TerminalBuffer.HEIGHT * cellH;
@@ -110,6 +118,13 @@ public class ComputerScreen extends Screen {
         int indicatorColor = os.isRunning() ? 0xFF00FF00 : (os.isBooting() ? 0xFFFFAA00 : 0xFF555555);
         gfx.fill(termX + gridW - 10, termY - headerH + 5,
                   termX + gridW - 4, termY - headerH + 13, indicatorColor);
+
+        // Resize grip (bottom-right corner of bezel)
+        int gs = Math.max(6, Math.round(6 * scale));
+        int gx = termX + gridW + border;
+        int gy = termY + gridH + border;
+        gfx.fill(gx - gs, gy - gs, gx, gy, 0xFF555555);
+        gfx.fill(gx - gs + 1, gy - gs + 1, gx - 1, gy - 1, 0xFF777777);
     }
 
     // --- Input handling ---
@@ -167,6 +182,26 @@ public class ComputerScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (button == 0) {
+            int gridW = TerminalBuffer.WIDTH * cellW;
+            int gridH = TerminalBuffer.HEIGHT * cellH;
+            // Resize grip: bottom-right corner of bezel
+            int gripSize = Math.max(10, Math.round(10 * scale));
+            int bx = termX + gridW + border;
+            int by = termY + gridH + border;
+            if (mouseX >= bx - gripSize && mouseX <= bx && mouseY >= by - gripSize && mouseY <= by) {
+                resizing = true;
+                return true;
+            }
+            // Header bar drag
+            if (mouseX >= termX - border && mouseX <= termX + gridW + border &&
+                mouseY >= termY - headerH - border && mouseY <= termY) {
+                dragging = true;
+                dragOffX = mouseX - termX;
+                dragOffY = mouseY - termY;
+                return true;
+            }
+        }
         int[] cell = screenToCell(mouseX, mouseY);
         if (cell != null) {
             os.pushEvent(new OSEvent(OSEvent.Type.MOUSE_CLICK, button, cell[0], cell[1]));
@@ -177,6 +212,8 @@ public class ComputerScreen extends Screen {
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (dragging) { dragging = false; return true; }
+        if (resizing) { resizing = false; return true; }
         int[] cell = screenToCell(mouseX, mouseY);
         if (cell != null) {
             os.pushEvent(new OSEvent(OSEvent.Type.MOUSE_UP, button, cell[0], cell[1]));
@@ -186,6 +223,18 @@ public class ComputerScreen extends Screen {
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (dragging) {
+            termX = (int)(mouseX - dragOffX);
+            termY = (int)(mouseY - dragOffY);
+            return true;
+        }
+        if (resizing) {
+            float newCellW = (float)(mouseX - termX - border) / TerminalBuffer.WIDTH;
+            float newScale = newCellW / BASE_CELL_W;
+            userScale = Math.max(0.75f, Math.min(4.0f, newScale));
+            recalcLayout();
+            return true;
+        }
         int[] cell = screenToCell(mouseX, mouseY);
         if (cell != null) {
             os.pushEvent(new OSEvent(OSEvent.Type.MOUSE_DRAG, button, cell[0], cell[1]));
