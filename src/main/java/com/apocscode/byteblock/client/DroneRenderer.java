@@ -37,7 +37,7 @@ public class DroneRenderer extends EntityRenderer<DroneEntity> {
         pose.translate(0.0, bob, 0.0);
         pose.mulPose(Axis.YP.rotationDegrees(-yaw));
 
-        VertexConsumer vc = buffers.getBuffer(RenderType.entityCutout(TEXTURE));
+        VertexConsumer vc = buffers.getBuffer(RenderType.entityCutoutNoCull(TEXTURE));
         PoseStack.Pose last = pose.last();
         Matrix4f mat = last.pose();
 

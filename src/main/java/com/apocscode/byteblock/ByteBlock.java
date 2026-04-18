@@ -18,6 +18,8 @@ import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
+import net.neoforged.neoforge.capabilities.Capabilities;
+import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.EntityAttributeCreationEvent;
 import net.neoforged.neoforge.event.server.ServerStartingEvent;
@@ -41,6 +43,9 @@ public class ByteBlock {
         // Entity attributes
         modEventBus.addListener(this::registerEntityAttributes);
 
+        // Entity capabilities (FE energy)
+        modEventBus.addListener(this::registerCapabilities);
+
         // Game events
         NeoForge.EVENT_BUS.register(this);
 
@@ -55,6 +60,14 @@ public class ByteBlock {
     private void registerEntityAttributes(EntityAttributeCreationEvent event) {
         event.put(ModEntities.DRONE.get(), DroneEntity.createAttributes().build());
         event.put(ModEntities.ROBOT.get(), RobotEntity.createAttributes().build());
+    }
+
+    private void registerCapabilities(RegisterCapabilitiesEvent event) {
+        event.registerEntity(
+                Capabilities.EnergyStorage.ENTITY,
+                ModEntities.ROBOT.get(),
+                (entity, direction) -> entity.getEnergyStorage()
+        );
     }
 
     @SubscribeEvent

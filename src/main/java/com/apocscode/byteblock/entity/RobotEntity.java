@@ -1,6 +1,6 @@
 package com.apocscode.byteblock.entity;
 
-import com.apocscode.byteblock.init.ModEntities;
+import com.apocscode.byteblock.computer.JavaOS;
 import com.apocscode.byteblock.network.BluetoothNetwork;
 
 import net.minecraft.core.BlockPos;
@@ -20,6 +20,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.neoforged.neoforge.energy.EnergyStorage;
 
 import java.util.LinkedList;
 import java.util.Queue;
@@ -28,20 +29,28 @@ import java.util.UUID;
 /**
  * Robot entity — a turtle-like programmable ground robot.
  * Can move, dig, place blocks, and interact with inventories.
- * Has a 16-slot internal inventory.
+ * Has a 16-slot internal inventory, FE-powered, with built-in computer terminal.
  */
 public class RobotEntity extends PathfinderMob {
+    private static final int MAX_ENERGY = 10000;
+    private static final int MAX_RECEIVE = 200;
+    private static final int ENERGY_PER_ACTION = 10;
+
     private UUID ownerId = null;
-    private UUID linkedComputerId = null;
+    private UUID computerId;
     private int bluetoothChannel = 2;
     private Direction facing = Direction.NORTH;
-    private int fuelTicks = 6000;
     private int selectedSlot = 0;
     private final SimpleContainer inventory = new SimpleContainer(16);
     private final Queue<String> commandQueue = new LinkedList<>();
+    private EnergyStorage energyStorage;
+    private JavaOS os;
 
     public RobotEntity(EntityType<? extends RobotEntity> type, Level level) {
         super(type, level);
+        this.computerId = UUID.randomUUID();
+        this.energyStorage = new EnergyStorage(MAX_ENERGY, MAX_RECEIVE, MAX_ENERGY, 0);
+        this.os = new JavaOS(computerId);
     }
 
     public static AttributeSupplier.Builder createAttributes() {
@@ -54,19 +63,21 @@ public class RobotEntity extends PathfinderMob {
     @Override
     public void tick() {
         super.tick();
+
+        // Tick the OS on both sides (client needs it for screen rendering)
+        os.tick();
+
         if (level().isClientSide()) return;
 
-        // Process next command from queue
-        if (!commandQueue.isEmpty() && fuelTicks > 0) {
+        // Process next command from queue if we have energy
+        if (!commandQueue.isEmpty() && energyStorage.getEnergyStored() >= ENERGY_PER_ACTION) {
             String cmd = commandQueue.poll();
             executeCommand(cmd);
-            fuelTicks--;
+            energyStorage.extractEnergy(ENERGY_PER_ACTION, false);
         }
 
         // Register on Bluetooth
-        if (linkedComputerId != null) {
-            BluetoothNetwork.register(level(), linkedComputerId, blockPosition(), bluetoothChannel);
-        }
+        BluetoothNetwork.register(level(), computerId, blockPosition(), bluetoothChannel);
     }
 
     private void executeCommand(String cmd) {
@@ -155,16 +166,14 @@ public class RobotEntity extends PathfinderMob {
 
     @Override
     protected InteractionResult mobInteract(Player player, InteractionHand hand) {
-        if (!level().isClientSide()) {
+        if (level().isClientSide()) {
+            // Open the robot's terminal screen (client-side only)
+            net.minecraft.client.Minecraft.getInstance().setScreen(
+                    new com.apocscode.byteblock.client.ComputerScreen(os));
+        } else {
             if (ownerId == null) {
                 ownerId = player.getUUID();
                 player.sendSystemMessage(Component.literal("[ByteBlock Robot] Linked to you."));
-            } else if (ownerId.equals(player.getUUID())) {
-                player.sendSystemMessage(Component.literal(
-                        "[ByteBlock Robot] Fuel: " + (fuelTicks / 20) + "s | Facing: " + facing.getName()
-                        + " | Inventory: " + countItems() + "/16 slots used"));
-            } else {
-                player.sendSystemMessage(Component.literal("[ByteBlock Robot] Not your robot."));
             }
         }
         return InteractionResult.sidedSuccess(level().isClientSide());
@@ -189,25 +198,28 @@ public class RobotEntity extends PathfinderMob {
     public int getSelectedSlot() { return selectedSlot; }
     public void setSelectedSlot(int slot) { this.selectedSlot = Math.clamp(slot, 0, 15); }
     public Direction getRobotFacing() { return facing; }
-    public int getFuelTicks() { return fuelTicks; }
-    public void addFuel(int ticks) { this.fuelTicks = Math.min(fuelTicks + ticks, 72000); }
-    public void linkComputer(UUID computerId) { this.linkedComputerId = computerId; }
+    public EnergyStorage getEnergyStorage() { return energyStorage; }
+    public JavaOS getOS() { return os; }
+    public UUID getComputerId() { return computerId; }
 
     @Override
     public void addAdditionalSaveData(CompoundTag tag) {
         super.addAdditionalSaveData(tag);
         if (ownerId != null) tag.putUUID("OwnerId", ownerId);
-        if (linkedComputerId != null) tag.putUUID("LinkedComputer", linkedComputerId);
+        tag.putUUID("ComputerId", computerId);
         tag.putInt("BluetoothChannel", bluetoothChannel);
-        tag.putInt("FuelTicks", fuelTicks);
+        tag.putInt("Energy", energyStorage.getEnergyStored());
         tag.putInt("SelectedSlot", selectedSlot);
         tag.putString("Facing", facing.getName());
+        // Save OS state
+        tag.putString("Label", os.getLabel());
+        tag.putInt("OSBluetoothChannel", os.getBluetoothChannel());
+        tag.put("Filesystem", os.getFileSystem().save());
         // Save inventory
         CompoundTag invTag = new CompoundTag();
         for (int i = 0; i < inventory.getContainerSize(); i++) {
             ItemStack stack = inventory.getItem(i);
             if (!stack.isEmpty()) {
-                // Use string index as key
                 invTag.put(String.valueOf(i), stack.save(level().registryAccess()));
             }
         }
@@ -218,12 +230,20 @@ public class RobotEntity extends PathfinderMob {
     public void readAdditionalSaveData(CompoundTag tag) {
         super.readAdditionalSaveData(tag);
         if (tag.contains("OwnerId")) ownerId = tag.getUUID("OwnerId");
-        if (tag.contains("LinkedComputer")) linkedComputerId = tag.getUUID("LinkedComputer");
+        if (tag.contains("ComputerId")) computerId = tag.getUUID("ComputerId");
         if (tag.contains("BluetoothChannel")) bluetoothChannel = tag.getInt("BluetoothChannel");
-        if (tag.contains("FuelTicks")) fuelTicks = tag.getInt("FuelTicks");
         if (tag.contains("SelectedSlot")) selectedSlot = tag.getInt("SelectedSlot");
         if (tag.contains("Facing")) facing = Direction.byName(tag.getString("Facing"));
         if (facing == null) facing = Direction.NORTH;
+        // Restore energy — reconstruct with the saved value as initial
+        int stored = tag.contains("Energy") ? tag.getInt("Energy") : 0;
+        energyStorage = new EnergyStorage(MAX_ENERGY, MAX_RECEIVE, MAX_ENERGY, stored);
+        // Restore OS
+        os = new JavaOS(computerId);
+        if (tag.contains("Label")) os.setLabel(tag.getString("Label"));
+        if (tag.contains("OSBluetoothChannel")) os.setBluetoothChannel(tag.getInt("OSBluetoothChannel"));
+        if (tag.contains("Filesystem")) os.getFileSystem().load(tag.getCompound("Filesystem"));
+        // Restore inventory
         if (tag.contains("Inventory")) {
             CompoundTag invTag = tag.getCompound("Inventory");
             for (String key : invTag.getAllKeys()) {

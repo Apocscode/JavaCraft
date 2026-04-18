@@ -42,7 +42,7 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
         };
         pose.mulPose(Axis.YP.rotationDegrees(rotation + 180f));
 
-        VertexConsumer vc = buffers.getBuffer(RenderType.entityCutout(TEXTURE));
+        VertexConsumer vc = buffers.getBuffer(RenderType.entityCutoutNoCull(TEXTURE));
         PoseStack.Pose last = pose.last();
         Matrix4f mat = last.pose();
 
