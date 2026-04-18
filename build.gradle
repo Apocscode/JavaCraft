@@ -2,6 +2,7 @@ plugins {
     id 'java-library'
     id 'maven-publish'
     id 'net.neoforged.gradle.userdev' version '7.1.22'
+    id 'com.gradleup.shadow' version '9.0.0-beta13'
 }
 
 tasks.named('wrapper', Wrapper).configure {
@@ -64,11 +65,9 @@ configurations {
 
 dependencies {
     implementation "net.neoforged:neoforge:${neo_version}"
-    // LuaJ — pure-Java Lua 5.2 interpreter for in-game computer scripting
+    // LuaJ — pure-Java Lua 5.2 interpreter (shadow-relocated to avoid conflicts)
     implementation "org.luaj:luaj-jse:3.0.1"
-    jarJar(group: 'org.luaj', name: 'luaj-jse', version: '[3.0.1,4.0)') {
-        jarJar.pin(it, '3.0.1')
-    }
+    shadow "org.luaj:luaj-jse:3.0.1"
 }
 
 tasks.withType(ProcessResources).configureEach {
@@ -105,6 +104,18 @@ publishing {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
+
+// Shadow: relocate LuaJ to avoid conflicts with other mods (e.g. TACZ/Figura)
+shadowJar {
+    archiveClassifier.set('')
+    configurations = [project.configurations.shadow]
+    relocate 'org.luaj', 'com.apocscode.javacraft.shadow.luaj'
+    exclude 'luajc*'
+}
+
+// Make shadow jar the default output
+tasks.named('jar').configure { enabled = false }
+tasks.named('build').configure { dependsOn shadowJar }
 
 idea {
     module {
