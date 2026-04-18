@@ -6,7 +6,6 @@ import com.apocscode.byteblock.item.GlassesItem;
 
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.item.SpawnEggItem;
 import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
@@ -28,10 +27,4 @@ public class ModItems {
     public static final DeferredItem<GlassesItem> GLASSES = ITEMS.register("glasses",
             () -> new GlassesItem(new Item.Properties().stacksTo(1).durability(500)));
 
-    // Spawn eggs for entities
-    public static final DeferredItem<SpawnEggItem> DRONE_SPAWN_EGG = ITEMS.register("drone_spawn_egg",
-            () -> new SpawnEggItem(ModEntities.DRONE.get(), 0x333333, 0x00AAFF, new Item.Properties()));
-
-    public static final DeferredItem<SpawnEggItem> ROBOT_SPAWN_EGG = ITEMS.register("robot_spawn_egg",
-            () -> new SpawnEggItem(ModEntities.ROBOT.get(), 0x666666, 0xFFAA00, new Item.Properties()));
 }
