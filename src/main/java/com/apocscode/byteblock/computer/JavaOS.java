@@ -1,16 +1,24 @@
 package com.apocscode.byteblock.computer;
 
+import com.apocscode.byteblock.block.entity.DriveBlockEntity;
 import com.apocscode.byteblock.computer.programs.DesktopProgram;
 import com.apocscode.byteblock.computer.programs.ShellProgram;
 import com.apocscode.byteblock.network.BluetoothNetwork;
 
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.entity.BlockEntity;
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -23,11 +31,19 @@ public class JavaOS {
 
     private State state;
     private final TerminalBuffer terminal;
+    private final PixelBuffer pixelBuffer;
     private final VirtualFileSystem fileSystem;
     private final UUID computerId;
     private String label;
     private int bluetoothChannel;
     private float textScale = 2.0f;
+
+    // Drive mount system — maps drive letters (D, E, ...) to detected drives
+    private final Map<Character, DriveBlockEntity> mountedDrives = new LinkedHashMap<>();
+
+    // World reference (set each tick by block entity)
+    private transient net.minecraft.world.level.Level level;
+    private transient net.minecraft.core.BlockPos blockPos;
 
     // Process management
     private final List<OSProgram> processes;
@@ -49,6 +65,7 @@ public class JavaOS {
     public JavaOS(UUID computerId) {
         this.computerId = computerId;
         this.terminal = new TerminalBuffer();
+        this.pixelBuffer = new PixelBuffer();
         this.fileSystem = new VirtualFileSystem();
         this.label = "Computer";
         this.bluetoothChannel = 1;
@@ -64,19 +81,54 @@ public class JavaOS {
     }
 
     private void installSystemPrograms() {
-        // Write built-in program source files to /system/programs/
-        fileSystem.installSystemFile("/system/programs/shell", "Built-in shell program");
-        fileSystem.installSystemFile("/system/programs/edit", "Built-in text editor");
-        fileSystem.installSystemFile("/system/programs/explorer", "Built-in file explorer");
-        fileSystem.installSystemFile("/system/programs/settings", "Built-in settings");
-        fileSystem.installSystemFile("/system/programs/paint", "Built-in paint program");
-        fileSystem.installSystemFile("/system/programs/lua", "Built-in Lua 5.2 shell");
-        fileSystem.installSystemFile("/system/programs/puzzle", "Built-in puzzle IDE");
-        fileSystem.installSystemFile("/system/programs/ide", "Built-in text IDE");
+        // Write built-in program stubs to /Program Files/
+        fileSystem.installSystemFile("/Program Files/shell", "Built-in shell program");
+        fileSystem.installSystemFile("/Program Files/edit", "Built-in text editor");
+        fileSystem.installSystemFile("/Program Files/explorer", "Built-in file explorer");
+        fileSystem.installSystemFile("/Program Files/settings", "Built-in settings");
+        fileSystem.installSystemFile("/Program Files/paint", "Built-in paint program");
+        fileSystem.installSystemFile("/Program Files/lua", "Built-in Lua 5.2 shell");
+        fileSystem.installSystemFile("/Program Files/puzzle", "Built-in puzzle IDE");
+        fileSystem.installSystemFile("/Program Files/ide", "Built-in text IDE");
+        fileSystem.installSystemFile("/Program Files/calculator", "Built-in calculator");
+        fileSystem.installSystemFile("/Program Files/task_manager", "Built-in task manager");
+        fileSystem.installSystemFile("/Program Files/bluetooth", "Built-in bluetooth manager");
 
-        // Create default startup file
-        if (!fileSystem.exists("/home/startup")) {
-            fileSystem.writeFile("/home/startup", "-- Startup script\nprint(\"Welcome to JavaOS!\")\n");
+        // Create default Documents startup file
+        if (!fileSystem.exists("/Users/User/Documents/startup")) {
+            fileSystem.writeFile("/Users/User/Documents/startup",
+                "-- Startup script\nprint(\"Welcome to ByteOS!\")\n");
+        }
+
+        // Tiny test program for the IDE
+        if (!fileSystem.exists("/Users/User/Documents/test.lua")) {
+            fileSystem.writeFile("/Users/User/Documents/test.lua",
+                "-- test.lua: IDE feature tester\n"
+              + "\n"
+              + "local function greet(name)\n"
+              + "  print(\"Hello, \" .. name .. \"!\")\n"
+              + "end\n"
+              + "\n"
+              + "local function add(a, b)\n"
+              + "  return a + b\n"
+              + "end\n"
+              + "\n"
+              + "-- math test\n"
+              + "local x = add(3, 7)\n"
+              + "print(\"3 + 7 = \" .. tostring(x))\n"
+              + "\n"
+              + "-- loop test\n"
+              + "for i = 1, 5 do\n"
+              + "  greet(\"User\" .. i)\n"
+              + "end\n"
+              + "\n"
+              + "-- table test\n"
+              + "local items = {\"pickaxe\", \"torch\", \"cobblestone\"}\n"
+              + "for _, item in ipairs(items) do\n"
+              + "  print(\"  > \" .. item)\n"
+              + "end\n"
+              + "\n"
+              + "print(\"All tests passed!\")\n");
         }
     }
 
@@ -115,6 +167,9 @@ public class JavaOS {
     }
 
     private void tickRunning() {
+        // Scan for drives every 2 seconds
+        if (tickCount % 40 == 0) scanDrives();
+
         // Fire timers
         Iterator<Map.Entry<Integer, Long>> it = timers.entrySet().iterator();
         while (it.hasNext()) {
@@ -128,7 +183,9 @@ public class JavaOS {
         // Poll Bluetooth inbox
         BluetoothNetwork.Message msg = BluetoothNetwork.receive(computerId);
         while (msg != null) {
-            pushEvent(new OSEvent(OSEvent.Type.BLUETOOTH, msg.channel(), msg.content(), 0));
+            double dist = msg.senderPos() != null ? Math.sqrt(msg.senderPos().distSqr(new net.minecraft.core.BlockPos(0, 0, 0))) : 0;
+            String senderId = msg.senderId() != null ? msg.senderId().toString() : "";
+            pushEvent(new OSEvent(OSEvent.Type.BLUETOOTH, msg.channel(), msg.content(), senderId));
             msg = BluetoothNetwork.receive(computerId);
         }
 
@@ -187,9 +244,9 @@ public class JavaOS {
             }
         }
 
-        // Render foreground
+        // Render foreground into pixel buffer
         if (foregroundProgram != null) {
-            foregroundProgram.render(terminal);
+            foregroundProgram.renderGraphics(pixelBuffer);
         }
     }
 
@@ -284,6 +341,7 @@ public class JavaOS {
     // --- Getters ---
 
     public TerminalBuffer getTerminal() { return terminal; }
+    public PixelBuffer getPixelBuffer() { return pixelBuffer; }
     public VirtualFileSystem getFileSystem() { return fileSystem; }
     public UUID getComputerId() { return computerId; }
     public State getState() { return state; }
@@ -295,10 +353,65 @@ public class JavaOS {
     public int getBluetoothChannel() { return bluetoothChannel; }
     public void setBluetoothChannel(int ch) { this.bluetoothChannel = ch; }
 
+    public net.minecraft.world.level.Level getLevel() { return level; }
+    public net.minecraft.core.BlockPos getBlockPos() { return blockPos; }
+    public void setWorldContext(net.minecraft.world.level.Level level, net.minecraft.core.BlockPos pos) {
+        this.level = level;
+        this.blockPos = pos;
+    }
+
+    // --- Drive Mount System ---
+
+    private void scanDrives() {
+        mountedDrives.clear();
+        if (level == null || blockPos == null) return;
+        char letter = 'D';
+        Set<net.minecraft.core.BlockPos> seen = new HashSet<>();
+
+        // Adjacent drives (directly touching the computer)
+        for (Direction dir : Direction.values()) {
+            BlockEntity be = level.getBlockEntity(blockPos.relative(dir));
+            if (be instanceof DriveBlockEntity drive && drive.hasDisk()) {
+                mountedDrives.put(letter++, drive);
+                seen.add(be.getBlockPos());
+                if (letter > 'Z') return;
+            }
+        }
+
+        // Bluetooth-range drives
+        List<BluetoothNetwork.DeviceEntry> devices =
+            BluetoothNetwork.getDevicesInRange(level, blockPos, BluetoothNetwork.BLOCK_RANGE);
+        for (BluetoothNetwork.DeviceEntry d : devices) {
+            if (d.type() == BluetoothNetwork.DeviceType.DRIVE && !seen.contains(d.pos())) {
+                BlockEntity be = level.getBlockEntity(d.pos());
+                if (be instanceof DriveBlockEntity drive && drive.hasDisk()) {
+                    mountedDrives.put(letter++, drive);
+                    seen.add(d.pos());
+                    if (letter > 'Z') return;
+                }
+            }
+        }
+    }
+
+    public Map<Character, DriveBlockEntity> getMountedDrives() {
+        return Collections.unmodifiableMap(mountedDrives);
+    }
+
+    public DriveBlockEntity getDrive(char letter) {
+        return mountedDrives.get(letter);
+    }
+
     public float getTextScale() { return textScale; }
     public void setTextScale(float s) { this.textScale = Math.max(1.0f, Math.min(3.0f, s)); }
 
     public boolean isRunning() { return state == State.RUNNING; }
     public boolean isBooting() { return state == State.BOOT; }
     public boolean isShutdown() { return state == State.SHUTDOWN; }
+
+    // Clipboard (program → system)
+    private String clipboard;
+    private String clipboardOut;
+    public void setClipboard(String text) { this.clipboard = text; this.clipboardOut = text; }
+    public String getClipboard() { return clipboard; }
+    public String consumeClipboard() { String t = clipboardOut; clipboardOut = null; return t; }
 }

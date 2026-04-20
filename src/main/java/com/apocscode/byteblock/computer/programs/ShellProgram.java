@@ -15,7 +15,7 @@ public class ShellProgram extends OSProgram {
 
     private final StringBuilder inputBuffer = new StringBuilder();
     private final StringBuilder outputBuffer = new StringBuilder();
-    private String currentDir = "/home";
+    private String currentDir = "/Users/User/Documents";
     private int scrollOffset = 0;
     private boolean needsRedraw = true;
     private final java.util.List<String> history = new java.util.ArrayList<>();
@@ -125,6 +125,7 @@ public class ShellProgram extends OSProgram {
             case "reboot" -> os.reboot();
             case "shutdown" -> os.shutdown();
             case "bt" -> cmdBluetooth(args);
+            case "rs", "redstone" -> cmdRedstone(args);
             case "run" -> cmdRun(args);
             case "lua" -> cmdLua(args);
             case "mkshortcut" -> cmdMkshortcut(args);
@@ -154,6 +155,7 @@ public class ShellProgram extends OSProgram {
         appendOutput(" label [name]  Get/set computer label\n");
         appendOutput(" id            Show computer ID\n");
         appendOutput(" bt <args>     Bluetooth commands\n");
+        appendOutput(" rs <args>     Redstone relay/panel\n");
         appendOutput(" run <file>    Run a program file\n");
         appendOutput(" lua [file]    Open Lua shell / run .lua\n");
         appendOutput(" mkshortcut    Create desktop shortcut\n");
@@ -182,7 +184,7 @@ public class ShellProgram extends OSProgram {
 
     private void cmdCd(String args) {
         if (args.isEmpty()) {
-            currentDir = "/home";
+            currentDir = "/Users/User/Documents";
             return;
         }
         String target = resolvePath(args);
@@ -329,6 +331,131 @@ public class ShellProgram extends OSProgram {
         }
     }
 
+    private void cmdRedstone(String args) {
+        var rl = com.apocscode.byteblock.computer.RedstoneLib.class;
+        String[] parts = args.split("\\s+", 2);
+        if (parts.length == 0 || parts[0].isEmpty()) {
+            appendOutput("Usage: rs out <side> <power>\n");
+            appendOutput("       rs in <side>\n");
+            appendOutput("       rs bout <side> <mask>\n");
+            appendOutput("       rs bin <side>\n");
+            appendOutput("       rs bset <side> <color> <on|off>\n");
+            appendOutput("       rs button <idx> <on|off>\n");
+            appendOutput("       rs buttons [mask]\n");
+            appendOutput("       rs status\n");
+            appendOutput("Sides: down/0 up/1 north/2 south/3 west/4 east/5\n");
+            return;
+        }
+        switch (parts[0].toLowerCase()) {
+            case "out" -> {
+                String[] p = parts.length > 1 ? parts[1].split("\\s+") : new String[0];
+                if (p.length < 2) { appendOutput("Usage: rs out <side> <power 0-15>\n"); return; }
+                int side = com.apocscode.byteblock.computer.RedstoneLib.parseSide(p[0]);
+                try {
+                    int power = Integer.parseInt(p[1]);
+                    com.apocscode.byteblock.computer.RedstoneLib.setOutput(os, side, power);
+                    appendOutput("Set " + com.apocscode.byteblock.computer.RedstoneLib.sideName(side)
+                            + " output to " + power + "\n");
+                } catch (NumberFormatException e) { appendOutput("Invalid power level.\n"); }
+            }
+            case "in" -> {
+                String[] p = parts.length > 1 ? parts[1].split("\\s+") : new String[0];
+                if (p.length < 1 || p[0].isEmpty()) { appendOutput("Usage: rs in <side>\n"); return; }
+                int side = com.apocscode.byteblock.computer.RedstoneLib.parseSide(p[0]);
+                int val = com.apocscode.byteblock.computer.RedstoneLib.getInput(os, side);
+                appendOutput(com.apocscode.byteblock.computer.RedstoneLib.sideName(side)
+                        + " input: " + val + "\n");
+            }
+            case "bout" -> {
+                String[] p = parts.length > 1 ? parts[1].split("\\s+") : new String[0];
+                if (p.length < 2) { appendOutput("Usage: rs bout <side> <16-bit mask hex>\n"); return; }
+                int side = com.apocscode.byteblock.computer.RedstoneLib.parseSide(p[0]);
+                try {
+                    int mask = Integer.decode(p[1]);
+                    com.apocscode.byteblock.computer.RedstoneLib.setBundledOutput(os, side, mask);
+                    appendOutput("Set " + com.apocscode.byteblock.computer.RedstoneLib.sideName(side)
+                            + " bundled to 0x" + Integer.toHexString(mask & 0xFFFF) + "\n");
+                } catch (NumberFormatException e) { appendOutput("Invalid mask.\n"); }
+            }
+            case "bin" -> {
+                String[] p = parts.length > 1 ? parts[1].split("\\s+") : new String[0];
+                if (p.length < 1 || p[0].isEmpty()) { appendOutput("Usage: rs bin <side>\n"); return; }
+                int side = com.apocscode.byteblock.computer.RedstoneLib.parseSide(p[0]);
+                int mask = com.apocscode.byteblock.computer.RedstoneLib.getBundledOutput(os, side);
+                appendOutput(com.apocscode.byteblock.computer.RedstoneLib.sideName(side)
+                        + " bundled: 0x" + Integer.toHexString(mask & 0xFFFF) + "\n");
+            }
+            case "bset" -> {
+                String[] p = parts.length > 1 ? parts[1].split("\\s+") : new String[0];
+                if (p.length < 3) { appendOutput("Usage: rs bset <side> <color 0-15> <on|off>\n"); return; }
+                int side = com.apocscode.byteblock.computer.RedstoneLib.parseSide(p[0]);
+                try {
+                    int color = Integer.parseInt(p[1]);
+                    boolean on = "on".equalsIgnoreCase(p[2]) || "1".equals(p[2]) || "true".equalsIgnoreCase(p[2]);
+                    com.apocscode.byteblock.computer.RedstoneLib.setBundledColor(os, side, color, on);
+                    appendOutput(com.apocscode.byteblock.computer.RedstoneLib.colorName(color) + " on "
+                            + com.apocscode.byteblock.computer.RedstoneLib.sideName(side) + " → "
+                            + (on ? "ON" : "OFF") + "\n");
+                } catch (NumberFormatException e) { appendOutput("Invalid color.\n"); }
+            }
+            case "button" -> {
+                String[] p = parts.length > 1 ? parts[1].split("\\s+") : new String[0];
+                if (p.length < 2) { appendOutput("Usage: rs button <0-15> <on|off>\n"); return; }
+                try {
+                    int idx = Integer.parseInt(p[0]);
+                    boolean on = "on".equalsIgnoreCase(p[1]) || "1".equals(p[1]) || "true".equalsIgnoreCase(p[1]);
+                    com.apocscode.byteblock.computer.RedstoneLib.setButton(os, idx, on);
+                    appendOutput("Button " + idx + " → " + (on ? "ON" : "OFF") + "\n");
+                } catch (NumberFormatException e) { appendOutput("Invalid button index.\n"); }
+            }
+            case "buttons" -> {
+                String[] p = parts.length > 1 ? parts[1].split("\\s+") : new String[0];
+                if (p.length >= 1 && !p[0].isEmpty()) {
+                    try {
+                        int mask = Integer.decode(p[0]);
+                        com.apocscode.byteblock.computer.RedstoneLib.setAllButtons(os, mask);
+                        appendOutput("Buttons set to 0x" + Integer.toHexString(mask & 0xFFFF) + "\n");
+                    } catch (NumberFormatException e) { appendOutput("Invalid mask.\n"); }
+                } else {
+                    int mask = com.apocscode.byteblock.computer.RedstoneLib.getButtonStates(os);
+                    appendOutput("Button states: 0x" + Integer.toHexString(mask & 0xFFFF) + "\n");
+                    for (int i = 0; i < 16; i++) {
+                        if ((mask & (1 << i)) != 0) {
+                            appendOutput("  " + i + " (" + com.apocscode.byteblock.computer.RedstoneLib.colorName(i) + "): ON\n");
+                        }
+                    }
+                }
+            }
+            case "status" -> {
+                var relay = com.apocscode.byteblock.computer.RedstoneLib.findRelay(os);
+                var panel = com.apocscode.byteblock.computer.RedstoneLib.findButtonPanel(os);
+                appendOutput("=== Redstone Status ===\n");
+                if (relay != null) {
+                    appendOutput("Relay: " + relay.toShortString() + "\n");
+                    for (int i = 0; i < 6; i++) {
+                        int out = com.apocscode.byteblock.computer.RedstoneLib.getOutput(os, i);
+                        int in = com.apocscode.byteblock.computer.RedstoneLib.getInput(os, i);
+                        int bund = com.apocscode.byteblock.computer.RedstoneLib.getBundledOutput(os, i);
+                        appendOutput("  " + com.apocscode.byteblock.computer.RedstoneLib.sideName(i)
+                                + ": out=" + out + " in=" + in);
+                        if (bund != 0) appendOutput(" bundled=0x" + Integer.toHexString(bund));
+                        appendOutput("\n");
+                    }
+                } else {
+                    appendOutput("Relay: not found\n");
+                }
+                if (panel != null) {
+                    int mask = com.apocscode.byteblock.computer.RedstoneLib.getButtonStates(os);
+                    appendOutput("Panel: " + panel.toShortString() + " buttons=0x"
+                            + Integer.toHexString(mask & 0xFFFF) + "\n");
+                } else {
+                    appendOutput("Panel: not found\n");
+                }
+            }
+            default -> appendOutput("Unknown rs command. Type 'rs' for usage.\n");
+        }
+    }
+
     private void cmdRun(String args) {
         if (args.isEmpty()) { appendOutput("Usage: run <file>\n"); return; }
         String path = resolvePath(args);
@@ -409,7 +536,7 @@ public class ShellProgram extends OSProgram {
         String safeName = name.replaceAll("[^a-zA-Z0-9_\\-]", "_").toLowerCase();
         String content = "name=" + name + "\ntarget=" + target
             + "\nicon=" + icon + "\ncolor=" + color + "\n";
-        os.getFileSystem().writeFile("/desktop/" + safeName + ".lnk", content);
+        os.getFileSystem().writeFile("/Users/User/Desktop/" + safeName + ".lnk", content);
         appendOutput("Shortcut created: " + name + " -> " + target + "\n");
     }
 
@@ -427,8 +554,8 @@ public class ShellProgram extends OSProgram {
     private String getPrompt() {
         // Shorten path for display
         String dir = currentDir;
-        if (dir.startsWith("/home")) {
-            dir = "~" + dir.substring(5);
+        if (dir.startsWith("/Users/User/Documents")) {
+            dir = "~" + dir.substring(21);
         }
         return dir + "> ";
     }

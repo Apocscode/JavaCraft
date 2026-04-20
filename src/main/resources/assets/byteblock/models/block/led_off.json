@@ -1,0 +1,21 @@
+{
+  "parent": "minecraft:block/block",
+  "textures": {
+    "led": "minecraft:block/red_concrete"
+  },
+  "elements": [
+    {
+      "from": [0, 0, -0.25],
+      "to": [2, 2, 0.5],
+      "shade": false,
+      "faces": {
+        "north": {"uv": [0, 0, 2, 2], "texture": "#led"},
+        "east": {"uv": [0, 0, 1, 2], "texture": "#led"},
+        "south": {"uv": [0, 0, 2, 2], "texture": "#led"},
+        "west": {"uv": [0, 0, 1, 2], "texture": "#led"},
+        "up": {"uv": [0, 0, 2, 1], "texture": "#led"},
+        "down": {"uv": [0, 0, 2, 1], "texture": "#led"}
+      }
+    }
+  ]
+}

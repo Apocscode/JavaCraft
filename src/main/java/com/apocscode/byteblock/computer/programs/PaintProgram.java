@@ -30,7 +30,7 @@ public class PaintProgram extends OSProgram {
     private Tool currentTool = Tool.DRAW;
 
     public PaintProgram() {
-        this("/home/art.pxl");
+        this("/Users/User/Pictures/art.pxl");
     }
 
     public PaintProgram(String path) {

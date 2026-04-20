@@ -18,16 +18,136 @@ import java.util.Map;
 public class VirtualFileSystem {
 
     private final FSNode root;
+    private boolean dirty;
+
+    // Windows-style path constants
+    public static final String DESKTOP    = "/Users/User/Desktop";
+    public static final String DOCUMENTS  = "/Users/User/Documents";
+    public static final String DOWNLOADS  = "/Users/User/Downloads";
+    public static final String PICTURES   = "/Users/User/Pictures";
+    public static final String PROGRAMS   = "/Program Files";
+    public static final String SYSTEM     = "/Windows";
+    public static final String SYSTEM32   = "/Windows/System32";
+    public static final String RECYCLE    = "/Recycle Bin";
+    public static final String TEMP       = "/Windows/Temp";
 
     public VirtualFileSystem() {
         root = new FSNode("", true);
-        // Default directory structure
-        mkdir("/system");
-        mkdir("/system/programs");
-        mkdir("/programs");
-        mkdir("/home");
-        mkdir("/desktop");
-        mkdir("/tmp");
+        // Windows-style directory structure
+        mkdir(DESKTOP);
+        mkdir(DOCUMENTS);
+        mkdir(DOWNLOADS);
+        mkdir(PICTURES);
+        mkdir(PROGRAMS);
+        mkdir(SYSTEM);
+        mkdir(SYSTEM32);
+        mkdir(RECYCLE);
+        mkdir(TEMP);
+    }
+
+    /** Convert internal path to Windows-style display: /Users/User/Desktop → C:\Users\User\Desktop */
+    public static String displayPath(String internalPath) {
+        if (internalPath == null || internalPath.isEmpty() || internalPath.equals("/")) return "C:\\";
+        String p = internalPath.startsWith("/") ? internalPath : "/" + internalPath;
+        return "C:" + p.replace('/', '\\');
+    }
+
+    /** Convert display path back to internal: C:\Users\User\Desktop → /Users/User/Desktop */
+    public static String internalPath(String displayPath) {
+        if (displayPath == null) return "/";
+        String p = displayPath.replace('\\', '/');
+        if (p.startsWith("C:") || p.startsWith("c:")) p = p.substring(2);
+        if (!p.startsWith("/")) p = "/" + p;
+        return p;
+    }
+
+    /** Get a friendly name for special folders */
+    public static String friendlyName(String path) {
+        if (path == null) return "";
+        return switch (path) {
+            case "/" -> "This PC";
+            case "/Users" -> "Users";
+            case "/Users/User" -> "User";
+            case "/Users/User/Desktop" -> "Desktop";
+            case "/Users/User/Documents" -> "Documents";
+            case "/Users/User/Downloads" -> "Downloads";
+            case "/Users/User/Pictures" -> "Pictures";
+            case "/Program Files" -> "Program Files";
+            case "/Windows" -> "Windows";
+            case "/Windows/System32" -> "System32";
+            case "/Windows/Temp" -> "Temp";
+            case "/Recycle Bin" -> "Recycle Bin";
+            default -> {
+                int lastSlash = path.lastIndexOf('/');
+                yield lastSlash >= 0 ? path.substring(lastSlash + 1) : path;
+            }
+        };
+    }
+
+    /** Move a file/directory to the Recycle Bin (soft delete) */
+    public boolean recycle(String path) {
+        String norm = normalize(path);
+        if (norm.isEmpty() || norm.startsWith("Recycle Bin") || norm.startsWith("Windows")) return false;
+        FSNode node = resolve(norm);
+        if (node == null) return false;
+        // Store original path as metadata
+        String name = node.name;
+        String recycleName = name + ".del";
+        // Avoid collisions
+        int counter = 1;
+        while (resolve(normalize(RECYCLE + "/" + recycleName)) != null) {
+            recycleName = name + "_" + counter + ".del";
+            counter++;
+        }
+        // Write metadata file with original path
+        writeFile(RECYCLE + "/" + recycleName + ".meta", norm);
+        // Move the actual item
+        if (node.isDirectory) {
+            // For directories, just move the FSNode
+            FSNode recycleNode = resolve(normalize(RECYCLE));
+            if (recycleNode == null) return false;
+            recycleNode.children.put(recycleName, node);
+            dirty = true;
+            // Remove from original location
+            return removeFromParent(norm);
+        } else {
+            // For files, copy content then delete original
+            writeFile(RECYCLE + "/" + recycleName, node.content);
+            return delete(path);
+        }
+    }
+
+    /** Restore a file from the Recycle Bin to its original location */
+    public boolean restore(String recycledName) {
+        String metaPath = RECYCLE + "/" + recycledName + ".meta";
+        String originalPath = readFile(metaPath);
+        if (originalPath == null) return false;
+        String itemPath = RECYCLE + "/" + recycledName;
+        if (!exists(itemPath)) return false;
+        // Move back to original location
+        boolean moved = move(itemPath, "/" + originalPath);
+        if (moved) {
+            delete(metaPath);
+        }
+        return moved;
+    }
+
+    /** Empty the Recycle Bin */
+    public void emptyRecycleBin() {
+        FSNode bin = resolve(normalize(RECYCLE));
+        if (bin != null && bin.isDirectory && !bin.children.isEmpty()) {
+            bin.children.clear();
+            dirty = true;
+        }
+    }
+
+    /** Get the count of items in the Recycle Bin */
+    public int recycleBinCount() {
+        List<String> items = list(RECYCLE);
+        if (items == null) return 0;
+        int count = 0;
+        for (String s : items) if (!s.endsWith(".meta")) count++;
+        return count;
     }
 
     // --- Public API ---
@@ -77,6 +197,7 @@ public class VirtualFileSystem {
         FSNode file = new FSNode(fileName, false);
         file.content = content;
         parent.children.put(fileName, file);
+        dirty = true;
         return true;
     }
 
@@ -91,6 +212,7 @@ public class VirtualFileSystem {
             if (child == null) {
                 child = new FSNode(part, true);
                 current.children.put(part, child);
+                dirty = true;
             } else if (!child.isDirectory) {
                 return false;
             }
@@ -113,7 +235,9 @@ public class VirtualFileSystem {
             parent = child;
         }
 
-        return parent.children.remove(parts[parts.length - 1]) != null;
+        boolean removed = parent.children.remove(parts[parts.length - 1]) != null;
+        if (removed) dirty = true;
+        return removed;
     }
 
     public List<String> list(String path) {
@@ -198,6 +322,9 @@ public class VirtualFileSystem {
         return total;
     }
 
+    public boolean isDirty() { return dirty; }
+    public void clearDirty() { dirty = false; }
+
     // --- NBT Serialization ---
 
     public CompoundTag save() {
@@ -241,9 +368,23 @@ public class VirtualFileSystem {
         }
     }
 
-    // Install a system file (used by OS to populate /system programs)
+    // Install a system file (used by OS to populate /Program Files)
     public void installSystemFile(String path, String content) {
         writeFile(path, content);
+    }
+
+    private boolean removeFromParent(String normalized) {
+        String[] parts = splitPath(normalized);
+        if (parts.length == 0) return false;
+        FSNode parent = root;
+        for (int i = 0; i < parts.length - 1; i++) {
+            FSNode child = parent.children.get(parts[i]);
+            if (child == null || !child.isDirectory) return false;
+            parent = child;
+        }
+        boolean removed = parent.children.remove(parts[parts.length - 1]) != null;
+        if (removed) dirty = true;
+        return removed;
     }
 
     // --- Inner classes ---

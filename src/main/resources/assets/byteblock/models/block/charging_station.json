@@ -1,0 +1,33 @@
+{
+  "parent": "minecraft:block/block",
+  "textures": {
+    "bottom": "byteblock:block/charging_station",
+    "top": "byteblock:block/charging_station_top",
+    "side": "byteblock:block/charging_station",
+    "led": "minecraft:block/red_concrete",
+    "particle": "byteblock:block/charging_station"
+  },
+  "elements": [
+    {
+      "from": [0, 0, 0],
+      "to": [16, 3, 16],
+      "faces": {
+        "north": {"uv": [0, 13, 16, 16], "texture": "#side", "cullface": "north"},
+        "east":  {"uv": [0, 13, 16, 16], "texture": "#side", "cullface": "east"},
+        "south": {"uv": [0, 13, 16, 16], "texture": "#side", "cullface": "south"},
+        "west":  {"uv": [0, 13, 16, 16], "texture": "#side", "cullface": "west"},
+        "up":    {"uv": [0, 0, 16, 16], "texture": "#top"},
+        "down":  {"uv": [0, 0, 16, 16], "texture": "#bottom", "cullface": "down"}
+      }
+    },
+    {
+      "name": "connection_led",
+      "from": [13, 0.5, -0.1],
+      "to": [14.5, 2.5, 0.2],
+      "shade": false,
+      "faces": {
+        "north": {"uv": [0, 0, 1.5, 2], "texture": "#led"}
+      }
+    }
+  ]
+}

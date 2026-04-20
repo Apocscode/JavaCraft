@@ -1,5 +1,6 @@
 package com.apocscode.byteblock.block.entity;
 
+import com.apocscode.byteblock.block.ComputerBlock;
 import com.apocscode.byteblock.computer.JavaOS;
 import com.apocscode.byteblock.init.ModBlockEntities;
 import com.apocscode.byteblock.network.BluetoothNetwork;
@@ -27,9 +28,20 @@ public class ComputerBlockEntity extends BlockEntity {
     }
 
     public void serverTick() {
+        if (level != null && !level.isClientSide() && level.getGameTime() % 20 == 0) {
+            BlockState current = level.getBlockState(worldPosition);
+            if (current.getValue(ComputerBlock.CONNECTED) != powered) {
+                level.setBlockAndUpdate(worldPosition, current.setValue(ComputerBlock.CONNECTED, powered));
+            }
+        }
         if (!powered) return;
+        os.setWorldContext(level, worldPosition);
         os.tick();
-        BluetoothNetwork.register(level, computerId, worldPosition, os.getBluetoothChannel());
+        if (level != null && !level.isClientSide() && os.getFileSystem().isDirty()) {
+            os.getFileSystem().clearDirty();
+            setChanged();
+        }
+        BluetoothNetwork.register(level, computerId, worldPosition, os.getBluetoothChannel(), BluetoothNetwork.DeviceType.COMPUTER);
     }
 
     // --- Accessors ---

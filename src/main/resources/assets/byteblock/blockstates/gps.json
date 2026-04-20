@@ -1,5 +1,6 @@
 {
   "variants": {
-    "": { "model": "ByteBlock:block/gps" }
+    "connected=false": {"model": "byteblock:block/gps"},
+    "connected=true":  {"model": "byteblock:block/gps_on"}
   }
 }

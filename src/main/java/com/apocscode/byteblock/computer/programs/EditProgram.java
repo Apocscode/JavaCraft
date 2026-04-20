@@ -225,7 +225,7 @@ public class EditProgram extends OSProgram {
         if (dot > 0) name = name.substring(0, dot);
         String safeName = name.replaceAll("[^a-zA-Z0-9_\\-]", "_").toLowerCase();
         String content = "name=" + name + "\ntarget=" + filePath + "\nicon=2\ncolor=9\n";
-        os.getFileSystem().writeFile("/desktop/" + safeName + ".lnk", content);
+        os.getFileSystem().writeFile("/Users/User/Desktop/" + safeName + ".lnk", content);
         statusMessage = "Shortcut created: " + name;
         statusTicks = 60;
     }

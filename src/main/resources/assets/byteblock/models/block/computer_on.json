@@ -1,0 +1,6 @@
+{
+  "parent": "byteblock:block/computer",
+  "textures": {
+    "led": "minecraft:block/light_blue_concrete"
+  }
+}

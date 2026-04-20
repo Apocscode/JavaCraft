@@ -1,0 +1,6 @@
+{
+  "parent": "byteblock:block/gps",
+  "textures": {
+    "led": "minecraft:block/light_blue_concrete"
+  }
+}

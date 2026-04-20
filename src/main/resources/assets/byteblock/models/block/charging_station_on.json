@@ -1,0 +1,6 @@
+{
+  "parent": "byteblock:block/charging_station",
+  "textures": {
+    "led": "minecraft:block/light_blue_concrete"
+  }
+}

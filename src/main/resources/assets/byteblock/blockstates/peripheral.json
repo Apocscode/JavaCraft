@@ -1,5 +1,6 @@
 {
   "variants": {
-    "": { "model": "ByteBlock:block/peripheral" }
+    "connected=false": {"model": "byteblock:block/peripheral"},
+    "connected=true":  {"model": "byteblock:block/peripheral_on"}
   }
 }

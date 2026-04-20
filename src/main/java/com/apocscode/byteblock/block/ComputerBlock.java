@@ -17,6 +17,7 @@ import net.minecraft.world.level.block.entity.BlockEntityTicker;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
+import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import net.minecraft.world.level.block.state.properties.DirectionProperty;
 import net.minecraft.world.phys.BlockHitResult;
 
@@ -26,15 +27,16 @@ import net.minecraft.world.phys.BlockHitResult;
  */
 public class ComputerBlock extends Block implements EntityBlock {
     public static final DirectionProperty FACING = HorizontalDirectionalBlock.FACING;
+    public static final BooleanProperty CONNECTED = BooleanProperty.create("connected");
 
     public ComputerBlock(Properties properties) {
         super(properties);
-        this.registerDefaultState(this.stateDefinition.any().setValue(FACING, Direction.NORTH));
+        this.registerDefaultState(this.stateDefinition.any().setValue(FACING, Direction.NORTH).setValue(CONNECTED, false));
     }
 
     @Override
     protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
-        builder.add(FACING);
+        builder.add(FACING, CONNECTED);
     }
 
     @Override
@@ -60,8 +62,12 @@ public class ComputerBlock extends Block implements EntityBlock {
         if (level.isClientSide()) {
             BlockEntity be = level.getBlockEntity(pos);
             if (be instanceof ComputerBlockEntity computer) {
+                com.apocscode.byteblock.computer.JavaOS os = computer.getOS();
+                if (os.isShutdown()) {
+                    os.reboot();
+                }
                 net.minecraft.client.Minecraft.getInstance().setScreen(
-                    new com.apocscode.byteblock.client.ComputerScreen(computer.getOS()));
+                    new com.apocscode.byteblock.client.ComputerScreen(os));
             }
         }
         return InteractionResult.sidedSuccess(level.isClientSide());

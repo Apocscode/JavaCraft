@@ -6,6 +6,7 @@ import com.apocscode.byteblock.entity.DroneEntity;
 import com.apocscode.byteblock.entity.RobotEntity;
 import com.apocscode.byteblock.init.*;
 import com.apocscode.byteblock.network.BluetoothNetwork;
+import com.apocscode.byteblock.network.RenameDiskPayload;
 import com.mojang.logging.LogUtils;
 
 import net.neoforged.api.distmarker.Dist;
@@ -24,6 +25,7 @@ import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.EntityAttributeCreationEvent;
 import net.neoforged.neoforge.event.server.ServerStartingEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 
 @Mod(ByteBlock.MODID)
 public class ByteBlock {
@@ -39,12 +41,16 @@ public class ByteBlock {
         ModBlockEntities.BLOCK_ENTITIES.register(modEventBus);
         ModEntities.ENTITIES.register(modEventBus);
         ModCreativeTabs.TABS.register(modEventBus);
+        ModMenuTypes.MENUS.register(modEventBus);
 
         // Entity attributes
         modEventBus.addListener(this::registerEntityAttributes);
 
         // Entity capabilities (FE energy)
         modEventBus.addListener(this::registerCapabilities);
+
+        // Network payloads
+        modEventBus.addListener(this::onRegisterPayloads);
 
         // Game events
         NeoForge.EVENT_BUS.register(this);
@@ -56,7 +62,24 @@ public class ByteBlock {
     private void commonSetup(FMLCommonSetupEvent event) {
         LOGGER.info("ByteBlock initializing — in-game Java computer simulator");
     }
-
+    private void onRegisterPayloads(RegisterPayloadHandlersEvent event) {
+        var registrar = event.registrar("1");
+        registrar.playToServer(
+            RenameDiskPayload.TYPE,
+            RenameDiskPayload.STREAM_CODEC,
+            RenameDiskPayload::handle
+        );
+        registrar.playToServer(
+            com.apocscode.byteblock.network.WriteToDiskPayload.TYPE,
+            com.apocscode.byteblock.network.WriteToDiskPayload.STREAM_CODEC,
+            com.apocscode.byteblock.network.WriteToDiskPayload::handle
+        );
+        registrar.playToServer(
+            com.apocscode.byteblock.network.ButtonConfigPayload.TYPE,
+            com.apocscode.byteblock.network.ButtonConfigPayload.STREAM_CODEC,
+            com.apocscode.byteblock.network.ButtonConfigPayload::handle
+        );
+    }
     private void registerEntityAttributes(EntityAttributeCreationEvent event) {
         event.put(ModEntities.DRONE.get(), DroneEntity.createAttributes().build());
         event.put(ModEntities.ROBOT.get(), RobotEntity.createAttributes().build());
@@ -91,11 +114,23 @@ public class ByteBlock {
         }
 
         @SubscribeEvent
+        public static void onRegisterMenuScreens(net.neoforged.neoforge.client.event.RegisterMenuScreensEvent event) {
+            event.register(ModMenuTypes.PRINTER.get(),
+                    com.apocscode.byteblock.client.PrinterScreen::new);
+            event.register(ModMenuTypes.DRIVE.get(),
+                    com.apocscode.byteblock.client.DriveScreen::new);
+        }
+
+        @SubscribeEvent
         public static void onRegisterRenderers(EntityRenderersEvent.RegisterRenderers event) {
             event.registerEntityRenderer(ModEntities.ROBOT.get(),
                     com.apocscode.byteblock.client.RobotRenderer::new);
             event.registerEntityRenderer(ModEntities.DRONE.get(),
                     com.apocscode.byteblock.client.DroneRenderer::new);
+            event.registerBlockEntityRenderer(ModBlockEntities.MONITOR.get(),
+                    com.apocscode.byteblock.client.MonitorRenderer::new);
+            event.registerBlockEntityRenderer(ModBlockEntities.BUTTON_PANEL.get(),
+                    com.apocscode.byteblock.client.ButtonPanelRenderer::new);
         }
     }
 }

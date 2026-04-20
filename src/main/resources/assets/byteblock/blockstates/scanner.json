@@ -1,5 +1,6 @@
 {
   "variants": {
-    "": { "model": "ByteBlock:block/scanner" }
+    "connected=false": {"model": "byteblock:block/scanner"},
+    "connected=true":  {"model": "byteblock:block/scanner_on"}
   }
 }

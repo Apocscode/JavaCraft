@@ -2,13 +2,13 @@ package com.apocscode.byteblock.computer;
 
 /**
  * Color character grid buffer for the computer terminal.
- * 51 columns x 19 rows, each cell has a character, foreground color, and background color.
+ * 80 columns x 25 rows, each cell has a character, foreground color, and background color.
  * Uses a 16-color palette matching Minecraft's chat color codes.
  */
 public class TerminalBuffer {
 
-    public static final int WIDTH = 51;
-    public static final int HEIGHT = 19;
+    public static final int WIDTH = 80;
+    public static final int HEIGHT = 25;
     public static final int DEFAULT_FG = 0;   // white
     public static final int DEFAULT_BG = 15;  // black
 

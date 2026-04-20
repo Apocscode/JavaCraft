@@ -14,6 +14,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityTicker;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.StateDefinition;
+import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import net.minecraft.world.phys.BlockHitResult;
 
 /**
@@ -21,9 +23,16 @@ import net.minecraft.world.phys.BlockHitResult;
  * Results are available to connected computers via the API.
  */
 public class ScannerBlock extends Block implements EntityBlock {
+    public static final BooleanProperty CONNECTED = BooleanProperty.create("connected");
 
     public ScannerBlock(Properties properties) {
         super(properties);
+        this.registerDefaultState(this.stateDefinition.any().setValue(CONNECTED, false));
+    }
+
+    @Override
+    protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
+        builder.add(CONNECTED);
     }
 
     @Override
@@ -44,9 +53,15 @@ public class ScannerBlock extends Block implements EntityBlock {
         if (!level.isClientSide()) {
             BlockEntity be = level.getBlockEntity(pos);
             if (be instanceof ScannerBlockEntity scanner) {
-                int count = scanner.getLastEntityCount();
+                String status = scanner.isScanning()
+                        ? "Scanning: " + scanner.getScanProgress() + "%"
+                        : "Idle";
                 player.sendSystemMessage(Component.literal(
-                        "[ByteBlock Scanner] Entities in range: " + count));
+                        String.format("[ByteBlock Scanner] %s | Blocks: %,d | Entities: %d | Radius: %d",
+                                status,
+                                scanner.getScanData().getScannedBlockCount(),
+                                scanner.getLastEntityCount(),
+                                scanner.getScanRadius())));
             }
         }
         return InteractionResult.sidedSuccess(level.isClientSide());

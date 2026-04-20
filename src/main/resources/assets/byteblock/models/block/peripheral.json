@@ -1,6 +1,31 @@
 {
-  "parent": "minecraft:block/cube_all",
+  "parent": "minecraft:block/block",
   "textures": {
-    "all": "ByteBlock:block/peripheral"
-  }
+    "all": "byteblock:block/peripheral",
+    "led": "minecraft:block/red_concrete",
+    "particle": "byteblock:block/peripheral"
+  },
+  "elements": [
+    {
+      "from": [0, 0, 0],
+      "to": [16, 16, 16],
+      "faces": {
+        "north": {"uv": [0, 0, 16, 16], "texture": "#all"},
+        "east":  {"uv": [0, 0, 16, 16], "texture": "#all"},
+        "south": {"uv": [0, 0, 16, 16], "texture": "#all"},
+        "west":  {"uv": [0, 0, 16, 16], "texture": "#all"},
+        "up":    {"uv": [0, 0, 16, 16], "texture": "#all", "cullface": "up"},
+        "down":  {"uv": [0, 0, 16, 16], "texture": "#all", "cullface": "down"}
+      }
+    },
+    {
+      "name": "connection_led",
+      "from": [13, 1, -0.1],
+      "to": [14.5, 2.5, 0.2],
+      "shade": false,
+      "faces": {
+        "north": {"uv": [0, 0, 1.5, 1.5], "texture": "#led"}
+      }
+    }
+  ]
 }

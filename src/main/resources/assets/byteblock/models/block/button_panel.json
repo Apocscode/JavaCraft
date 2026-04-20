@@ -1,0 +1,23 @@
+{
+  "parent": "minecraft:block/block",
+  "textures": {
+    "frame": "minecraft:block/gray_concrete",
+    "back": "minecraft:block/deepslate_tiles",
+    "particle": "minecraft:block/gray_concrete"
+  },
+  "elements": [
+    {
+      "comment": "Thin panel — buttons rendered by BER on north face",
+      "from": [0, 0, 0],
+      "to": [16, 16, 3],
+      "faces": {
+        "north": {"uv": [0, 0, 16, 16], "texture": "#frame"},
+        "south": {"uv": [0, 0, 16, 16], "texture": "#back"},
+        "east":  {"uv": [0, 0, 3, 16],  "texture": "#frame"},
+        "west":  {"uv": [13, 0, 16, 16], "texture": "#frame"},
+        "up":    {"uv": [0, 0, 16, 3],  "texture": "#frame"},
+        "down":  {"uv": [0, 13, 16, 16], "texture": "#frame"}
+      }
+    }
+  ]
+}

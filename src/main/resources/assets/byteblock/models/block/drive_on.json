@@ -1,0 +1,6 @@
+{
+  "parent": "byteblock:block/drive",
+  "textures": {
+    "led": "minecraft:block/light_blue_concrete"
+  }
+}

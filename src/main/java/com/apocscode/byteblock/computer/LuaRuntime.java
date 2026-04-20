@@ -1,5 +1,10 @@
 package com.apocscode.byteblock.computer;
 
+import com.apocscode.byteblock.block.entity.ScannerBlockEntity;
+import com.apocscode.byteblock.network.BluetoothNetwork;
+import com.apocscode.byteblock.scanner.PathfindingEngine;
+import com.apocscode.byteblock.scanner.WorldScanData;
+
 import org.luaj.vm2.*;
 import org.luaj.vm2.compiler.LuaC;
 import org.luaj.vm2.lib.*;
@@ -166,6 +171,11 @@ public class LuaRuntime {
         installColorsAPI();
         installShellAPI();
         installTextUtilsAPI();
+        installGpsAPI();
+        installBluetoothAPI();
+        installRednetAPI();
+        installRedstoneAPI();
+        installScannerAPI();
     }
 
     private void installTermAPI() {
@@ -530,6 +540,664 @@ public class LuaRuntime {
         textutils.set("serialise", textutils.get("serialize"));
 
         globals.set("textutils", textutils);
+    }
+
+    private void installGpsAPI() {
+        LuaTable gps = new LuaTable();
+
+        // gps.locate() — returns x, y, z of this computer, or nil if no GPS satellite active
+        gps.set("locate", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                if (!BluetoothNetwork.hasActiveGps()) return LuaValue.NIL;
+                net.minecraft.core.BlockPos pos = BluetoothNetwork.findDevicePos(os.getComputerId());
+                if (pos == null) return LuaValue.NIL;
+                return LuaValue.varargsOf(new LuaValue[]{
+                    LuaValue.valueOf(pos.getX()),
+                    LuaValue.valueOf(pos.getY()),
+                    LuaValue.valueOf(pos.getZ())
+                });
+            }
+        });
+
+        globals.set("gps", gps);
+    }
+
+    private void installBluetoothAPI() {
+        LuaTable bt = new LuaTable();
+
+        // bluetooth.getDevices() — returns table of devices in range
+        bt.set("getDevices", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                net.minecraft.core.BlockPos pos = os.getBlockPos();
+                LuaTable result = new LuaTable();
+                if (lvl == null || pos == null) return result;
+
+                java.util.List<BluetoothNetwork.DeviceEntry> entries =
+                        BluetoothNetwork.getDevicesInRange(lvl, pos, BluetoothNetwork.BLOCK_RANGE);
+                int i = 1;
+                for (BluetoothNetwork.DeviceEntry d : entries) {
+                    if (d.deviceId().equals(os.getComputerId())) continue;
+                    LuaTable dev = new LuaTable();
+                    dev.set("id", LuaValue.valueOf(d.deviceId().toString()));
+                    dev.set("type", LuaValue.valueOf(d.type().getDisplayName()));
+                    dev.set("distance", LuaValue.valueOf(Math.sqrt(pos.distSqr(d.pos()))));
+                    dev.set("channel", LuaValue.valueOf(d.channel()));
+                    dev.set("x", LuaValue.valueOf(d.pos().getX()));
+                    dev.set("y", LuaValue.valueOf(d.pos().getY()));
+                    dev.set("z", LuaValue.valueOf(d.pos().getZ()));
+                    result.set(i++, dev);
+                }
+                return result;
+            }
+        });
+
+        // bluetooth.getAllDevices() — returns ALL devices (including unlimited-range ones)
+        bt.set("getAllDevices", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                LuaTable result = new LuaTable();
+                java.util.List<BluetoothNetwork.DeviceEntry> entries = BluetoothNetwork.getAllDevices();
+                int i = 1;
+                for (BluetoothNetwork.DeviceEntry d : entries) {
+                    if (d.deviceId().equals(os.getComputerId())) continue;
+                    LuaTable dev = new LuaTable();
+                    dev.set("id", LuaValue.valueOf(d.deviceId().toString()));
+                    dev.set("type", LuaValue.valueOf(d.type().getDisplayName()));
+                    dev.set("channel", LuaValue.valueOf(d.channel()));
+                    dev.set("dimension", LuaValue.valueOf(d.dimension()));
+                    result.set(i++, dev);
+                }
+                return result;
+            }
+        });
+
+        // bluetooth.send(targetId, channel, message) — send to specific device
+        bt.set("send", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                String targetId = args.checkjstring(1);
+                int channel = args.checkint(2);
+                String message = args.checkjstring(3);
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                net.minecraft.core.BlockPos pos = os.getBlockPos();
+                if (lvl == null || pos == null) return LuaValue.FALSE;
+                try {
+                    java.util.UUID target = java.util.UUID.fromString(targetId);
+                    BluetoothNetwork.send(lvl, pos, os.getComputerId(), target, channel, message);
+                    return LuaValue.TRUE;
+                } catch (IllegalArgumentException e) {
+                    return LuaValue.FALSE;
+                }
+            }
+        });
+
+        // bluetooth.broadcast(channel, message) — broadcast to all in range
+        bt.set("broadcast", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                int channel = args.checkint(1);
+                String message = args.checkjstring(2);
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                net.minecraft.core.BlockPos pos = os.getBlockPos();
+                if (lvl == null || pos == null) return LuaValue.FALSE;
+                BluetoothNetwork.broadcast(lvl, os.getComputerId(), pos, channel, message);
+                return LuaValue.TRUE;
+            }
+        });
+
+        // bluetooth.getChannel() — get current BT channel
+        bt.set("getChannel", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() { return LuaValue.valueOf(os.getBluetoothChannel()); }
+        });
+
+        // bluetooth.setChannel(n) — set BT channel
+        bt.set("setChannel", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue arg) {
+                os.setBluetoothChannel(arg.checkint());
+                return NONE;
+            }
+        });
+
+        // bluetooth.getRange() — get BT range for this device
+        bt.set("getRange", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() { return LuaValue.valueOf(BluetoothNetwork.BLOCK_RANGE); }
+        });
+
+        // bluetooth.getID() — get this computer's device ID
+        bt.set("getID", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() { return LuaValue.valueOf(os.getComputerId().toString()); }
+        });
+
+        globals.set("bluetooth", bt);
+    }
+
+    private void installRednetAPI() {
+        LuaTable rednet = new LuaTable();
+
+        // rednet.open() — CC compat: opens the modem (no-op for us, always open)
+        rednet.set("open", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) { return NONE; }
+        });
+
+        // rednet.close() — CC compat: no-op
+        rednet.set("close", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) { return NONE; }
+        });
+
+        // rednet.isOpen() — always true
+        rednet.set("isOpen", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() { return LuaValue.TRUE; }
+        });
+
+        // rednet.send(targetId, message, protocol) — send to specific device
+        rednet.set("send", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                String targetId = args.checkjstring(1);
+                String message = args.checkjstring(2);
+                String protocol = args.optjstring(3, "");
+                String payload = protocol.isEmpty() ? message : protocol + ":" + message;
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                net.minecraft.core.BlockPos pos = os.getBlockPos();
+                if (lvl == null || pos == null) return LuaValue.FALSE;
+                try {
+                    java.util.UUID target = java.util.UUID.fromString(targetId);
+                    BluetoothNetwork.send(lvl, pos, os.getComputerId(), target, os.getBluetoothChannel(), payload);
+                    return LuaValue.TRUE;
+                } catch (IllegalArgumentException e) {
+                    return LuaValue.FALSE;
+                }
+            }
+        });
+
+        // rednet.broadcast(message, protocol) — broadcast to all
+        rednet.set("broadcast", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                String message = args.checkjstring(1);
+                String protocol = args.optjstring(2, "");
+                String payload = protocol.isEmpty() ? message : protocol + ":" + message;
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                net.minecraft.core.BlockPos pos = os.getBlockPos();
+                if (lvl == null || pos == null) return LuaValue.FALSE;
+                BluetoothNetwork.broadcast(lvl, os.getComputerId(), pos, os.getBluetoothChannel(), payload);
+                return LuaValue.TRUE;
+            }
+        });
+
+        // rednet.host(protocol, hostname) — register as host (stores in VFS for discovery)
+        rednet.set("host", new TwoArgFunction() {
+            @Override
+            public LuaValue call(LuaValue protocol, LuaValue hostname) {
+                String key = "/Windows/System32/rednet_hosts";
+                String existing = os.getFileSystem().readFile(key);
+                String entry = protocol.checkjstring() + "=" + hostname.checkjstring() + "=" + os.getComputerId().toString();
+                String content = (existing != null ? existing + "\n" : "") + entry;
+                os.getFileSystem().writeFile(key, content);
+                return NONE;
+            }
+        });
+
+        // rednet.lookup(protocol) — find hosts
+        rednet.set("lookup", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue protocol) {
+                LuaTable result = new LuaTable();
+                String key = "/Windows/System32/rednet_hosts";
+                String content = os.getFileSystem().readFile(key);
+                if (content == null) return result;
+                int i = 1;
+                for (String line : content.split("\n")) {
+                    String[] parts = line.split("=", 3);
+                    if (parts.length >= 3 && parts[0].equals(protocol.checkjstring())) {
+                        LuaTable host = new LuaTable();
+                        host.set("hostname", LuaValue.valueOf(parts[1]));
+                        host.set("id", LuaValue.valueOf(parts[2]));
+                        result.set(i++, host);
+                    }
+                }
+                return result;
+            }
+        });
+
+        globals.set("rednet", rednet);
+    }
+
+    private void installRedstoneAPI() {
+        LuaTable rs = new LuaTable();
+        String[] SIDES = {"bottom", "top", "north", "south", "west", "east"};
+
+        // redstone.getSides() — returns list of side names
+        rs.set("getSides", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                LuaTable t = new LuaTable();
+                for (int i = 0; i < SIDES.length; i++) t.set(i + 1, LuaValue.valueOf(SIDES[i]));
+                return t;
+            }
+        });
+
+        // redstone.getInput(side) — read analog input 0-15
+        rs.set("getInput", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue side) {
+                int idx = sideToIndex(side.checkjstring(), SIDES);
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                net.minecraft.core.BlockPos pos = os.getBlockPos();
+                if (lvl == null || pos == null || idx < 0) return LuaValue.valueOf(0);
+                net.minecraft.core.Direction dir = net.minecraft.core.Direction.values()[idx];
+                return LuaValue.valueOf(lvl.getSignal(pos.relative(dir), dir));
+            }
+        });
+
+        // redstone.getAnalogInput(side) — alias
+        rs.set("getAnalogInput", rs.get("getInput"));
+
+        // redstone.setOutput(side, power) — set analog output 0-15
+        rs.set("setOutput", new TwoArgFunction() {
+            @Override
+            public LuaValue call(LuaValue side, LuaValue power) {
+                int idx = sideToIndex(side.checkjstring(), SIDES);
+                net.minecraft.core.BlockPos pos = os.getBlockPos();
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                if (pos == null || idx < 0) return NONE;
+                BluetoothNetwork.setRedstoneOutput(pos, idx, power.checkint());
+                if (lvl != null) {
+                    net.minecraft.core.Direction dir = net.minecraft.core.Direction.values()[idx];
+                    lvl.updateNeighborsAt(pos, lvl.getBlockState(pos).getBlock());
+                }
+                return NONE;
+            }
+        });
+
+        // redstone.setAnalogOutput(side, power) — alias
+        rs.set("setAnalogOutput", rs.get("setOutput"));
+
+        // redstone.getOutput(side) — read our own output
+        rs.set("getOutput", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue side) {
+                int idx = sideToIndex(side.checkjstring(), SIDES);
+                net.minecraft.core.BlockPos pos = os.getBlockPos();
+                if (pos == null || idx < 0) return LuaValue.valueOf(0);
+                return LuaValue.valueOf(BluetoothNetwork.getRedstoneOutput(pos, idx));
+            }
+        });
+
+        // redstone.getAnalogOutput(side) — alias
+        rs.set("getAnalogOutput", rs.get("getOutput"));
+
+        // Bundled cable support
+        // redstone.setBundledOutput(side, colorMask)
+        rs.set("setBundledOutput", new TwoArgFunction() {
+            @Override
+            public LuaValue call(LuaValue side, LuaValue mask) {
+                int idx = sideToIndex(side.checkjstring(), SIDES);
+                net.minecraft.core.BlockPos pos = os.getBlockPos();
+                if (pos == null || idx < 0) return NONE;
+                BluetoothNetwork.setBundledOutput(pos, idx, mask.checkint());
+                return NONE;
+            }
+        });
+
+        // redstone.getBundledOutput(side)
+        rs.set("getBundledOutput", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue side) {
+                int idx = sideToIndex(side.checkjstring(), SIDES);
+                net.minecraft.core.BlockPos pos = os.getBlockPos();
+                if (pos == null || idx < 0) return LuaValue.valueOf(0);
+                return LuaValue.valueOf(BluetoothNetwork.getBundledOutput(pos, idx));
+            }
+        });
+
+        // redstone.getBundledInput(side) — reads from world (requires compatible mod)
+        rs.set("getBundledInput", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue side) {
+                // Bundled input requires a mod like CC or Project Red to provide signals
+                // Returns 0 if no compatible mod is present
+                return LuaValue.valueOf(0);
+            }
+        });
+
+        // redstone.testBundledInput(side, color) — test if a specific color wire is active
+        rs.set("testBundledInput", new TwoArgFunction() {
+            @Override
+            public LuaValue call(LuaValue side, LuaValue color) {
+                return LuaValue.FALSE;
+            }
+        });
+
+        globals.set("redstone", rs);
+        globals.set("rs", rs); // CC alias
+    }
+
+    private void installScannerAPI() {
+        LuaTable scanner = new LuaTable();
+
+        // scanner.scan([radius]) — trigger a scan. ≤16 = immediate, >16 = incremental
+        scanner.set("scan", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                ScannerBlockEntity be = findNearestScanner();
+                if (be == null) return LuaValue.varargsOf(LuaValue.FALSE,
+                        LuaValue.valueOf("No scanner in range"));
+                int radius = args.optint(1, -1);
+                if (radius > 0 && radius <= 16) {
+                    be.performImmediateScan(radius);
+                } else {
+                    be.startScan();
+                }
+                return LuaValue.TRUE;
+            }
+        });
+
+        // scanner.getBlock(x,y,z) — returns block name or nil
+        scanner.set("getBlock", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                ScannerBlockEntity be = findNearestScanner();
+                if (be == null) return LuaValue.NIL;
+                String block = be.getScanData().getBlock(
+                        be.getLevel(), args.checkint(1), args.checkint(2), args.checkint(3));
+                return block != null ? LuaValue.valueOf(block) : LuaValue.NIL;
+            }
+        });
+
+        // scanner.getBlocks(x1,y1,z1,x2,y2,z2) — returns table of {x,y,z,name}
+        scanner.set("getBlocks", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                ScannerBlockEntity be = findNearestScanner();
+                if (be == null) return new LuaTable();
+                net.minecraft.core.BlockPos from = new net.minecraft.core.BlockPos(
+                        args.checkint(1), args.checkint(2), args.checkint(3));
+                net.minecraft.core.BlockPos to = new net.minecraft.core.BlockPos(
+                        args.checkint(4), args.checkint(5), args.checkint(6));
+                java.util.Map<net.minecraft.core.BlockPos, String> blocks =
+                        be.getScanData().getBlocksInArea(be.getLevel(), from, to);
+                LuaTable result = new LuaTable();
+                int i = 1;
+                for (java.util.Map.Entry<net.minecraft.core.BlockPos, String> entry : blocks.entrySet()) {
+                    LuaTable b = new LuaTable();
+                    b.set("x", LuaValue.valueOf(entry.getKey().getX()));
+                    b.set("y", LuaValue.valueOf(entry.getKey().getY()));
+                    b.set("z", LuaValue.valueOf(entry.getKey().getZ()));
+                    b.set("name", LuaValue.valueOf(entry.getValue()));
+                    result.set(i++, b);
+                }
+                return result;
+            }
+        });
+
+        // scanner.findBlock(name, [radius]) — find nearest block of type
+        scanner.set("findBlock", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                ScannerBlockEntity be = findNearestScanner();
+                if (be == null) return LuaValue.NIL;
+                String name = args.checkjstring(1);
+                int radius = args.optint(2, be.getScanRadius());
+                net.minecraft.core.BlockPos found = be.getScanData().findBlock(
+                        name, be.getBlockPos(), radius);
+                if (found == null) return LuaValue.NIL;
+                return LuaValue.varargsOf(new LuaValue[]{
+                        LuaValue.valueOf(found.getX()),
+                        LuaValue.valueOf(found.getY()),
+                        LuaValue.valueOf(found.getZ())
+                });
+            }
+        });
+
+        // scanner.findBlocks(name, [radius]) — find all blocks of type
+        scanner.set("findBlocks", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                ScannerBlockEntity be = findNearestScanner();
+                if (be == null) return new LuaTable();
+                String name = args.checkjstring(1);
+                int radius = args.optint(2, be.getScanRadius());
+                java.util.List<net.minecraft.core.BlockPos> found =
+                        be.getScanData().findBlocks(name, be.getBlockPos(), radius);
+                LuaTable result = new LuaTable();
+                int i = 1;
+                for (net.minecraft.core.BlockPos pos : found) {
+                    LuaTable entry = new LuaTable();
+                    entry.set("x", LuaValue.valueOf(pos.getX()));
+                    entry.set("y", LuaValue.valueOf(pos.getY()));
+                    entry.set("z", LuaValue.valueOf(pos.getZ()));
+                    result.set(i++, entry);
+                }
+                return result;
+            }
+        });
+
+        // scanner.getEntities([radius]) — returns table of entity snapshots
+        scanner.set("getEntities", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                ScannerBlockEntity be = findNearestScanner();
+                if (be == null) return new LuaTable();
+                java.util.List<WorldScanData.EntitySnapshot> entities = be.getScanData().getEntities();
+                int radius = args.optint(1, be.getScanRadius());
+                long radiusSq = (long) radius * radius;
+                net.minecraft.core.BlockPos origin = be.getBlockPos();
+
+                LuaTable result = new LuaTable();
+                int i = 1;
+                for (WorldScanData.EntitySnapshot e : entities) {
+                    double dx = e.x() - origin.getX();
+                    double dy = e.y() - origin.getY();
+                    double dz = e.z() - origin.getZ();
+                    if (dx * dx + dy * dy + dz * dz > radiusSq) continue;
+
+                    LuaTable entry = new LuaTable();
+                    entry.set("type", LuaValue.valueOf(e.type()));
+                    entry.set("name", LuaValue.valueOf(e.name()));
+                    entry.set("x", LuaValue.valueOf(e.x()));
+                    entry.set("y", LuaValue.valueOf(e.y()));
+                    entry.set("z", LuaValue.valueOf(e.z()));
+                    entry.set("health", LuaValue.valueOf(e.health()));
+                    entry.set("maxHealth", LuaValue.valueOf(e.maxHealth()));
+                    entry.set("isPlayer", LuaValue.valueOf(e.isPlayer()));
+                    entry.set("uuid", LuaValue.valueOf(e.uuid()));
+                    result.set(i++, entry);
+                }
+                return result;
+            }
+        });
+
+        // scanner.getPlayers([radius]) — returns table of player snapshots
+        scanner.set("getPlayers", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                ScannerBlockEntity be = findNearestScanner();
+                if (be == null) return new LuaTable();
+                java.util.List<WorldScanData.EntitySnapshot> players = be.getScanData().getPlayers();
+                int radius = args.optint(1, be.getScanRadius());
+                long radiusSq = (long) radius * radius;
+                net.minecraft.core.BlockPos origin = be.getBlockPos();
+
+                LuaTable result = new LuaTable();
+                int i = 1;
+                for (WorldScanData.EntitySnapshot p : players) {
+                    double dx = p.x() - origin.getX();
+                    double dy = p.y() - origin.getY();
+                    double dz = p.z() - origin.getZ();
+                    if (dx * dx + dy * dy + dz * dz > radiusSq) continue;
+
+                    LuaTable entry = new LuaTable();
+                    entry.set("name", LuaValue.valueOf(p.name()));
+                    entry.set("x", LuaValue.valueOf(p.x()));
+                    entry.set("y", LuaValue.valueOf(p.y()));
+                    entry.set("z", LuaValue.valueOf(p.z()));
+                    entry.set("uuid", LuaValue.valueOf(p.uuid()));
+                    result.set(i++, entry);
+                }
+                return result;
+            }
+        });
+
+        // scanner.isPassable(x,y,z) — true if entities can pass through
+        scanner.set("isPassable", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                ScannerBlockEntity be = findNearestScanner();
+                if (be == null) return LuaValue.NIL;
+                return LuaValue.valueOf(be.getScanData().isPassable(
+                        be.getLevel(), args.checkint(1), args.checkint(2), args.checkint(3)));
+            }
+        });
+
+        // scanner.isSolid(x,y,z) — true if block has collision
+        scanner.set("isSolid", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                ScannerBlockEntity be = findNearestScanner();
+                if (be == null) return LuaValue.NIL;
+                return LuaValue.valueOf(be.getScanData().isSolid(
+                        be.getLevel(), args.checkint(1), args.checkint(2), args.checkint(3)));
+            }
+        });
+
+        // scanner.getPath(x1,y1,z1, x2,y2,z2, [mode]) — A* pathfinding
+        // mode: "walk" (default) or "fly"
+        scanner.set("getPath", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                ScannerBlockEntity be = findNearestScanner();
+                if (be == null) return new LuaTable();
+                net.minecraft.core.BlockPos start = new net.minecraft.core.BlockPos(
+                        args.checkint(1), args.checkint(2), args.checkint(3));
+                net.minecraft.core.BlockPos end = new net.minecraft.core.BlockPos(
+                        args.checkint(4), args.checkint(5), args.checkint(6));
+                String modeStr = args.optjstring(7, "walk");
+                PathfindingEngine.PathMode mode = modeStr.equalsIgnoreCase("fly")
+                        ? PathfindingEngine.PathMode.FLY
+                        : PathfindingEngine.PathMode.WALK;
+
+                java.util.List<net.minecraft.core.BlockPos> path =
+                        PathfindingEngine.findPath(be.getScanData(), be.getLevel(), start, end, mode);
+                LuaTable result = new LuaTable();
+                int i = 1;
+                for (net.minecraft.core.BlockPos pos : path) {
+                    LuaTable wp = new LuaTable();
+                    wp.set("x", LuaValue.valueOf(pos.getX()));
+                    wp.set("y", LuaValue.valueOf(pos.getY()));
+                    wp.set("z", LuaValue.valueOf(pos.getZ()));
+                    result.set(i++, wp);
+                }
+                return result;
+            }
+        });
+
+        // scanner.getRadius() — current scan radius
+        scanner.set("getRadius", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                ScannerBlockEntity be = findNearestScanner();
+                return be != null ? LuaValue.valueOf(be.getScanRadius()) : LuaValue.valueOf(0);
+            }
+        });
+
+        // scanner.setRadius(r) — set scan radius (1-128)
+        scanner.set("setRadius", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue arg) {
+                ScannerBlockEntity be = findNearestScanner();
+                if (be != null) be.setScanRadius(arg.checkint());
+                return NONE;
+            }
+        });
+
+        // scanner.getProgress() — scan progress 0-100
+        scanner.set("getProgress", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                ScannerBlockEntity be = findNearestScanner();
+                return be != null ? LuaValue.valueOf(be.getScanProgress()) : LuaValue.valueOf(100);
+            }
+        });
+
+        // scanner.isScanning() — true if background scan in progress
+        scanner.set("isScanning", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                ScannerBlockEntity be = findNearestScanner();
+                return be != null ? LuaValue.valueOf(be.isScanning()) : LuaValue.FALSE;
+            }
+        });
+
+        // scanner.getBlockCount() — number of cached blocks
+        scanner.set("getBlockCount", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                ScannerBlockEntity be = findNearestScanner();
+                return be != null ? LuaValue.valueOf(be.getScanData().getScannedBlockCount())
+                        : LuaValue.valueOf(0);
+            }
+        });
+
+        // scanner.getPosition() — scanner block position (x,y,z)
+        scanner.set("getPosition", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                ScannerBlockEntity be = findNearestScanner();
+                if (be == null) return LuaValue.NIL;
+                net.minecraft.core.BlockPos pos = be.getBlockPos();
+                return LuaValue.varargsOf(new LuaValue[]{
+                        LuaValue.valueOf(pos.getX()),
+                        LuaValue.valueOf(pos.getY()),
+                        LuaValue.valueOf(pos.getZ())
+                });
+            }
+        });
+
+        globals.set("scanner", scanner);
+    }
+
+    /** Find nearest Scanner block entity via Bluetooth network. */
+    private ScannerBlockEntity findNearestScanner() {
+        net.minecraft.world.level.Level level = os.getLevel();
+        net.minecraft.core.BlockPos computerPos = os.getBlockPos();
+        if (level == null || computerPos == null) return null;
+
+        java.util.List<BluetoothNetwork.DeviceEntry> devices =
+                BluetoothNetwork.getDevicesInRange(level, computerPos, BluetoothNetwork.BLOCK_RANGE);
+
+        ScannerBlockEntity nearest = null;
+        double nearestDist = Double.MAX_VALUE;
+        for (BluetoothNetwork.DeviceEntry d : devices) {
+            if (d.type() != BluetoothNetwork.DeviceType.SCANNER) continue;
+            double dist = computerPos.distSqr(d.pos());
+            if (dist < nearestDist) {
+                net.minecraft.world.level.block.entity.BlockEntity be =
+                        level.getBlockEntity(d.pos());
+                if (be instanceof ScannerBlockEntity s) {
+                    nearest = s;
+                    nearestDist = dist;
+                }
+            }
+        }
+        return nearest;
+    }
+
+    private static int sideToIndex(String side, String[] sides) {
+        for (int i = 0; i < sides.length; i++) {
+            if (sides[i].equalsIgnoreCase(side)) return i;
+        }
+        return -1;
     }
 
     // --- CC Color Mapping ---

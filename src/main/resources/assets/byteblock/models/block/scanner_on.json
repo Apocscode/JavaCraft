@@ -1,0 +1,6 @@
+{
+  "parent": "byteblock:block/scanner",
+  "textures": {
+    "led": "minecraft:block/light_blue_concrete"
+  }
+}

@@ -25,9 +25,15 @@ public class ModCreativeTabs {
                         output.accept(ModItems.GPS_ITEM.get());
                         output.accept(ModItems.SCANNER_ITEM.get());
                         output.accept(ModItems.DRIVE_ITEM.get());
+                        output.accept(ModItems.PRINTER_ITEM.get());
+                        output.accept(ModItems.CHARGING_STATION_ITEM.get());
+                        output.accept(ModItems.MONITOR_ITEM.get());
+                        output.accept(ModItems.REDSTONE_RELAY_ITEM.get());
+                        output.accept(ModItems.BUTTON_PANEL_ITEM.get());
                         // Items
                         output.accept(ModItems.DISK.get());
                         output.accept(ModItems.GLASSES.get());
+                        output.accept(ModItems.GPS_TOOL.get());
                         // Entities
                         output.accept(ModItems.ROBOT_SPAWN_EGG.get());
                         output.accept(ModItems.DRONE_SPAWN_EGG.get());

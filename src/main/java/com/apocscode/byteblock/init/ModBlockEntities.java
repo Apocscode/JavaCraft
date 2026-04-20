@@ -31,4 +31,24 @@ public class ModBlockEntities {
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<DriveBlockEntity>> DRIVE =
             BLOCK_ENTITIES.register("drive",
                     () -> BlockEntityType.Builder.of(DriveBlockEntity::new, ModBlocks.DRIVE.get()).build(null));
+
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<PrinterBlockEntity>> PRINTER =
+            BLOCK_ENTITIES.register("printer",
+                    () -> BlockEntityType.Builder.of(PrinterBlockEntity::new, ModBlocks.PRINTER.get()).build(null));
+
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<ChargingStationBlockEntity>> CHARGING_STATION =
+            BLOCK_ENTITIES.register("charging_station",
+                    () -> BlockEntityType.Builder.of(ChargingStationBlockEntity::new, ModBlocks.CHARGING_STATION.get()).build(null));
+
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<MonitorBlockEntity>> MONITOR =
+            BLOCK_ENTITIES.register("monitor",
+                    () -> BlockEntityType.Builder.of(MonitorBlockEntity::new, ModBlocks.MONITOR.get()).build(null));
+
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<RedstoneRelayBlockEntity>> REDSTONE_RELAY =
+            BLOCK_ENTITIES.register("redstone_relay",
+                    () -> BlockEntityType.Builder.of(RedstoneRelayBlockEntity::new, ModBlocks.REDSTONE_RELAY.get()).build(null));
+
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<ButtonPanelBlockEntity>> BUTTON_PANEL =
+            BLOCK_ENTITIES.register("button_panel",
+                    () -> BlockEntityType.Builder.of(ButtonPanelBlockEntity::new, ModBlocks.BUTTON_PANEL.get()).build(null));
 }

@@ -1,6 +1,192 @@
 {
-  "parent": "minecraft:block/cube_all",
+  "credit": "ByteBlock — Reel-to-Reel Tape Drive",
+  "parent": "minecraft:block/block",
+  "ambientocclusion": false,
   "textures": {
-    "all": "ByteBlock:block/drive"
+    "cabinet": "byteblock:block/terminal",
+    "panel": "byteblock:block/keyboard",
+    "reel": "minecraft:block/iron_block",
+    "tape": "minecraft:block/black_wool",
+    "particle": "byteblock:block/terminal",
+    "led": "minecraft:block/red_concrete"
+  },
+  "elements": [
+    {
+      "name": "cabinet_body",
+      "from": [1, 0, 3],
+      "to": [15, 16, 15],
+      "faces": {
+        "north": {"uv": [0, 0, 14, 16], "texture": "#cabinet"},
+        "east":  {"uv": [0, 0, 12, 16], "texture": "#cabinet"},
+        "south": {"uv": [0, 0, 14, 16], "texture": "#cabinet"},
+        "west":  {"uv": [0, 0, 12, 16], "texture": "#cabinet"},
+        "up":    {"uv": [0, 0, 14, 12], "texture": "#cabinet", "cullface": "up"},
+        "down":  {"uv": [0, 0, 14, 12], "texture": "#cabinet", "cullface": "down"}
+      }
+    },
+    {
+      "name": "front_panel",
+      "from": [1, 0, 2],
+      "to": [15, 16, 3],
+      "faces": {
+        "north": {"uv": [1, 0, 15, 16], "texture": "#panel"},
+        "east":  {"uv": [0, 0, 1, 16], "texture": "#cabinet"},
+        "west":  {"uv": [0, 0, 1, 16], "texture": "#cabinet"},
+        "up":    {"uv": [1, 0, 15, 1], "texture": "#cabinet", "cullface": "up"},
+        "down":  {"uv": [1, 0, 15, 1], "texture": "#cabinet", "cullface": "down"}
+      }
+    },
+    {
+      "name": "left_reel_outer",
+      "from": [2, 10, 1.5],
+      "to": [7, 15, 2],
+      "faces": {
+        "north": {"uv": [2, 1, 7, 6], "texture": "#reel"},
+        "east":  {"uv": [0, 0, 0.5, 5], "texture": "#reel"},
+        "west":  {"uv": [0, 0, 0.5, 5], "texture": "#reel"},
+        "up":    {"uv": [2, 0, 7, 0.5], "texture": "#reel"},
+        "down":  {"uv": [2, 0, 7, 0.5], "texture": "#reel"}
+      }
+    },
+    {
+      "name": "left_reel_hub",
+      "from": [3.5, 11.5, 1],
+      "to": [5.5, 13.5, 2],
+      "faces": {
+        "north": {"uv": [6, 6, 8, 8], "texture": "#tape"},
+        "up":    {"uv": [6, 0, 8, 1], "texture": "#tape"},
+        "down":  {"uv": [6, 0, 8, 1], "texture": "#tape"},
+        "east":  {"uv": [0, 0, 1, 2], "texture": "#tape"},
+        "west":  {"uv": [0, 0, 1, 2], "texture": "#tape"}
+      }
+    },
+    {
+      "name": "right_reel_outer",
+      "from": [9, 10, 1.5],
+      "to": [14, 15, 2],
+      "faces": {
+        "north": {"uv": [9, 1, 14, 6], "texture": "#reel"},
+        "east":  {"uv": [0, 0, 0.5, 5], "texture": "#reel"},
+        "west":  {"uv": [0, 0, 0.5, 5], "texture": "#reel"},
+        "up":    {"uv": [9, 0, 14, 0.5], "texture": "#reel"},
+        "down":  {"uv": [9, 0, 14, 0.5], "texture": "#reel"}
+      }
+    },
+    {
+      "name": "right_reel_hub",
+      "from": [10.5, 11.5, 1],
+      "to": [12.5, 13.5, 2],
+      "faces": {
+        "north": {"uv": [6, 6, 8, 8], "texture": "#tape"},
+        "up":    {"uv": [6, 0, 8, 1], "texture": "#tape"},
+        "down":  {"uv": [6, 0, 8, 1], "texture": "#tape"},
+        "east":  {"uv": [0, 0, 1, 2], "texture": "#tape"},
+        "west":  {"uv": [0, 0, 1, 2], "texture": "#tape"}
+      }
+    },
+    {
+      "name": "tape_path",
+      "from": [5.5, 12, 1],
+      "to": [10.5, 13, 1.5],
+      "faces": {
+        "north": {"uv": [5, 7, 10, 8], "texture": "#tape"},
+        "up":    {"uv": [5, 0, 10, 0.5], "texture": "#tape"},
+        "down":  {"uv": [5, 0, 10, 0.5], "texture": "#tape"}
+      }
+    },
+    {
+      "name": "tape_guide_top",
+      "from": [7, 14, 1],
+      "to": [9, 15, 1.5],
+      "faces": {
+        "north": {"uv": [7, 1, 9, 2], "texture": "#reel"},
+        "up":    {"uv": [7, 0, 9, 0.5], "texture": "#reel"},
+        "down":  {"uv": [7, 0, 9, 0.5], "texture": "#reel"}
+      }
+    },
+    {
+      "name": "control_panel_area",
+      "from": [3, 3, 1.5],
+      "to": [13, 8, 2],
+      "faces": {
+        "north": {"uv": [3, 8, 13, 13], "texture": "#panel"},
+        "up":    {"uv": [3, 0, 13, 0.5], "texture": "#cabinet"},
+        "down":  {"uv": [3, 0, 13, 0.5], "texture": "#cabinet"}
+      }
+    },
+    {
+      "name": "button_1",
+      "from": [4, 5, 1],
+      "to": [5, 6, 1.5],
+      "faces": {
+        "north": {"uv": [0, 0, 1, 1], "texture": "#reel"}
+      }
+    },
+    {
+      "name": "button_2",
+      "from": [6, 5, 1],
+      "to": [7, 6, 1.5],
+      "faces": {
+        "north": {"uv": [0, 0, 1, 1], "texture": "#reel"}
+      }
+    },
+    {
+      "name": "button_3",
+      "from": [8, 5, 1],
+      "to": [9, 6, 1.5],
+      "faces": {
+        "north": {"uv": [0, 0, 1, 1], "texture": "#reel"}
+      }
+    },
+    {
+      "name": "status_indicator",
+      "from": [11, 5, 1],
+      "to": [12, 7, 1.5],
+      "shade": false,
+      "faces": {
+        "north": {"uv": [4, 4, 5, 6], "texture": "#led"}
+      }
+    },
+    {
+      "name": "ventilation_top",
+      "from": [2, 15.5, 4],
+      "to": [14, 16, 14],
+      "faces": {
+        "north": {"uv": [2, 0, 14, 0.5], "texture": "#cabinet"},
+        "south": {"uv": [2, 0, 14, 0.5], "texture": "#cabinet"}
+      }
+    },
+    {
+      "name": "base_trim",
+      "from": [0, 0, 2],
+      "to": [16, 1, 16],
+      "faces": {
+        "east":  {"uv": [0, 15, 14, 16], "texture": "#cabinet"},
+        "south": {"uv": [0, 15, 16, 16], "texture": "#cabinet"},
+        "west":  {"uv": [0, 15, 14, 16], "texture": "#cabinet"},
+        "down":  {"uv": [0, 0, 16, 14], "texture": "#cabinet", "cullface": "down"}
+      }
+    }
+  ],
+  "display": {
+    "firstperson_righthand": {
+      "rotation": [0, 135, 0],
+      "translation": [0, 0, 0],
+      "scale": [0.4, 0.4, 0.4]
+    },
+    "thirdperson_righthand": {
+      "rotation": [75, 45, 0],
+      "translation": [0, 2.5, 0],
+      "scale": [0.375, 0.375, 0.375]
+    },
+    "gui": {
+      "rotation": [30, 225, 0],
+      "translation": [0, 0, 0],
+      "scale": [0.625, 0.625, 0.625]
+    },
+    "ground": {
+      "translation": [0, 3, 0],
+      "scale": [0.25, 0.25, 0.25]
+    }
   }
 }

@@ -26,8 +26,36 @@ public abstract class OSProgram {
     /** Called when an event is dispatched to this program */
     public abstract void handleEvent(OSEvent event);
 
-    /** Called to render this program's output to the terminal buffer */
+    /** Called to render this program's output to the terminal buffer (legacy) */
     public abstract void render(TerminalBuffer buffer);
+
+    /**
+     * Render to a pixel buffer (640x400). Override this for graphical programs.
+     * Default implementation bridges from the old text-mode render() method.
+     */
+    public void renderGraphics(PixelBuffer pb) {
+        TerminalBuffer tb = new TerminalBuffer();
+        render(tb);
+        pb.rasterizeTerminal(tb);
+        // Propagate cursor blink info
+        this.lastCursorX = tb.getCursorX();
+        this.lastCursorY = tb.getCursorY();
+        this.lastCursorBlink = tb.isCursorBlink();
+    }
+
+    // Cursor state from last render (used by ComputerScreen)
+    private int lastCursorX, lastCursorY;
+    private boolean lastCursorBlink;
+
+    public int getLastCursorX() { return lastCursorX; }
+    public int getLastCursorY() { return lastCursorY; }
+    public boolean isLastCursorBlink() { return lastCursorBlink; }
+
+    protected void setCursorInfo(int x, int y, boolean blink) {
+        this.lastCursorX = x;
+        this.lastCursorY = y;
+        this.lastCursorBlink = blink;
+    }
 
     /** Called when the program is terminated */
     public void shutdown() {

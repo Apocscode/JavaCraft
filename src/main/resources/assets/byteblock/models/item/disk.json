@@ -1,6 +1,6 @@
 {
   "parent": "minecraft:item/generated",
   "textures": {
-    "layer0": "ByteBlock:item/disk"
+    "layer0": "byteblock:item/disk"
   }
 }

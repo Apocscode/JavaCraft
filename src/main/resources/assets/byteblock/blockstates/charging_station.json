@@ -1,0 +1,6 @@
+{
+  "variants": {
+    "connected=false": {"model": "byteblock:block/charging_station"},
+    "connected=true":  {"model": "byteblock:block/charging_station_on"}
+  }
+}

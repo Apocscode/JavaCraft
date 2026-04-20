@@ -1,8 +1,12 @@
 {
   "variants": {
-    "facing=north": { "model": "ByteBlock:block/computer" },
-    "facing=south": { "model": "ByteBlock:block/computer", "y": 180 },
-    "facing=west": { "model": "ByteBlock:block/computer", "y": 270 },
-    "facing=east": { "model": "ByteBlock:block/computer", "y": 90 }
+    "connected=false,facing=north": {"model": "byteblock:block/computer"},
+    "connected=false,facing=south": {"model": "byteblock:block/computer", "y": 180},
+    "connected=false,facing=west":  {"model": "byteblock:block/computer", "y": 270},
+    "connected=false,facing=east":  {"model": "byteblock:block/computer", "y": 90},
+    "connected=true,facing=north":  {"model": "byteblock:block/computer_on"},
+    "connected=true,facing=south":  {"model": "byteblock:block/computer_on", "y": 180},
+    "connected=true,facing=west":   {"model": "byteblock:block/computer_on", "y": 270},
+    "connected=true,facing=east":   {"model": "byteblock:block/computer_on", "y": 90}
   }
 }
