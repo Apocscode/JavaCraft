@@ -42,6 +42,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 /**
@@ -136,8 +137,10 @@ public class CraftingCalculatorProgram extends OSProgram {
     // ── Storage scan state ────────────────────────────────────────────────────
     /** Item counts from the last storage scan, or null if not yet scanned. */
     private Map<String, Long> storageInventory = null;
-    /** Set to true by handleClick() to request a scan on the next server tick. */
+    /** Set to true by handleClick() to request a scan on the next tick. */
     private volatile boolean scanRequested = false;
+    /** Receives the completed scan result from the server thread. */
+    private final AtomicReference<Map<String, Long>> pendingScan = new AtomicReference<>();
 
     /** Last known mouse pixel position (updated on click/drag). */
     private int mouseX, mouseY;
@@ -162,26 +165,40 @@ public class CraftingCalculatorProgram extends OSProgram {
     public boolean tick() {
         if (statusTicks > 0) statusTicks--;
 
-        // Storage scan — OS runs client-side, so resolve the server level for BT/BE access
+        // Storage scan — submit to server thread so BE access is thread-safe.
         if (scanRequested) {
             scanRequested = false;
-            Level level = os.getLevel();
-            net.minecraft.core.BlockPos pos = os.getBlockPos();
-            // In integrated single-player the OS level is the client level;
-            // grab the matching server level so we can read block entities.
-            if (level != null && level.isClientSide()) {
-                net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
-                if (mc.getSingleplayerServer() != null) {
-                    level = mc.getSingleplayerServer().getLevel(level.dimension());
+            Level clientLevel = os.getLevel();
+            BlockPos pos = os.getBlockPos();
+            if (clientLevel != null && pos != null && clientLevel.isClientSide()) {
+                Minecraft mc = Minecraft.getInstance();
+                MinecraftServer server = mc.getSingleplayerServer();
+                if (server != null) {
+                    net.minecraft.server.level.ServerLevel serverLevel =
+                            server.getLevel(clientLevel.dimension());
+                    if (serverLevel != null) {
+                        final BlockPos scanPos = pos;
+                        server.execute(() -> {
+                            Map<String, Long> result = StorageScanner.scan(serverLevel, scanPos);
+                            pendingScan.set(result);
+                        });
+                        setStatus("Scanning storage...", C_ACNT);
+                    } else {
+                        setStatus("Scan unavailable (multiplayer not yet supported)", C_YEL);
+                    }
+                } else {
+                    setStatus("Scan unavailable (multiplayer not yet supported)", C_YEL);
                 }
             }
-            if (level != null && pos != null && !level.isClientSide()) {
-                storageInventory = StorageScanner.scan(level, pos);
-                int total = storageInventory.values().stream().mapToInt(v -> v > Integer.MAX_VALUE ? Integer.MAX_VALUE : v.intValue()).sum();
-                setStatus("Scanned " + storageInventory.size() + " item type(s), " + total + " total", C_GRN);
-            } else {
-                setStatus("Scan unavailable (multiplayer not yet supported)", C_YEL);
-            }
+        }
+
+        // Pick up completed scan from server thread
+        Map<String, Long> completed = pendingScan.getAndSet(null);
+        if (completed != null) {
+            storageInventory = completed;
+            int total = storageInventory.values().stream()
+                    .mapToInt(v -> v > Integer.MAX_VALUE ? Integer.MAX_VALUE : v.intValue()).sum();
+            setStatus("Scanned " + storageInventory.size() + " item type(s), " + total + " total", C_GRN);
         }
 
         return running;

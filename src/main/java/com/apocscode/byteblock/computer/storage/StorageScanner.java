@@ -30,13 +30,6 @@ public class StorageScanner {
 
     private StorageScanner() {}
 
-    /**
-     * Perform a full storage scan visible from {@code computerPos}.
-     *
-     * @param level       Server-side level.
-     * @param computerPos Position of the Computer block running the scan.
-     * @return Map of {@code "namespace:path" → total quantity} across all sources.
-     */
     public static Map<String, Long> scan(Level level, BlockPos computerPos) {
         Map<String, Long> totals = new HashMap<>();
 
@@ -54,11 +47,9 @@ public class StorageScanner {
             for (int i = 0; i < chest.getContainerSize(); i++) {
                 ItemStack stack = chest.getItem(i);
                 if (stack.isEmpty()) continue;
-
                 Item item = stack.getItem();
                 ResourceLocation key = BuiltInRegistries.ITEM.getKey(item);
                 if (key == null) continue;
-
                 totals.merge(key.toString(), (long) stack.getCount(), Long::sum);
             }
 
