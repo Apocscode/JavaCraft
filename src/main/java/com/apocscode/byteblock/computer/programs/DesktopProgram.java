@@ -158,7 +158,7 @@ public class DesktopProgram extends OSProgram {
     // Start menu structure (two-panel)
     private static final String[] START_LEFT = {
         "Shell", "Lua Shell", "Puzzle", "IDE", "Notepad", "Explorer",
-        "Paint", "Calculator", "Task Manager", "Bluetooth", "Buttons", "Monitor"
+        "Paint", "Calculator", "Task Manager", "Bluetooth", "Buttons", "Monitor", "Materials"
     };
     private static final String[] START_LEFT_TARGETS = {
         "builtin:shell", "builtin:lua", "builtin:puzzle", "builtin:edit",
