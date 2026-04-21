@@ -23,6 +23,15 @@ import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.server.network.Filterable;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.WritableBookContent;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -77,7 +86,21 @@ public class CraftingCalculatorProgram extends OSProgram {
     private static final int C_RED   = 0xFFFF6060;
     private static final int C_BTN   = 0xFF2A4A8A;
     private static final int C_BTNH  = 0xFF3A6ABA;
-    private static final int C_SUBHD = 0xFF1E1E3F;
+    private static final int C_SUBHD  = 0xFF1E1E3F;
+    private static final int C_SRCH_FOC = 0xFF23234E;
+    private static final int C_DROP_BG  = 0xFF18183A;
+    private static final int C_DROP_SEL = 0xFF2C2C6A;
+    private static final int C_DROP_DIV = 0xFF3A3A5A;
+
+    // ── Dropdown constants ────────────────────────────────────────────────────
+    private static final String[] DROPDOWN_ITEMS = {
+        "Save", "Save As", "Save to Disk", null,
+        "Print", "Book", "Clipboard", "Mod Clipboard"
+    };
+    private static final int DROP_W    = 160;
+    private static final int DROP_ROW  = 18;
+    private static final int BTN_OUT_X = 4;
+    private static final int BTN_OUT_W = 90;
 
     // ── Static caches (shared across instances) ──────────────────────────────
     /** Full sorted list of every registered item ID (built once). */
@@ -98,6 +121,8 @@ public class CraftingCalculatorProgram extends OSProgram {
     private Map<String, Long> materials = new LinkedHashMap<>();
     private boolean hasRecipe;
     private int matScroll;
+    private boolean searchFocused = false;
+    private boolean dropdownOpen  = false;
 
     private String statusMsg  = "";
     private int    statusColor = C_TEXT;
@@ -155,7 +180,9 @@ public class CraftingCalculatorProgram extends OSProgram {
 
     private void handleChar(char c) {
         if (c >= 32 && c <= 126) {
+            dropdownOpen = false;
             searchQuery.insert(searchCursor++, c);
+            searchFocused = true;
             resetSelection();
             applyFilter();
         }
@@ -163,7 +190,7 @@ public class CraftingCalculatorProgram extends OSProgram {
 
     private void handleKey(int key) {
         switch (key) {
-            case 256 -> running = false;                          // Escape — close
+            case 256 -> { if (dropdownOpen) dropdownOpen = false; else running = false; } // Escape
             case 259 -> {                                          // Backspace
                 if (searchCursor > 0) {
                     searchQuery.deleteCharAt(--searchCursor);
@@ -191,8 +218,40 @@ public class CraftingCalculatorProgram extends OSProgram {
     private void handleClick() {
         int px = mouseX, py = mouseY;
 
+        // ── Dropdown intercept ───────────────────────────────────────────────
+        if (dropdownOpen) {
+            int dropH = computeDropdownHeight();
+            int dropX = BTN_OUT_X;
+            int dropY = PH - BTM_H - dropH;
+            if (px >= dropX && px < dropX + DROP_W && py >= dropY && py < PH - BTM_H) {
+                int itemY = dropY + 4;
+                for (int i = 0; i < DROPDOWN_ITEMS.length; i++) {
+                    String item = DROPDOWN_ITEMS[i];
+                    if (item == null) {
+                        itemY += 5;
+                    } else {
+                        if (py >= itemY && py < itemY + DROP_ROW) {
+                            activateDropdownItem(i);
+                            dropdownOpen = false;
+                            return;
+                        }
+                        itemY += DROP_ROW;
+                    }
+                }
+            }
+            dropdownOpen = false;
+            return;
+        }
+
+        // ── Search bar ───────────────────────────────────────────────────────
+        if (py >= HDR_H && py < HDR_H + SRH_H) {
+            searchFocused = true;
+            return;
+        }
+
         // ── Left panel: item list ──
         if (px < LIST_W && py >= LIST_Y && py < LIST_Y + LIST_H) {
+            searchFocused = false;
             int row = (py - LIST_Y) / ROW_H + listScroll;
             if (row >= 0 && row < results.size()) {
                 selectedIndex = row;
@@ -204,6 +263,7 @@ public class CraftingCalculatorProgram extends OSProgram {
 
         // ── Right panel header: craft-count stepper ──
         if (py >= LIST_Y && py < LIST_Y + ROW_H && px >= MAT_X) {
+            searchFocused = false;
             int sx = MAT_X + MAT_W - 70;
             if (px >= sx && px < sx + 14) {                      // [−]
                 craftCount = Math.max(1, craftCount - 1);
@@ -219,11 +279,24 @@ public class CraftingCalculatorProgram extends OSProgram {
             return;
         }
 
-        // ── Bottom bar: Print / Copy ──
+        // ── Bottom bar ───────────────────────────────────────────────────────
         int btmY = PH - BTM_H;
-        if (py >= btmY + 4 && py < PH - 4) {
-            if      (px >= 4  && px < 74)  doPrint();
-            else if (px >= 80 && px < 150) doCopy();
+        if (py >= btmY && py < PH) {
+            if (px >= BTN_OUT_X && px < BTN_OUT_X + BTN_OUT_W) {
+                dropdownOpen = !dropdownOpen;
+            }
+        }
+    }
+
+    private void activateDropdownItem(int i) {
+        switch (DROPDOWN_ITEMS[i]) {
+            case "Save"          -> doSave();
+            case "Save As"       -> doSave();
+            case "Save to Disk"  -> doSaveToDisk();
+            case "Print"         -> doPrint();
+            case "Book"          -> doWriteBook();
+            case "Clipboard"     -> doCopy();
+            case "Mod Clipboard" -> doModClipboard();
         }
     }
 
@@ -463,6 +536,7 @@ public class CraftingCalculatorProgram extends OSProgram {
         drawItemList(pb);
         drawMaterialsPanel(pb);
         drawBottomBar(pb);
+        drawDropdown(pb);                                  // overlay — rendered last
     }
 
     // ── Header ───────────────────────────────────────────────────────────────
@@ -475,9 +549,11 @@ public class CraftingCalculatorProgram extends OSProgram {
 
     // ── Search bar ───────────────────────────────────────────────────────────
     private void drawSearchBar(PixelBuffer pb) {
-        int y = HDR_H;
-        pb.fillRect(0, y, PW, SRH_H, C_SRCH);
+        int y   = HDR_H;
+        int bgC = searchFocused ? C_SRCH_FOC : C_SRCH;
+        pb.fillRect(0, y, PW, SRH_H, bgC);
         pb.fillRect(0, y + SRH_H - 1, PW, 1, C_SEP);
+        if (searchFocused) pb.drawRect(0, y, PW, SRH_H, C_ACNT);  // focus border
 
         pb.drawString(6, y + (SRH_H - CH) / 2, ">", C_ACNT);
 
@@ -485,11 +561,12 @@ public class CraftingCalculatorProgram extends OSProgram {
         int    textX = 18;
         int    textY = y + (SRH_H - CH) / 2;
 
-        if (q.isEmpty()) {
-            pb.drawString(textX, textY, "Search items and blocks (all mods included)...", C_MUTED);
+        if (q.isEmpty() && !searchFocused) {
+            pb.drawString(textX, textY, "Click here to search all items and blocks...", C_MUTED);
         } else {
-            pb.drawString(textX, textY, q, C_TEXT);
-            if ((System.currentTimeMillis() / 500) % 2 == 0) {
+            if (!q.isEmpty()) pb.drawString(textX, textY, q, C_TEXT);
+            // Blinking cursor when focused
+            if (searchFocused && (System.currentTimeMillis() / 500) % 2 == 0) {
                 pb.fillRect(textX + searchCursor * CW, textY - 1, 1, CH + 2, C_ACNT);
             }
         }
@@ -640,27 +717,106 @@ public class CraftingCalculatorProgram extends OSProgram {
         int btnH = BTM_H - 8;
         int mid  = y + (BTM_H - CH) / 2;
 
-        // Print button
-        boolean ph = mouseX >= 4 && mouseX < 74 && mouseY >= btnY && mouseY < y + BTM_H - 4;
-        pb.fillRect(4, btnY, 70, btnH, ph ? C_BTNH : C_BTN);
-        pb.drawStringCentered(4, 70, mid, "Print", C_TEXT);
-
-        // Copy button
-        boolean ch = mouseX >= 80 && mouseX < 150 && mouseY >= btnY && mouseY < y + BTM_H - 4;
-        pb.fillRect(80, btnY, 70, btnH, ch ? C_BTNH : C_BTN);
-        pb.drawStringCentered(80, 70, mid, "Copy", C_TEXT);
+        // Output dropdown button
+        boolean outH = !dropdownOpen
+                && mouseX >= BTN_OUT_X && mouseX < BTN_OUT_X + BTN_OUT_W
+                && mouseY >= btnY && mouseY < y + BTM_H - 4;
+        int outBg = (dropdownOpen || outH) ? C_BTNH : C_BTN;
+        pb.fillRect(BTN_OUT_X, btnY, BTN_OUT_W, btnH, outBg);
+        pb.drawStringCentered(BTN_OUT_X, BTN_OUT_W, mid,
+                "Output " + (dropdownOpen ? "\u25b2" : "\u25bc"), C_TEXT);
 
         // Status / hint
+        int hintX = BTN_OUT_X + BTN_OUT_W + 10;
         if (statusTicks > 0 && !statusMsg.isEmpty()) {
-            pb.drawString(160, mid, statusMsg, statusColor);
+            pb.drawString(hintX, mid, statusMsg, statusColor);
         } else if (selectedId != null && !materials.isEmpty()) {
-            pb.drawString(160, mid,
-                    materials.size() + " material(s)  \u2502  Up/Down to navigate  \u2502  Print or Copy results",
+            pb.drawString(hintX, mid,
+                    materials.size() + " material(s)  \u2502  Use Output \u25bc to export",
                     C_MUTED);
         } else {
-            pb.drawString(160, mid,
-                    "Type to search  \u2502  Click item  \u2502  Esc to close",
+            pb.drawString(hintX, mid,
+                    "Click search bar to type  \u2502  Click item  \u2502  Esc to close",
                     C_MUTED);
+        }
+    }
+
+    // ── Dropdown overlay ─────────────────────────────────────────────────────
+    private void drawDropdown(PixelBuffer pb) {
+        if (!dropdownOpen) return;
+        int dropH = computeDropdownHeight();
+        int dropX = BTN_OUT_X;
+        int dropY = PH - BTM_H - dropH;
+        pb.fillRect(dropX, dropY, DROP_W, dropH, C_DROP_BG);
+        pb.drawRect(dropX, dropY, DROP_W, dropH, C_DROP_DIV);
+
+        int itemY = dropY + 4;
+        for (String item : DROPDOWN_ITEMS) {
+            if (item == null) {
+                pb.fillRect(dropX + 6, itemY + 2, DROP_W - 12, 1, C_DROP_DIV);
+                itemY += 5;
+            } else {
+                boolean hov = mouseX >= dropX && mouseX < dropX + DROP_W
+                        && mouseY >= itemY && mouseY < itemY + DROP_ROW;
+                if (hov) pb.fillRect(dropX + 1, itemY, DROP_W - 2, DROP_ROW, C_DROP_SEL);
+                pb.drawString(dropX + 10, itemY + (DROP_ROW - CH) / 2, item,
+                        hov ? C_TEXT : C_MUTED);
+                itemY += DROP_ROW;
+            }
+        }
+    }
+
+    private int computeDropdownHeight() {
+        int h = 8;
+        for (String item : DROPDOWN_ITEMS) h += (item == null) ? 5 : DROP_ROW;
+        return h;
+    }
+
+    // ── Save / export actions ─────────────────────────────────────────────────
+    private void doSave() { doSaveToDisk(); }
+
+    private void doSaveToDisk() {
+        if (selectedId == null) { setStatus("Select an item first", C_YEL); return; }
+        String safeName = selectedId.replace(':', '_').replace('/', '_');
+        Path dir = Path.of("material_exports");
+        try {
+            Files.createDirectories(dir);
+            Path out = dir.resolve("materials_" + safeName + ".txt");
+            Files.writeString(out, buildOutput());
+            setStatus("Saved: materials_" + safeName + ".txt", C_GRN);
+        } catch (IOException e) {
+            setStatus("Save failed: " + e.getMessage(), C_RED);
+        }
+    }
+
+    private void doWriteBook() {
+        if (selectedId == null) { setStatus("Select an item first", C_YEL); return; }
+        Minecraft mc = Minecraft.getInstance();
+        if (mc == null) { setStatus("No game context", C_RED); return; }
+        MinecraftServer server = mc.getSingleplayerServer();
+        if (server == null) { setStatus("Book requires singleplayer", C_YEL); return; }
+        ServerPlayer sp = server.getPlayerList().getPlayerByName(mc.getUser().getName());
+        if (sp == null) { setStatus("Player not found on server", C_RED); return; }
+
+        String output = buildOutput();
+        java.util.List<Filterable<String>> pages = new java.util.ArrayList<>();
+        int pageLen = 256;
+        for (int i = 0; i < output.length(); i += pageLen) {
+            pages.add(Filterable.passThrough(
+                    output.substring(i, Math.min(i + pageLen, output.length()))));
+        }
+        ItemStack book = new ItemStack(Items.WRITABLE_BOOK);
+        book.set(DataComponents.WRITABLE_BOOK_CONTENT, new WritableBookContent(pages));
+        server.execute(() -> sp.addItem(book));
+        setStatus("Book added to inventory!", C_GRN);
+    }
+
+    private void doModClipboard() {
+        if (selectedId == null) { setStatus("Select an item first", C_YEL); return; }
+        Minecraft mc = Minecraft.getInstance();
+        if (mc != null) {
+            mc.keyboardHandler.setClipboard("=== ByteBlock Materials Export ===\n" + buildOutput());
+            setStatus("Copied to mod clipboard!", C_GRN);
         }
     }
 }
