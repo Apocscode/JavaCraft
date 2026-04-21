@@ -38,6 +38,12 @@ public class PeripheralRegistry {
         if (ModList.get().isLoaded("logiclink")) {
             register(new LogicLinkPeripheralAdapter());
         }
+        if (ModList.get().isLoaded("ae2")) {
+            register(new AE2PeripheralAdapter());
+        }
+        if (ModList.get().isLoaded("create")) {
+            register(new CreatePeripheralAdapter());
+        }
     }
 
     /**

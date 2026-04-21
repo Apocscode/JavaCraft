@@ -93,6 +93,8 @@ public class JavaOS {
         fileSystem.installSystemFile("/Program Files/calculator", "Built-in calculator");
         fileSystem.installSystemFile("/Program Files/task_manager", "Built-in task manager");
         fileSystem.installSystemFile("/Program Files/bluetooth", "Built-in bluetooth manager");
+        fileSystem.installSystemFile("/Program Files/me_dashboard", "Built-in AE2 ME Network dashboard");
+        fileSystem.installSystemFile("/Program Files/create_dashboard", "Built-in Create mod machine dashboard");
 
         // Create default Documents startup file
         if (!fileSystem.exists("/Users/User/Documents/startup")) {

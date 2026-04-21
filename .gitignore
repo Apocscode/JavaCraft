@@ -38,3 +38,10 @@ run/
 **/src/generated/**/.cache/
 repo/
 !**/src/**/repo/
+
+temp_pneumatic/
+*.class
+runs/
+logs/
+run_output.txt
+temp_pneumatic.zip
