@@ -218,10 +218,9 @@ public class ComputerScreen extends Screen {
             }
             return true;
         }
-        if (keyCode == 256) { // Escape
-            this.onClose();
-            return true;
-        }
+        // Escape is forwarded to the OS so programs can handle it (e.g., dismiss dialogs,
+        // exit test patterns). DesktopProgram shuts down the OS when nothing is open,
+        // which triggers onClose() via the isShutdown() check in render().
         os.pushEvent(new OSEvent(OSEvent.Type.KEY, keyCode, 0, modifiers));
         return true;
     }

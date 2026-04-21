@@ -770,8 +770,12 @@ public class DesktopProgram extends OSProgram {
                     return;
                 }
             }
-            if (keyCode == 256) { // Escape → deselect
-                selectedIcon = null;
+            if (keyCode == 256) { // Escape → deselect icon, or close terminal if nothing selected
+                if (selectedIcon != null) {
+                    selectedIcon = null;
+                } else {
+                    os.shutdown(); // Nothing to dismiss → close terminal
+                }
                 return;
             }
             return; // Don't forward to (non-existent) window

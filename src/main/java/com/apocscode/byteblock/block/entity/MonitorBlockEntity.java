@@ -102,6 +102,18 @@ public class MonitorBlockEntity extends BlockEntity {
             // Format: "display_mode:mirror" or "display_mode:test:bars" etc.
             String mode = content.substring("display_mode:".length());
             setDisplayMode(mode);
+        } else if (content.startsWith("link:")) {
+            // Format: "link:x,y,z" — sets the linked computer position for mirror mode
+            try {
+                String[] parts = content.substring(5).split(",");
+                if (parts.length == 3) {
+                    int x = Integer.parseInt(parts[0].trim());
+                    int y = Integer.parseInt(parts[1].trim());
+                    int z = Integer.parseInt(parts[2].trim());
+                    linkedComputerPos = new BlockPos(x, y, z);
+                    syncToClient();
+                }
+            } catch (NumberFormatException ignored) {}
         }
     }
 

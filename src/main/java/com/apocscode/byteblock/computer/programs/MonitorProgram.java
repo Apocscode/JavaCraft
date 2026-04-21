@@ -195,13 +195,19 @@ public class MonitorProgram extends OSProgram {
     private void applyDisplayMode(String mode) {
         if (os == null || os.getLevel() == null || os.getBlockPos() == null) return;
 
+        // Include our computer position so the monitor can link itself for mirror mode
+        BlockPos cp = os.getBlockPos();
+        String linkMsg = "link:" + cp.getX() + "," + cp.getY() + "," + cp.getZ();
+
         int applied = 0;
         if (selectedIndex >= 0 && selectedIndex < monitors.size()) {
             MonitorInfo selected = monitors.get(selectedIndex);
+            BluetoothNetwork.send(os.getLevel(), os.getBlockPos(), os.getComputerId(), selected.fullId(), 1, linkMsg);
             BluetoothNetwork.send(os.getLevel(), os.getBlockPos(), os.getComputerId(), selected.fullId(), 1, "display_mode:" + mode);
             applied = 1;
         } else {
             for (MonitorInfo monitor : monitors) {
+                BluetoothNetwork.send(os.getLevel(), os.getBlockPos(), os.getComputerId(), monitor.fullId(), 1, linkMsg);
                 BluetoothNetwork.send(os.getLevel(), os.getBlockPos(), os.getComputerId(), monitor.fullId(), 1, "display_mode:" + mode);
                 applied++;
             }
