@@ -51,6 +51,10 @@ public class ModLinkRegistry {
         if (ModList.get().isLoaded("ae2")) {
             register(new AE2StorageLink());
         }
+
+        if (ModList.get().isLoaded("logiclink")) {
+            register(new LogicLinkStorageLink());
+        }
     }
 
     // ── Built-in: Applied Energistics 2 integration ───────────────────────────
@@ -148,6 +152,91 @@ public class ModLinkRegistry {
             } catch (Exception e) {
                 // AE2 not present or API changed — silently disable integration
                 clsGridNodeHost = null;
+                return false;
+            }
+        }
+    }
+
+    // ── Built-in: CreateLogicLink integration ─────────────────────────────────
+
+    /**
+     * Queries Create logistics networks via a Logic Link Hub adjacent to the
+     * given position. The hub's cached {@code InventorySummary} is read
+     * reflectively so this compiles without LogicLink or Create on the
+     * classpath.
+     *
+     * <p>Place a Logic Link Hub (linked to a Create logistics frequency) next
+     * to a ByteChest; the Materials Calculator scan will then include all
+     * items visible on that logistics network.
+     */
+    static final class LogicLinkStorageLink implements IStorageProvider {
+
+        private static volatile boolean cacheReady = false;
+        private static Class<?>         clsLogicLinkBE;
+        private static Method           mGetNetworkSummary;
+        private static Method           mGetStacks;
+        private static java.lang.reflect.Field fStack;
+        private static java.lang.reflect.Field fCount;
+
+        @Override
+        public String getModId() { return "logiclink"; }
+
+        @Override
+        public Map<String, Long> getItemCounts(Level level, BlockPos nearPos) {
+            Map<String, Long> result = new HashMap<>();
+            if (!ensureCache()) return result;
+
+            for (Direction dir : Direction.values()) {
+                BlockPos adjPos = nearPos.relative(dir);
+                BlockEntity be = level.getBlockEntity(adjPos);
+                if (be == null || !clsLogicLinkBE.isInstance(be)) continue;
+
+                try {
+                    // InventorySummary summary = hub.getNetworkSummary()
+                    Object summary = mGetNetworkSummary.invoke(be);
+                    if (summary == null) continue;
+
+                    // List<BigItemStack> stacks = summary.getStacks()
+                    Object stacksRaw = mGetStacks.invoke(summary);
+                    if (!(stacksRaw instanceof java.util.List<?> stacks)) continue;
+
+                    for (Object bis : stacks) {
+                        if (bis == null) continue;
+                        net.minecraft.world.item.ItemStack stack =
+                                (net.minecraft.world.item.ItemStack) fStack.get(bis);
+                        if (stack == null || stack.isEmpty()) continue;
+                        long count = ((Number) fCount.get(bis)).longValue();
+                        String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+                        result.merge(id, count, Long::sum);
+                    }
+                } catch (Exception ignored) {}
+            }
+            return result;
+        }
+
+        /** Populate reflection caches. Returns false if LogicLink API is unavailable. */
+        private static boolean ensureCache() {
+            if (cacheReady) return clsLogicLinkBE != null;
+            cacheReady = true;
+            try {
+                clsLogicLinkBE = Class.forName(
+                        "com.apocscode.logiclink.block.LogicLinkBlockEntity");
+                Class<?> clsInventorySummary = Class.forName(
+                        "com.simibubi.create.content.logistics.packager.InventorySummary");
+                Class<?> clsBigItemStack = Class.forName(
+                        "com.simibubi.create.content.logistics.BigItemStack");
+
+                mGetNetworkSummary = clsLogicLinkBE.getMethod("getNetworkSummary");
+                mGetStacks         = clsInventorySummary.getMethod("getStacks");
+
+                fStack = clsBigItemStack.getField("stack");
+                fCount = clsBigItemStack.getField("count");
+                fStack.setAccessible(true);
+                fCount.setAccessible(true);
+                return true;
+            } catch (Exception e) {
+                // LogicLink not present or API changed — silently disable integration
+                clsLogicLinkBE = null;
                 return false;
             }
         }
