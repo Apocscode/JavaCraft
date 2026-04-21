@@ -30,6 +30,7 @@ public class ModCreativeTabs {
                         output.accept(ModItems.MONITOR_ITEM.get());
                         output.accept(ModItems.REDSTONE_RELAY_ITEM.get());
                         output.accept(ModItems.BUTTON_PANEL_ITEM.get());
+                        output.accept(ModItems.BYTE_CHEST_ITEM.get());
                         // Items
                         output.accept(ModItems.DISK.get());
                         output.accept(ModItems.GLASSES.get());

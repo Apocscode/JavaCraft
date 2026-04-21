@@ -43,5 +43,14 @@ Compatible with All the Mods 10 (ATM10).
     ordering="NONE"
     side="BOTH"
 
+# Applied Energistics 2 — optional integration for ME network storage scanning
+[[dependencies.${mod_id}]]
+    modId="ae2"
+    type="optional"
+    versionRange="[1,)"
+    ordering="NONE"
+    side="SERVER"
+
 #[features.${mod_id}]
 #openGLVersion="[3.2,)"
+

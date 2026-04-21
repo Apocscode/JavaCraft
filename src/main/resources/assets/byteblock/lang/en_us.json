@@ -8,6 +8,9 @@
   "block.byteblock.drive": "Tape Drive",
   "block.byteblock.printer": "Printer",
   "block.byteblock.charging_station": "Charging Station",
+  "block.byteblock.byte_chest": "ByteChest",
+
+  "container.byteblock.byte_chest": "ByteChest",
 
   "item.byteblock.disk": "Floppy Disk",
   "item.byteblock.glasses": "Smart Glasses",

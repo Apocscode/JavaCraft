@@ -7,6 +7,7 @@ import com.apocscode.byteblock.computer.OSEvent;
 import com.apocscode.byteblock.computer.OSProgram;
 import com.apocscode.byteblock.computer.PixelBuffer;
 import com.apocscode.byteblock.computer.TerminalBuffer;
+import com.apocscode.byteblock.computer.storage.StorageScanner;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
@@ -102,6 +103,9 @@ public class CraftingCalculatorProgram extends OSProgram {
     private static final int DROP_ROW  = 18;
     private static final int BTN_OUT_X = 4;
     private static final int BTN_OUT_W = 90;
+    private static final int BTN_SCAN_X = BTN_OUT_X + BTN_OUT_W + 6; // 100
+    private static final int BTN_SCAN_W = 80;
+    private static final int HINT_X     = BTN_SCAN_X + BTN_SCAN_W + 10;
 
     // ── Static caches (shared across instances) ──────────────────────────────
     /** Full sorted list of every registered item ID (built once). */
@@ -129,6 +133,12 @@ public class CraftingCalculatorProgram extends OSProgram {
     private int    statusColor = C_TEXT;
     private int    statusTicks;
 
+    // ── Storage scan state ────────────────────────────────────────────────────
+    /** Item counts from the last storage scan, or null if not yet scanned. */
+    private Map<String, Long> storageInventory = null;
+    /** Set to true by handleClick() to request a scan on the next server tick. */
+    private volatile boolean scanRequested = false;
+
     /** Last known mouse pixel position (updated on click/drag). */
     private int mouseX, mouseY;
 
@@ -151,6 +161,21 @@ public class CraftingCalculatorProgram extends OSProgram {
     @Override
     public boolean tick() {
         if (statusTicks > 0) statusTicks--;
+
+        // Storage scan (runs server-side where block entities are accessible)
+        if (scanRequested) {
+            scanRequested = false;
+            Level level = os.getLevel();
+            net.minecraft.core.BlockPos pos = os.getBlockPos();
+            if (level != null && pos != null && !level.isClientSide()) {
+                storageInventory = StorageScanner.scan(level, pos);
+                int total = storageInventory.values().stream().mapToInt(v -> v > Integer.MAX_VALUE ? Integer.MAX_VALUE : v.intValue()).sum();
+                setStatus("Scanned " + storageInventory.size() + " item type(s), " + total + " total", C_GRN);
+            } else {
+                setStatus("Scan unavailable (server context required)", C_YEL);
+            }
+        }
+
         return running;
     }
 
@@ -285,6 +310,11 @@ public class CraftingCalculatorProgram extends OSProgram {
         if (py >= btmY && py < PH) {
             if (px >= BTN_OUT_X && px < BTN_OUT_X + BTN_OUT_W) {
                 dropdownOpen = !dropdownOpen;
+            } else if (px >= BTN_SCAN_X && px < BTN_SCAN_X + BTN_SCAN_W) {
+                // Request a storage scan
+                dropdownOpen = false;
+                scanRequested = true;
+                setStatus("Scanning storage...", C_ACNT);
             }
         }
     }
@@ -694,8 +724,25 @@ public class CraftingCalculatorProgram extends OSProgram {
             pb.drawString(MAT_X + 6,        rowY + (ROW_H - CH) / 2, ns,   C_MUTED);
             pb.drawString(MAT_X + 6 + nsW,  rowY + (ROW_H - CH) / 2, path, C_TEXT);
 
-            String amt = "x" + e.getValue();
-            pb.drawStringRight(MAT_X + MAT_W - 6, rowY + (ROW_H - CH) / 2, amt, C_YEL);
+            // Need amount
+            long need = e.getValue();
+            String needStr = "x" + need;
+
+            if (storageInventory != null) {
+                // Show need + have with color coding
+                long have = storageInventory.getOrDefault(e.getKey(), 0L);
+                int haveColor;
+                if (have >= need)      haveColor = C_GRN;
+                else if (have > 0)     haveColor = C_YEL;
+                else                   haveColor = C_RED;
+
+                String haveStr = "(have " + have + ")";
+                pb.drawStringRight(MAT_X + MAT_W - 6, rowY + (ROW_H - CH) / 2, haveStr, haveColor);
+                int haveW = haveStr.length() * CW + 8;
+                pb.drawStringRight(MAT_X + MAT_W - 6 - haveW, rowY + (ROW_H - CH) / 2, needStr, C_YEL);
+            } else {
+                pb.drawStringRight(MAT_X + MAT_W - 6, rowY + (ROW_H - CH) / 2, needStr, C_YEL);
+            }
         }
 
         // Scrollbar
@@ -727,17 +774,26 @@ public class CraftingCalculatorProgram extends OSProgram {
         pb.drawStringCentered(BTN_OUT_X, BTN_OUT_W, mid,
                 dropdownOpen ? "Output [^]" : "Output [v]", C_TEXT);
 
+        // Scan storage button
+        boolean scanH = mouseX >= BTN_SCAN_X && mouseX < BTN_SCAN_X + BTN_SCAN_W
+                && mouseY >= btnY && mouseY < y + BTM_H - 4;
+        int scanBg = scanH ? C_BTNH : (storageInventory != null ? 0xFF1A4A2A : C_BTN);
+        pb.fillRect(BTN_SCAN_X, btnY, BTN_SCAN_W, btnH, scanBg);
+        String scanLabel = storageInventory != null ? "[BT] Scanned" : "Scan [BT]";
+        pb.drawStringCentered(BTN_SCAN_X, BTN_SCAN_W, mid, scanLabel,
+                storageInventory != null ? C_GRN : C_TEXT);
+
         // Status / hint
-        int hintX = BTN_OUT_X + BTN_OUT_W + 10;
         if (statusTicks > 0 && !statusMsg.isEmpty()) {
-            pb.drawString(hintX, mid, statusMsg, statusColor);
+            pb.drawString(HINT_X, mid, statusMsg, statusColor);
         } else if (selectedId != null && !materials.isEmpty()) {
-            pb.drawString(hintX, mid,
-                    materials.size() + " material(s)  |  Use Output [v] to export",
-                    C_MUTED);
+            String hint = storageInventory != null
+                    ? materials.size() + " material(s)  |  Scan fresh: click [BT]"
+                    : materials.size() + " material(s)  |  Click [BT] to check storage";
+            pb.drawString(HINT_X, mid, hint, C_MUTED);
         } else {
-            pb.drawString(hintX, mid,
-                    "Click search bar to type  |  Click item  |  Esc to close",
+            pb.drawString(HINT_X, mid,
+                    "Search items  |  Click [BT] to scan storage",
                     C_MUTED);
         }
     }

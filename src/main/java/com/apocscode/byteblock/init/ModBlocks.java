@@ -100,4 +100,12 @@ public class ModBlocks {
                     .sound(SoundType.METAL)
                     .requiresCorrectToolForDrops()
                     .noOcclusion()));
+
+    // ByteChest — Bluetooth-enabled smart storage, scannable from Materials Calculator
+    public static final DeferredBlock<ByteChestBlock> BYTE_CHEST = BLOCKS.register("byte_chest",
+            () -> new ByteChestBlock(BlockBehaviour.Properties.of()
+                    .mapColor(MapColor.COLOR_CYAN)
+                    .strength(2.5f)
+                    .sound(SoundType.METAL)
+                    .requiresCorrectToolForDrops()));
 }

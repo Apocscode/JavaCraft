@@ -61,6 +61,7 @@ public class ByteBlock {
 
     private void commonSetup(FMLCommonSetupEvent event) {
         LOGGER.info("ByteBlock initializing — in-game Java computer simulator");
+        com.apocscode.byteblock.computer.storage.ModLinkRegistry.registerDefaults();
     }
     private void onRegisterPayloads(RegisterPayloadHandlersEvent event) {
         var registrar = event.registrar("1");

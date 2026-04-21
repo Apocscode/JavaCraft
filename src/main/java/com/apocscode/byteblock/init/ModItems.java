@@ -52,4 +52,7 @@ public class ModItems {
     public static final DeferredItem<BlockItem> REDSTONE_RELAY_ITEM = ITEMS.registerSimpleBlockItem("redstone_relay", ModBlocks.REDSTONE_RELAY);
     public static final DeferredItem<BlockItem> BUTTON_PANEL_ITEM = ITEMS.registerSimpleBlockItem("button_panel", ModBlocks.BUTTON_PANEL);
 
+    // ByteChest
+    public static final DeferredItem<BlockItem> BYTE_CHEST_ITEM = ITEMS.registerSimpleBlockItem("byte_chest", ModBlocks.BYTE_CHEST);
+
 }

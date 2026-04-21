@@ -51,4 +51,8 @@ public class ModBlockEntities {
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<ButtonPanelBlockEntity>> BUTTON_PANEL =
             BLOCK_ENTITIES.register("button_panel",
                     () -> BlockEntityType.Builder.of(ButtonPanelBlockEntity::new, ModBlocks.BUTTON_PANEL.get()).build(null));
+
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<com.apocscode.byteblock.block.entity.ByteChestBlockEntity>> BYTE_CHEST =
+            BLOCK_ENTITIES.register("byte_chest",
+                    () -> BlockEntityType.Builder.of(com.apocscode.byteblock.block.entity.ByteChestBlockEntity::new, ModBlocks.BYTE_CHEST.get()).build(null));
 }
