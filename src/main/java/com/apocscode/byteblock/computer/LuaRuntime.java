@@ -176,6 +176,7 @@ public class LuaRuntime {
         installRednetAPI();
         installRedstoneAPI();
         installScannerAPI();
+        installPeripheralAPI();
     }
 
     private void installTermAPI() {
@@ -1165,6 +1166,129 @@ public class LuaRuntime {
         });
 
         globals.set("scanner", scanner);
+    }
+
+    // ── peripheral API ────────────────────────────────────────────────────
+
+    private void installPeripheralAPI() {
+        LuaTable peripheral = new LuaTable();
+
+        // peripheral.isPresent(side) → boolean
+        peripheral.set("isPresent", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue side) {
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                net.minecraft.core.BlockPos pos = os.getBlockPos();
+                if (lvl == null || pos == null) return LuaValue.FALSE;
+                return LuaValue.valueOf(
+                    com.apocscode.byteblock.computer.peripheral.PeripheralRegistry
+                        .findBySide(lvl, pos, side.checkjstring()) != null);
+            }
+        });
+
+        // peripheral.getType(side) → string | nil
+        peripheral.set("getType", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue side) {
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                net.minecraft.core.BlockPos pos = os.getBlockPos();
+                if (lvl == null || pos == null) return LuaValue.NIL;
+                var result = com.apocscode.byteblock.computer.peripheral.PeripheralRegistry
+                        .findBySide(lvl, pos, side.checkjstring());
+                return result != null ? LuaValue.valueOf(result.getType()) : LuaValue.NIL;
+            }
+        });
+
+        // peripheral.getMethods(side) → table of method name strings
+        peripheral.set("getMethods", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue side) {
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                net.minecraft.core.BlockPos pos = os.getBlockPos();
+                LuaTable methods = new LuaTable();
+                if (lvl == null || pos == null) return methods;
+                var result = com.apocscode.byteblock.computer.peripheral.PeripheralRegistry
+                        .findBySide(lvl, pos, side.checkjstring());
+                if (result == null) return methods;
+                org.luaj.vm2.LuaTable tbl = result.buildTable();
+                int i = 1;
+                for (org.luaj.vm2.LuaValue key = tbl.next(LuaValue.NIL).arg1();
+                     !key.isnil();
+                     key = tbl.next(key).arg1()) {
+                    methods.set(i++, key);
+                }
+                return methods;
+            }
+        });
+
+        // peripheral.wrap(side) → method table | nil
+        peripheral.set("wrap", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue side) {
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                net.minecraft.core.BlockPos pos = os.getBlockPos();
+                if (lvl == null || pos == null) return LuaValue.NIL;
+                var result = com.apocscode.byteblock.computer.peripheral.PeripheralRegistry
+                        .findBySide(lvl, pos, side.checkjstring());
+                if (result == null) return LuaValue.NIL;
+                return result.buildTable();
+            }
+        });
+
+        // peripheral.call(side, method, ...) → result
+        peripheral.set("call", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                net.minecraft.core.BlockPos pos = os.getBlockPos();
+                if (lvl == null || pos == null) return LuaValue.NIL;
+                var result = com.apocscode.byteblock.computer.peripheral.PeripheralRegistry
+                        .findBySide(lvl, pos, args.checkjstring(1));
+                if (result == null) return LuaValue.NIL;
+                org.luaj.vm2.LuaTable tbl = result.buildTable();
+                LuaValue fn = tbl.get(args.checkjstring(2));
+                if (fn.isnil() || !fn.isfunction()) return LuaValue.NIL;
+                return fn.invoke(args.subargs(3));
+            }
+        });
+
+        // peripheral.find(type) → method table | nil
+        // Scans all 6 sides, returns the first peripheral of the requested type.
+        peripheral.set("find", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue type) {
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                net.minecraft.core.BlockPos pos = os.getBlockPos();
+                if (lvl == null || pos == null) return LuaValue.NIL;
+                var result = com.apocscode.byteblock.computer.peripheral.PeripheralRegistry
+                        .findByType(lvl, pos, type.checkjstring());
+                return result != null ? result.buildTable() : LuaValue.NIL;
+            }
+        });
+
+        // peripheral.getSides() → table of side names that have a peripheral
+        peripheral.set("getSides", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                LuaTable sides = new LuaTable();
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                net.minecraft.core.BlockPos pos = os.getBlockPos();
+                if (lvl == null || pos == null) return sides;
+                int i = 1;
+                for (net.minecraft.core.Direction dir : net.minecraft.core.Direction.values()) {
+                    var result = com.apocscode.byteblock.computer.peripheral.PeripheralRegistry
+                            .find(lvl, pos, dir);
+                    if (result != null) {
+                        sides.set(i++, LuaValue.valueOf(
+                            com.apocscode.byteblock.computer.peripheral.PeripheralRegistry
+                                .directionToSide(dir)));
+                    }
+                }
+                return sides;
+            }
+        });
+
+        globals.set("peripheral", peripheral);
     }
 
     /** Find nearest Scanner block entity via Bluetooth network. */
