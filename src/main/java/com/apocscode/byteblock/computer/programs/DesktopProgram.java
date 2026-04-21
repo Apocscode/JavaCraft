@@ -163,13 +163,13 @@ public class DesktopProgram extends OSProgram {
     private static final String[] START_LEFT_TARGETS = {
         "builtin:shell", "builtin:lua", "builtin:puzzle", "builtin:edit",
         "builtin:notepad", "builtin:explorer", "builtin:paint", "builtin:calculator", "builtin:taskmanager",
-        "builtin:bluetooth", "builtin:buttons", "builtin:monitor"
+        "builtin:bluetooth", "builtin:buttons", "builtin:monitor", "builtin:crafting"
     };
     private static final SystemIcons.Icon[] START_LEFT_ICONS = {
         SystemIcons.Icon.TERMINAL, SystemIcons.Icon.LUA_MOON, SystemIcons.Icon.PUZZLE,
         SystemIcons.Icon.FILE_CODE, SystemIcons.Icon.NOTEPAD, SystemIcons.Icon.EXPLORER, SystemIcons.Icon.PAINT,
         SystemIcons.Icon.CALCULATOR, SystemIcons.Icon.TASK_MANAGER, SystemIcons.Icon.BLUETOOTH,
-        SystemIcons.Icon.BLUETOOTH, SystemIcons.Icon.COMPUTER
+        SystemIcons.Icon.BLUETOOTH, SystemIcons.Icon.COMPUTER, SystemIcons.Icon.DOCUMENTS
     };
     private static final String[] START_RIGHT = {
         "Documents", "Pictures", "Downloads", "This PC"
@@ -1053,7 +1053,8 @@ public class DesktopProgram extends OSProgram {
             case "builtin:taskmanager" -> openWindow("Task Manager", new TaskManagerProgram(), 3, 1, 45, 16);
             case "builtin:bluetooth" -> openWindow("Bluetooth", new BluetoothProgram(), 4, 1, 45, 16);
             case "builtin:buttons" -> openWindow("Buttons", new ButtonProgram(), 2, 1, 45, 16);
-            case "builtin:monitor" -> openWindow("Monitor", new MonitorProgram(), 3, 1, 45, 16);
+            case "builtin:monitor"  -> openWindow("Monitor",    new MonitorProgram(),            3, 1, 45, 16);
+            case "builtin:crafting" -> openWindow("Materials",  new CraftingCalculatorProgram(), 1, 1, 49, 17);
             default -> {}
         }
     }
@@ -1403,6 +1404,7 @@ public class DesktopProgram extends OSProgram {
             case "builtin:puzzle" -> SystemIcons.Icon.PUZZLE;
             case "builtin:calculator" -> SystemIcons.Icon.CALCULATOR;
             case "builtin:taskmanager" -> SystemIcons.Icon.TASK_MANAGER;
+            case "builtin:crafting"    -> SystemIcons.Icon.DOCUMENTS;
             default -> {
                 if (s.target.endsWith(".lua")) yield SystemIcons.Icon.LUA_MOON;
                 if (s.target.endsWith(".pxl")) yield SystemIcons.Icon.PAINT;
@@ -1862,7 +1864,7 @@ public class DesktopProgram extends OSProgram {
     private static final java.util.Set<String> VALID_TARGETS = java.util.Set.of(
         "builtin:shell", "builtin:edit", "builtin:explorer", "builtin:settings",
         "builtin:paint", "builtin:lua", "builtin:puzzle", "builtin:ide",
-        "builtin:notepad", "builtin:calculator", "builtin:taskmanager", "builtin:bluetooth"
+        "builtin:notepad", "builtin:calculator", "builtin:taskmanager", "builtin:bluetooth", "builtin:crafting"
     );
 
     private void loadShortcuts() {
