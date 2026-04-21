@@ -1054,7 +1054,7 @@ public class DesktopProgram extends OSProgram {
             case "builtin:bluetooth" -> openWindow("Bluetooth", new BluetoothProgram(), 4, 1, 45, 16);
             case "builtin:buttons" -> openWindow("Buttons", new ButtonProgram(), 2, 1, 45, 16);
             case "builtin:monitor"  -> openWindow("Monitor",    new MonitorProgram(),            3, 1, 45, 16);
-            case "builtin:crafting" -> openWindow("Materials",  new CraftingCalculatorProgram(), 1, 1, 49, 17);
+            case "builtin:crafting" -> openWindow("Materials",  new CraftingCalculatorProgram(), 0, 0, 80, 23);
             default -> {}
         }
     }

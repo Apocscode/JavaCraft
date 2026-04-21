@@ -57,8 +57,9 @@ import java.util.stream.Collectors;
 public class CraftingCalculatorProgram extends OSProgram {
 
     // ── Layout ───────────────────────────────────────────────────────────────
-    private static final int PW     = PixelBuffer.SCREEN_W;   // 640
-    private static final int PH     = PixelBuffer.SCREEN_H;   // 400
+    // Window opens at (0,0,80,23): bodyW=640, bodyH=23*16=368
+    private static final int PW     = PixelBuffer.SCREEN_W;            // 640
+    private static final int PH     = 23 * PixelBuffer.CELL_H;         // 368
     private static final int HDR_H  = 18;
     private static final int SRH_H  = 22;
     private static final int BTM_H  = 28;
