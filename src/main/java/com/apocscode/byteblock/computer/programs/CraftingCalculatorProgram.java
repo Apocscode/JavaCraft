@@ -162,17 +162,25 @@ public class CraftingCalculatorProgram extends OSProgram {
     public boolean tick() {
         if (statusTicks > 0) statusTicks--;
 
-        // Storage scan (runs server-side where block entities are accessible)
+        // Storage scan — OS runs client-side, so resolve the server level for BT/BE access
         if (scanRequested) {
             scanRequested = false;
             Level level = os.getLevel();
             net.minecraft.core.BlockPos pos = os.getBlockPos();
+            // In integrated single-player the OS level is the client level;
+            // grab the matching server level so we can read block entities.
+            if (level != null && level.isClientSide()) {
+                net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+                if (mc.getSingleplayerServer() != null) {
+                    level = mc.getSingleplayerServer().getLevel(level.dimension());
+                }
+            }
             if (level != null && pos != null && !level.isClientSide()) {
                 storageInventory = StorageScanner.scan(level, pos);
                 int total = storageInventory.values().stream().mapToInt(v -> v > Integer.MAX_VALUE ? Integer.MAX_VALUE : v.intValue()).sum();
                 setStatus("Scanned " + storageInventory.size() + " item type(s), " + total + " total", C_GRN);
             } else {
-                setStatus("Scan unavailable (server context required)", C_YEL);
+                setStatus("Scan unavailable (multiplayer not yet supported)", C_YEL);
             }
         }
 
