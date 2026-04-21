@@ -1,7 +1,33 @@
 {
-  "parent": "minecraft:block/cube_column",
+  "parent": "minecraft:block/block",
   "textures": {
-    "end":  "minecraft:block/iron_block",
-    "side": "minecraft:block/iron_block"
-  }
+    "top":    "byteblock:block/byte_chest_top",
+    "side":   "byteblock:block/byte_chest_side",
+    "front":  "byteblock:block/byte_chest_front",
+    "led":    "minecraft:block/red_concrete",
+    "particle": "byteblock:block/byte_chest_side"
+  },
+  "elements": [
+    {
+      "from": [0, 0, 0],
+      "to": [16, 16, 16],
+      "faces": {
+        "north": {"uv": [0, 0, 16, 16], "texture": "#front", "cullface": "north"},
+        "east":  {"uv": [0, 0, 16, 16], "texture": "#side",  "cullface": "east"},
+        "south": {"uv": [0, 0, 16, 16], "texture": "#side",  "cullface": "south"},
+        "west":  {"uv": [0, 0, 16, 16], "texture": "#side",  "cullface": "west"},
+        "up":    {"uv": [0, 0, 16, 16], "texture": "#top",   "cullface": "up"},
+        "down":  {"uv": [0, 0, 16, 16], "texture": "#top",   "cullface": "down"}
+      }
+    },
+    {
+      "name": "bt_led",
+      "from": [12.5, 1, -0.1],
+      "to": [14.5, 3, 0.2],
+      "shade": false,
+      "faces": {
+        "north": {"uv": [0, 0, 2, 2], "texture": "#led"}
+      }
+    }
+  ]
 }

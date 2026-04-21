@@ -1,5 +1,6 @@
 package com.apocscode.byteblock.block.entity;
 
+import com.apocscode.byteblock.block.ByteChestBlock;
 import com.apocscode.byteblock.init.ModBlockEntities;
 import com.apocscode.byteblock.network.BluetoothNetwork;
 
@@ -42,6 +43,14 @@ public class ByteChestBlockEntity extends RandomizableContainerBlockEntity {
         if (level == null || level.isClientSide()) return;
         BluetoothNetwork.register(level, deviceId, worldPosition, 1,
                 BluetoothNetwork.DeviceType.BYTE_CHEST);
+        // Update BT indicator LED every second
+        if (level.getGameTime() % 20 == 0) {
+            boolean connected = BluetoothNetwork.isComputerInRange(level, worldPosition);
+            BlockState current = level.getBlockState(worldPosition);
+            if (current.getValue(ByteChestBlock.CONNECTED) != connected) {
+                level.setBlockAndUpdate(worldPosition, current.setValue(ByteChestBlock.CONNECTED, connected));
+            }
+        }
     }
 
     // ── UUID accessor ─────────────────────────────────────────────────────────
