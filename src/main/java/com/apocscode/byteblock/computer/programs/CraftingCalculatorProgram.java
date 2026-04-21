@@ -144,7 +144,11 @@ public class CraftingCalculatorProgram extends OSProgram {
                 mouseX = event.getInt(1);
                 mouseY = event.getInt(2);
             }
-            case MOUSE_SCROLL  -> handleScroll(event.getInt(1));
+            case MOUSE_SCROLL -> {
+                mouseX = event.getInt(1) * PixelBuffer.CELL_W;
+                mouseY = event.getInt(2) * PixelBuffer.CELL_H;
+                handleScroll(event.getInt(0));
+            }
             default            -> {}
         }
     }
@@ -225,9 +229,9 @@ public class CraftingCalculatorProgram extends OSProgram {
 
     private void handleScroll(int delta) {
         if (mouseX >= MAT_X) {
-            matScroll  = clamp(matScroll  - delta, 0, Math.max(0, materials.size() - visibleMatRows()));
+            matScroll  = clamp(matScroll  + delta, 0, Math.max(0, materials.size() - visibleMatRows()));
         } else {
-            listScroll = clamp(listScroll - delta, 0, Math.max(0, results.size()   - visibleListRows()));
+            listScroll = clamp(listScroll + delta, 0, Math.max(0, results.size()   - visibleListRows()));
         }
     }
 
