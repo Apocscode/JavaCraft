@@ -724,7 +724,7 @@ public class CraftingCalculatorProgram extends OSProgram {
         int outBg = (dropdownOpen || outH) ? C_BTNH : C_BTN;
         pb.fillRect(BTN_OUT_X, btnY, BTN_OUT_W, btnH, outBg);
         pb.drawStringCentered(BTN_OUT_X, BTN_OUT_W, mid,
-                "Output " + (dropdownOpen ? "\u25b2" : "\u25bc"), C_TEXT);
+                dropdownOpen ? "Output [^]" : "Output [v]", C_TEXT);
 
         // Status / hint
         int hintX = BTN_OUT_X + BTN_OUT_W + 10;
@@ -732,11 +732,11 @@ public class CraftingCalculatorProgram extends OSProgram {
             pb.drawString(hintX, mid, statusMsg, statusColor);
         } else if (selectedId != null && !materials.isEmpty()) {
             pb.drawString(hintX, mid,
-                    materials.size() + " material(s)  \u2502  Use Output \u25bc to export",
+                    materials.size() + " material(s)  |  Use Output [v] to export",
                     C_MUTED);
         } else {
             pb.drawString(hintX, mid,
-                    "Click search bar to type  \u2502  Click item  \u2502  Esc to close",
+                    "Click search bar to type  |  Click item  |  Esc to close",
                     C_MUTED);
         }
     }
