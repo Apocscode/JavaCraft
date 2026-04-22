@@ -69,6 +69,9 @@ public class ButtonProgram extends OSProgram {
     // Index into panels[] that is currently being controlled
     private int selectedPanelIdx = 0;
 
+    // Per-button flash countdown (ticks) for click feedback
+    private final int[] buttonFlash = new int[16];
+
     // ── Rename overlay state ──────────────────────────────────────────────────
     private boolean renaming     = false;
     private String  renameBuffer = "";
@@ -89,7 +92,7 @@ public class ButtonProgram extends OSProgram {
     private static final int GRID_LEFT    = 12;
     private static final int GRID_TOP     = 48;   // shifted down by PANEL_BAR_H + 6px gap
     private static final int ACTION_Y_OFFSET = 160;
-    private static final int ACTION_BTN_W = 56;
+    private static final int ACTION_BTN_W = 64;  // wide enough for "All OFF" (7×8px) + 4px padding
     private static final int ACTION_BTN_H = 14;
 
     // Popup (centred on visible window area: 640×368 for h=24 window)
@@ -160,6 +163,10 @@ public class ButtonProgram extends OSProgram {
 
     @Override
     public boolean tick() {
+        // Decrement button flash timers every tick (20 Hz)
+        for (int i = 0; i < 16; i++) {
+            if (buttonFlash[i] > 0) buttonFlash[i]--;
+        }
         if (++refreshCounter >= REFRESH_INTERVAL) {
             refreshCounter = 0;
             refreshState();
@@ -208,10 +215,18 @@ public class ButtonProgram extends OSProgram {
         Level lvl   = os.getLevel();
         BlockPos me = os.getBlockPos();
 
-        // Refresh panel list every cycle
-        if (lvl != null && me != null) {
-            List<BlockPos> found = BluetoothNetwork.findAllDevices(
-                    lvl, me, BluetoothNetwork.DeviceType.BUTTON_PANEL);
+        // Refresh panel list every cycle — scan all registered devices,
+        // filter by BUTTON_PANEL (has unlimited range so no dimension/range check needed)
+        {
+            List<BlockPos> found = new ArrayList<>();
+            for (BluetoothNetwork.DeviceEntry d : BluetoothNetwork.getAllDevices()) {
+                if (d.type() == BluetoothNetwork.DeviceType.BUTTON_PANEL) {
+                    found.add(d.pos());
+                }
+            }
+            if (me != null) {
+                found.sort(Comparator.comparingDouble(p -> p.distSqr(me)));
+            }
             if (!found.equals(panels)) {
                 panels.clear();
                 panels.addAll(found);
@@ -341,6 +356,7 @@ public class ButtonProgram extends OSProgram {
                         // Optimistic local update for instant visual response
                         if (cur) buttonStates &= ~(1 << idx);
                         else     buttonStates |=  (1 << idx);
+                        buttonFlash[idx] = 5; // flash for 5 ticks ≈ 250ms
                         // Fire relay output immediately for TOGGLE/INVERTED modes
                         if (buttonRelayAssign[idx] >= 0 && relayFound) {
                             boolean nowOn = (buttonStates & (1 << idx)) != 0;
@@ -364,8 +380,7 @@ public class ButtonProgram extends OSProgram {
         // "All OFF" button
         int offX = GRID_LEFT + ACTION_BTN_W + 8;
         if (px >= offX && px < offX + ACTION_BTN_W
-                && py >= actionY && py < actionY + ACTION_BTN_H) {
-            ButtonPanelBlockEntity p = getActivePanelBE();
+                && py >= actionY && py < actionY + ACTION_BTN_H) {            ButtonPanelBlockEntity p = getActivePanelBE();
             if (p != null) { p.setAllButtons(0); buttonStates = 0; }
             return;
         }
@@ -553,11 +568,14 @@ public class ButtonProgram extends OSProgram {
 
                 boolean lit       = (buttonStates & (1 << idx)) != 0;
                 int     baseColor = BUTTON_COLORS[idx];
+                boolean flashing  = buttonFlash[idx] > 0;
 
-                // Fill colour: full when lit, 30 % dim when off, grey when offline
+                // Fill colour: flash white on click, full when lit, 30% dim when off
                 int fillColor;
                 if (!panelFound) {
                     fillColor = 0xFF282838;
+                } else if (flashing) {
+                    fillColor = 0xFFEEEEEE; // bright white flash on click
                 } else if (lit) {
                     fillColor = baseColor;
                 } else {
@@ -568,25 +586,25 @@ public class ButtonProgram extends OSProgram {
                 }
                 pb.fillRect(bx, by, BTN_SIZE, BTN_SIZE, fillColor);
 
-                // Border: bright white glow when lit; subtle dark frame when off
-                if (lit && panelFound) {
+                // Border: bright white glow when lit or flashing; subtle dark frame when off
+                if ((lit || flashing) && panelFound) {
                     pb.drawRect(bx, by, BTN_SIZE, BTN_SIZE, 0xFFFFFFFF);
-                    // Inner top highlight
-                    pb.fillRect(bx + 1, by + 1, BTN_SIZE - 2, 2, 0xFF666655);
+                    if (!flashing) pb.fillRect(bx + 1, by + 1, BTN_SIZE - 2, 2, 0xFF666655);
                 } else if (panelFound) {
                     pb.drawRect(bx, by, BTN_SIZE, BTN_SIZE, 0xFF111122);
                 } else {
                     pb.drawRect(bx, by, BTN_SIZE, BTN_SIZE, 0xFF222233);
                 }
 
-                // Label — black on bright lit buttons, dim on off buttons
+                // Label — black on bright lit/flash buttons, dim on off buttons
                 int luminance = (((baseColor >> 16) & 0xFF) * 299
                                + ((baseColor >>  8) & 0xFF) * 587
                                + ( baseColor        & 0xFF) * 114) / 1000;
                 int textColor;
-                if (!panelFound)  textColor = 0xFF444455;
-                else if (lit)     textColor = luminance < 80 ? 0xFFDDDDDD : 0xFF000000;
-                else              textColor = TEXT_DIM;
+                if (!panelFound)     textColor = 0xFF444455;
+                else if (flashing)   textColor = 0xFF111111; // dark on white flash
+                else if (lit)        textColor = luminance < 80 ? 0xFFDDDDDD : 0xFF000000;
+                else                 textColor = TEXT_DIM;
                 pb.drawString(bx + 3, by + 3, COLOR_SHORT[idx], textColor);
 
                 // Mode badge (top-right corner) — skip for default TOGGLE
@@ -605,8 +623,8 @@ public class ButtonProgram extends OSProgram {
                     pb.fillRect(bx + 1, by + BTN_SIZE - 5, 5, 4, 0xFF00CCDD);
                 }
 
-                // Bottom pulse strip when lit — bright accent bar
-                if (lit && panelFound) {
+                // Bottom pulse strip when lit (not during flash — flash is its own cue)
+                if (lit && panelFound && !flashing) {
                     pb.fillRect(bx + 1, by + BTN_SIZE - 4, BTN_SIZE - 2, 3, 0xFFFFFFFF);
                 }
             }
