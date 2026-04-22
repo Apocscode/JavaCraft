@@ -379,13 +379,33 @@ public class DesktopProgram extends OSProgram {
             return;
         }
 
-        // Right-click â†’ context menu
+        // Right-click: forward to window content first, then desktop context menu
         if (button == 1) {
             if (startMenuOpen) {
                 handleStartMenuRightClick(px, py);
-            } else {
-                handleRightClick(px, py);
+                return;
             }
+            // Forward right-click to any window content area first
+            for (int i = windows.size() - 1; i >= 0; i--) {
+                Window w = windows.get(i);
+                if (w.minimized) continue;
+                if (mx >= w.x && mx < w.x + w.width && my > w.y && my < w.y + w.height) {
+                    windows.remove(i);
+                    windows.add(w);
+                    activeWindow = w;
+                    if (w.program != null) {
+                        int localX = mx - w.x;
+                        int localY = my - w.y - 1;
+                        w.program.handleEvent(new OSEvent(OSEvent.Type.MOUSE_CLICK, button, localX, localY));
+                        int localPx = px - w.x * PixelBuffer.CELL_W;
+                        int localPy = py - (w.y + 1) * PixelBuffer.CELL_H;
+                        w.program.handleEvent(new OSEvent(OSEvent.Type.MOUSE_CLICK_PX, button, localPx, localPy));
+                    }
+                    return;
+                }
+            }
+            // No window content hit: show desktop context menu
+            handleRightClick(px, py);
             return;
         }
 
@@ -776,9 +796,10 @@ public class DesktopProgram extends OSProgram {
             if (keyCode == 256) { // Escape → deselect icon, or close terminal if nothing selected
                 if (selectedIcon != null) {
                     selectedIcon = null;
-                } else {
-                    os.shutdown(); // Nothing to dismiss → close terminal
+                } else if (windows.isEmpty()) {
+                    os.shutdown(); // No windows and nothing to dismiss → close terminal
                 }
+                // If minimized windows exist, do NOT shutdown — just let Minecraft close the screen
                 return;
             }
             return; // Don't forward to (non-existent) window
@@ -1059,7 +1080,7 @@ public class DesktopProgram extends OSProgram {
             case "builtin:calculator" -> openWindow("Calculator", new CalculatorProgram(), 10, 2, 25, 16);
             case "builtin:taskmanager" -> openWindow("Task Manager", new TaskManagerProgram(), 3, 1, 45, 16);
             case "builtin:bluetooth" -> openWindow("Bluetooth", new BluetoothProgram(), 4, 1, 45, 16);
-            case "builtin:buttons" -> openWindow("Buttons", new ButtonProgram(), 2, 1, 45, 16);
+            case "builtin:buttons" -> openWindow("Buttons", new ButtonProgram(), 0, 0, 80, 24);
             case "builtin:monitor"       -> openWindow("Monitor",       new MonitorProgram(),            3, 1, 45, 16);
             case "builtin:crafting"      -> openWindow("Materials",     new CraftingCalculatorProgram(), 0, 0, 80, 23);
             case "builtin:me_dashboard"  -> openWindow("ME Network",    new MEDashboardProgram(),        0, 0, 80, 23);
@@ -1079,7 +1100,8 @@ public class DesktopProgram extends OSProgram {
             case "builtin:shell", "builtin:edit", "builtin:explorer", "builtin:settings",
                  "builtin:paint", "builtin:lua", "builtin:puzzle", "builtin:ide",
                  "builtin:notepad", "builtin:calculator", "builtin:taskmanager",
-                 "builtin:bluetooth", "builtin:me_dashboard", "builtin:create_dashboard" -> launchByTarget(
+                 "builtin:bluetooth", "builtin:buttons", "builtin:monitor",
+                 "builtin:me_dashboard", "builtin:create_dashboard" -> launchByTarget(
                      s.target.equals("builtin:ide") ? "builtin:edit" : s.target);
             default -> {
                 if (os.getFileSystem().isDirectory(s.target)) {

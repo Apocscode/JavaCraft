@@ -50,14 +50,21 @@ public class ButtonProgram extends OSProgram {
     private final ButtonMode[] buttonModes     = new ButtonMode[16];
     private final int[]        buttonDurations = new int[16];
 
+    // Per-button relay-side assignment: -1 = none, 0-5 = Down/Up/North/South/West/East
+    private final int[] buttonRelayAssign = new int[16];
+
+    // Previous button state mask for detecting changes (drives relay output)
+    private int prevButtonStates = 0;
+
     // Selected relay side for output editing (-1 = none)
     private int selectedSide = -1;
 
     // ── Config popup state ────────────────────────────────────────────────────
 
-    private int        configButton   = -1;              // -1 = closed
-    private ButtonMode configMode     = ButtonMode.TOGGLE;
-    private int        configDuration = 20;
+    private int        configButton      = -1;              // -1 = closed
+    private ButtonMode configMode        = ButtonMode.TOGGLE;
+    private int        configDuration    = 20;
+    private int        configRelayAssign = -1;              // relay side for this button
 
     // ── Layout ────────────────────────────────────────────────────────────────
 
@@ -70,11 +77,11 @@ public class ButtonProgram extends OSProgram {
     private static final int ACTION_BTN_W = 56;
     private static final int ACTION_BTN_H = 14;
 
-    // Popup (centred on 640×400 screen)
-    private static final int POPUP_W = 220;
-    private static final int POPUP_H = 140;
-    private static final int POPUP_X = (640 - POPUP_W) / 2;  // 210
-    private static final int POPUP_Y = (400 - POPUP_H) / 2;  // 130
+    // Popup (centred on visible window area: 640×368 for h=24 window)
+    private static final int POPUP_W = 280;
+    private static final int POPUP_H = 175;
+    private static final int POPUP_X = (640 - POPUP_W) / 2;  // 180
+    private static final int POPUP_Y = (368 - POPUP_H) / 2;  // 96
 
     // ── Colors ────────────────────────────────────────────────────────────────
 
@@ -112,19 +119,20 @@ public class ButtonProgram extends OSProgram {
     // Mode badge letters shown in button corner (empty = default TOGGLE, no badge needed)
     private static final String[] MODE_BADGES = { "", "M", "T", "D", "I" };
 
-    // One-line description per mode shown in the popup
+    // One-line description per mode shown in the popup (max 32 chars to fit POPUP_W)
     private static final String[] MODE_DESC = {
         "Click to toggle on/off",
-        "Pulses on for ~4 ticks, then auto-off",
-        "Stays on for N ticks, then auto-off",
-        "Toggles after N tick delay",
-        "Toggle with inverted redstone output"
+        "Press: pulses on for ~4 ticks",
+        "Press: on for N ticks, then off",
+        "Press: toggle after N tick delay",
+        "Toggle, inverted redstone output"
     };
 
     public ButtonProgram() {
         super("Buttons");
         Arrays.fill(buttonModes,     ButtonMode.TOGGLE);
         Arrays.fill(buttonDurations, 20);
+        Arrays.fill(buttonRelayAssign, -1);
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -140,6 +148,18 @@ public class ButtonProgram extends OSProgram {
         if (++refreshCounter >= REFRESH_INTERVAL) {
             refreshCounter = 0;
             refreshState();
+            // Fire relay outputs for buttons that changed state (supports MOMENTARY/TIMER auto-off)
+            int changed = buttonStates ^ prevButtonStates;
+            if (changed != 0 && relayFound) {
+                for (int i = 0; i < 16; i++) {
+                    if ((changed & (1 << i)) != 0 && buttonRelayAssign[i] >= 0) {
+                        boolean nowOn = (buttonStates & (1 << i)) != 0;
+                        RedstoneLib.setOutput(os, buttonRelayAssign[i], nowOn ? 15 : 0);
+                        relayOutputs[buttonRelayAssign[i]] = nowOn ? 15 : 0;
+                    }
+                }
+            }
+            prevButtonStates = buttonStates;
         }
         return running;
     }
@@ -224,6 +244,12 @@ public class ButtonProgram extends OSProgram {
                         // Optimistic local update for instant visual response
                         if (cur) buttonStates &= ~(1 << idx);
                         else     buttonStates |=  (1 << idx);
+                        // Fire relay output immediately for TOGGLE/INVERTED modes
+                        if (buttonRelayAssign[idx] >= 0 && relayFound) {
+                            boolean nowOn = (buttonStates & (1 << idx)) != 0;
+                            RedstoneLib.setOutput(os, buttonRelayAssign[idx], nowOn ? 15 : 0);
+                            relayOutputs[buttonRelayAssign[idx]] = nowOn ? 15 : 0;
+                        }
                     }
                     return;
                 }
@@ -285,9 +311,10 @@ public class ButtonProgram extends OSProgram {
                 int by = GRID_TOP  + row * (BTN_SIZE + BTN_GAP);
                 if (px >= bx && px < bx + BTN_SIZE && py >= by && py < by + BTN_SIZE) {
                     int idx = row * 4 + col;
-                    configButton   = idx;
-                    configMode     = buttonModes[idx];
-                    configDuration = buttonDurations[idx];
+                    configButton      = idx;
+                    configMode        = buttonModes[idx];
+                    configDuration    = buttonDurations[idx];
+                    configRelayAssign = buttonRelayAssign[idx];
                     return;
                 }
             }
@@ -338,6 +365,17 @@ public class ButtonProgram extends OSProgram {
             }
         }
 
+        // Relay assign ◄ arrow (cycles: None → Down → Up → North → South → West → East → None)
+        if (px >= x + 8 && px < x + 26 && py >= y + 108 && py < y + 122) {
+            configRelayAssign = (configRelayAssign <= -1) ? 5 : configRelayAssign - 1;
+            return;
+        }
+        // Relay assign ► arrow
+        if (px >= x + POPUP_W - 26 && px < x + POPUP_W - 8 && py >= y + 108 && py < y + 122) {
+            configRelayAssign = (configRelayAssign >= 5) ? -1 : configRelayAssign + 1;
+            return;
+        }
+
         // APPLY button
         int btnY = y + POPUP_H - 28;
         if (px >= x + 10 && px < x + 100 && py >= btnY && py < btnY + 18) {
@@ -364,6 +402,8 @@ public class ButtonProgram extends OSProgram {
             buttonModes[configButton]     = configMode;
             buttonDurations[configButton] = configDuration;
         }
+        // Apply relay assignment (program-side, no BE storage needed)
+        buttonRelayAssign[configButton] = configRelayAssign;
     }
 
     // ── Render ────────────────────────────────────────────────────────────────
@@ -448,6 +488,11 @@ public class ButtonProgram extends OSProgram {
                     }
                 }
 
+                // Relay assign dot (bottom-left corner) — small cyan dot if assigned
+                if (buttonRelayAssign[idx] >= 0) {
+                    pb.fillRect(bx + 1, by + BTN_SIZE - 5, 5, 4, 0xFF00CCDD);
+                }
+
                 // Bottom pulse strip when lit — bright accent bar
                 if (lit && panelFound) {
                     pb.fillRect(bx + 1, by + BTN_SIZE - 4, BTN_SIZE - 2, 3, 0xFFFFFFFF);
@@ -519,13 +564,15 @@ public class ButtonProgram extends OSProgram {
             }
         }
 
-        // ── Status bar ────────────────────────────────────────────────────
-        pb.fillRect(0, h - 14, w, 14, HEADER_BG);
-        String hint = "L-click: toggle  |  R-click: configure mode";
+        // ── Status bar (at fixed y to stay within the visible window area) ──
+        int statusY = 215;
+        pb.fillRect(0, statusY, w, 14, HEADER_BG);
+        String hint = "L-click: toggle  |  R-click: configure mode + relay assign";
         if (selectedSide >= 0 && relayFound) {
-            hint += "  |  " + SIDE_NAMES[selectedSide] + " out=" + relayOutputs[selectedSide];
+            hint = SIDE_NAMES[selectedSide] + " output=" + relayOutputs[selectedSide]
+                   + "  |  R-click button to assign relay side";
         }
-        pb.drawString(4, h - 12, hint, TEXT_DIM);
+        pb.drawString(4, statusY + 2, hint, TEXT_DIM);
 
         // ── Config popup drawn last, always on top ────────────────────────
         if (configButton >= 0) {
@@ -610,6 +657,27 @@ public class ButtonProgram extends OSProgram {
         if (!durActive) {
             pb.drawString(x + 8, y + 92, "Not used by this mode", TEXT_DIM);
         }
+
+        // ── Relay Assign row ──────────────────────────────────────────────
+        pb.drawString(x + 8, y + 104, "Relay Side:", TEXT_NORM);
+
+        // ◄ arrow
+        pb.fillRect(x + 8, y + 108, 18, 14, 0xFF2A3A5A);
+        pb.drawRect (x + 8, y + 108, 18, 14, POPUP_BRD);
+        pb.drawString(x + 12, y + 111, "<", TEXT_NORM);
+
+        // Relay assign value (centred)
+        String relayName = configRelayAssign < 0 ? "None" : SIDE_NAMES[configRelayAssign];
+        int relayNameX = x + (POPUP_W - relayName.length() * 8) / 2;
+        pb.fillRect(x + 30, y + 108, POPUP_W - 60, 14, 0xFF1A1A30);
+        pb.drawString(relayNameX, y + 111, relayName, configRelayAssign < 0 ? TEXT_DIM : ACCENT);
+
+        // ► arrow
+        pb.fillRect(x + POPUP_W - 26, y + 108, 18, 14, 0xFF2A3A5A);
+        pb.drawRect (x + POPUP_W - 26, y + 108, 18, 14, POPUP_BRD);
+        pb.drawString(x + POPUP_W - 22, y + 111, ">", TEXT_NORM);
+
+        pb.drawString(x + 8, y + 126, "Press button \u2192 fires relay side", TEXT_DIM);
 
         // ── APPLY / CANCEL buttons ─────────────────────────────────────────
         int btnY = y + POPUP_H - 28;
