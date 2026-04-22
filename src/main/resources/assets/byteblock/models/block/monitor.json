@@ -7,9 +7,9 @@
   },
   "elements": [
     {
-      "comment": "Thin panel — screen on north face, back flush with south",
-      "from": [0, 0, 0],
-      "to": [16, 16, 4],
+      "comment": "Thin panel — mass hugs far side of cell (against mounting block). Screen on player-facing (north) face.",
+      "from": [0, 0, 12],
+      "to": [16, 16, 16],
       "faces": {
         "north": {"uv": [0, 0, 16, 16], "texture": "#screen"},
         "south": {"uv": [0, 0, 16, 16], "texture": "#frame"},

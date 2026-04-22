@@ -2,7 +2,7 @@
   "variants": {
     "facing=north": {"model": "byteblock:block/monitor"},
     "facing=south": {"model": "byteblock:block/monitor", "y": 180},
-    "facing=west":  {"model": "byteblock:block/monitor", "y": 270},
-    "facing=east":  {"model": "byteblock:block/monitor", "y": 90}
+    "facing=east":  {"model": "byteblock:block/monitor", "y": 90},
+    "facing=west":  {"model": "byteblock:block/monitor", "y": 270}
   }
 }

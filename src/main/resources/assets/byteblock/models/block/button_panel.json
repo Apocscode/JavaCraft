@@ -7,9 +7,9 @@
   },
   "elements": [
     {
-      "comment": "Thin panel — buttons rendered by BER on north face",
-      "from": [0, 0, 0],
-      "to": [16, 16, 3],
+      "comment": "Thin panel — mass hugs far side of cell (against mounting block). Buttons rendered by BER.",
+      "from": [0, 0, 13],
+      "to": [16, 16, 16],
       "faces": {
         "north": {"uv": [0, 0, 16, 16], "texture": "#frame"},
         "south": {"uv": [0, 0, 16, 16], "texture": "#back"},

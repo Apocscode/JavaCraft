@@ -320,6 +320,8 @@ public class ButtonPanelBlockEntity extends BlockEntity {
         if (level != null && !level.isClientSide()) {
             setChanged();
             level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), Block.UPDATE_ALL);
+            // Trigger light recalc — block emits light proportional to active button count
+            level.getChunkSource().getLightEngine().checkBlock(worldPosition);
         }
     }
 

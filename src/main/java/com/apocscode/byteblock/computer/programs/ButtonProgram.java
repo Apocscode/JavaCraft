@@ -556,9 +556,6 @@ public class ButtonProgram extends OSProgram {
         renderPanelBar(pb, w);
         // ── Left: 4×4 button grid ──────────────────────────────────────────
         pb.drawString(GRID_LEFT, GRID_TOP - 12, "BUTTON PANEL", panelFound ? ACCENT : TEXT_DIM);
-        if (panelFound) {
-            pb.drawString(GRID_LEFT + 94, GRID_TOP - 12, "R-click: configure", TEXT_DIM);
-        }
 
         for (int row = 0; row < 4; row++) {
             for (int col = 0; col < 4; col++) {
@@ -669,7 +666,7 @@ public class ButtonProgram extends OSProgram {
         }
 
         // ── Right: Connected Blocks panel ─────────────────────────────────
-        int nbX = 340;
+        int nbX = 360;
         pb.drawString(nbX, GRID_TOP - 12, "CONNECTED BLOCKS", relayFound ? ACCENT : TEXT_DIM);
 
         int nbY = GRID_TOP + 16;

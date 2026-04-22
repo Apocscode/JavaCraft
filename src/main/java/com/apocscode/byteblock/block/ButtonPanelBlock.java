@@ -15,12 +15,12 @@ import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.EntityBlock;
-import net.minecraft.world.level.block.HorizontalDirectionalBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityTicker;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.DirectionProperty;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
@@ -35,13 +35,18 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * Sneak+click opens the configuration GUI. Outputs redstone and bundled cable signals.
  */
 public class ButtonPanelBlock extends Block implements EntityBlock {
-    public static final DirectionProperty FACING = HorizontalDirectionalBlock.FACING;
+    /** Full 6-direction facing: panel can mount on walls, floors, and ceilings. */
+    public static final DirectionProperty FACING = BlockStateProperties.FACING;
 
-    // Thin panel shapes (3 pixels deep, like a wall switch)
-    private static final VoxelShape SHAPE_NORTH = Block.box(0, 0, 0, 16, 16, 3);
-    private static final VoxelShape SHAPE_SOUTH = Block.box(0, 0, 13, 16, 16, 16);
-    private static final VoxelShape SHAPE_EAST  = Block.box(13, 0, 0, 16, 16, 16);
-    private static final VoxelShape SHAPE_WEST  = Block.box(0, 0, 0, 3, 16, 16);
+    // Thin panel shapes (3 pixels deep) inset 1px on each face-plane edge so the slab is visibly
+    // smaller than the supporting block (looks like a recessed/floating panel, not flush wallpaper).
+    // Face footprint = 14×14 px centered. Mass hugs the supporting block's face on the depth axis.
+    private static final VoxelShape SHAPE_NORTH = Block.box(1, 1, 13, 15, 15, 16); // back against wall SOUTH
+    private static final VoxelShape SHAPE_SOUTH = Block.box(1, 1, 0, 15, 15, 3);   // back against wall NORTH
+    private static final VoxelShape SHAPE_EAST  = Block.box(0, 1, 1, 3, 15, 15);   // back against wall WEST
+    private static final VoxelShape SHAPE_WEST  = Block.box(13, 1, 1, 16, 15, 15); // back against wall EAST
+    private static final VoxelShape SHAPE_UP    = Block.box(1, 0, 1, 15, 3, 15);   // back against floor BELOW
+    private static final VoxelShape SHAPE_DOWN  = Block.box(1, 13, 1, 15, 16, 15); // back against ceiling ABOVE
 
     public ButtonPanelBlock(Properties properties) {
         super(properties);
@@ -55,7 +60,11 @@ public class ButtonPanelBlock extends Block implements EntityBlock {
 
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext context) {
-        return this.defaultBlockState().setValue(FACING, context.getHorizontalDirection().getOpposite());
+        // Place against the clicked block's face: the panel's front points AWAY from that block
+        // (i.e., toward the player). clickedFace is the face the player looked at, so the panel's
+        // back hugs that face and its front is clickedFace itself.
+        Direction clicked = context.getClickedFace();
+        return this.defaultBlockState().setValue(FACING, clicked);
     }
 
     @Override
@@ -64,8 +73,28 @@ public class ButtonPanelBlock extends Block implements EntityBlock {
             case SOUTH -> SHAPE_SOUTH;
             case EAST  -> SHAPE_EAST;
             case WEST  -> SHAPE_WEST;
+            case UP    -> SHAPE_UP;
+            case DOWN  -> SHAPE_DOWN;
             default    -> SHAPE_NORTH;
         };
+    }
+
+    /**
+     * Emit world light proportional to the number of active buttons.
+     * 0 active = 0 light, 1+ active scales up to a max of 14 (16 buttons → ~14 light).
+     * Querying the block entity here is fine because vanilla calls this from the light engine
+     * with a real BlockGetter (Level/ServerLevel/etc.) that supports BE lookup.
+     */
+    @Override
+    public int getLightEmission(BlockState state, BlockGetter level, BlockPos pos) {
+        BlockEntity be = level.getBlockEntity(pos);
+        if (be instanceof ButtonPanelBlockEntity panel) {
+            int count = Integer.bitCount(panel.getButtonStates() & 0xFFFF);
+            if (count == 0) return 0;
+            // Map 1..16 active → 7..15 light level so even one button emits noticeable light
+            return Math.min(15, 6 + count);
+        }
+        return 0;
     }
 
     @Override
@@ -117,30 +146,38 @@ public class ButtonPanelBlock extends Block implements EntityBlock {
             Direction facing = state.getValue(FACING);
             Vec3 hit = hitResult.getLocation();
 
-            // Calculate local coordinates on the front face (0.0-1.0)
-            double localX, localY;
+            // Local-to-face coordinates (u = column axis, v = row axis), both in 0..1.
+            // Must agree with the renderer's per-facing rotation so that col=0,row=0 in the
+            // hit test corresponds to the SAME visible button as col=0,row=0 in the renderer.
+            // In the renderer, row 0 is always at high render-y (top of the local face quad).
+            // We compute v so that v=0 lines up with row 0 (high render-y), giving row=int(v*4).
+            double u, v;
+            double hx = hit.x - pos.getX();
+            double hy = hit.y - pos.getY();
+            double hz = hit.z - pos.getZ();
             switch (facing) {
-                case SOUTH -> {
-                    localX = 1.0 - (hit.x - pos.getX());
-                    localY = 1.0 - (hit.y - pos.getY());
-                }
-                case EAST -> {
-                    localX = 1.0 - (hit.z - pos.getZ());
-                    localY = 1.0 - (hit.y - pos.getY());
-                }
-                case WEST -> {
-                    localX = hit.z - pos.getZ();
-                    localY = 1.0 - (hit.y - pos.getY());
-                }
-                default -> { // NORTH
-                    localX = hit.x - pos.getX();
-                    localY = 1.0 - (hit.y - pos.getY());
-                }
+                case NORTH -> { u = hx;           v = 1.0 - hy; }
+                case SOUTH -> { u = 1.0 - hx;     v = 1.0 - hy; }
+                case WEST  -> { u = 1.0 - hz;     v = 1.0 - hy; }
+                case EAST  -> { u = hz;           v = 1.0 - hy; }
+                case UP    -> { u = hx;           v = 1.0 - hz; } // row 0 at south edge
+                case DOWN  -> { u = hx;           v = hz; }       // row 0 at north edge
+                default    -> { u = hx;           v = 1.0 - hy; }
             }
 
-            // Map to 4×4 grid
-            int col = Math.min(3, Math.max(0, (int) (localX * 4)));
-            int row = Math.min(3, Math.max(0, (int) (localY * 4)));
+            // Map to 4×4 grid — constants must match ButtonPanelRenderer exactly.
+            // Slab is inset 1px (1/16) on each face edge, then buttons have an additional 1px
+            // inner margin → MARGIN = 2/16 = 0.125, CELL_SIZE = 12/16/4 = 0.1875.
+            final float MARGIN = 0.125f;
+            final float CELL_SIZE = (1.0f - 2 * MARGIN) / 4.0f; // 0.1875
+
+            // Subtract the left/top margin, then divide by CELL_SIZE to get the cell index
+            int col = (int) Math.floor((u - MARGIN) / CELL_SIZE);
+            int row = (int) Math.floor((v - MARGIN) / CELL_SIZE);
+            if (col < 0 || col > 3 || row < 0 || row > 3) {
+                // Click landed in the margin around the grid — ignore
+                return InteractionResult.sidedSuccess(level.isClientSide());
+            }
             int buttonIndex = row * 4 + col;
 
             if (level.getBlockEntity(pos) instanceof ButtonPanelBlockEntity panel) {

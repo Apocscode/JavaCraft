@@ -2,7 +2,9 @@
   "variants": {
     "facing=north": {"model": "byteblock:block/button_panel"},
     "facing=south": {"model": "byteblock:block/button_panel", "y": 180},
+    "facing=east":  {"model": "byteblock:block/button_panel", "y": 90},
     "facing=west":  {"model": "byteblock:block/button_panel", "y": 270},
-    "facing=east":  {"model": "byteblock:block/button_panel", "y": 90}
+    "facing=up":    {"model": "byteblock:block/button_panel", "x": 90},
+    "facing=down":  {"model": "byteblock:block/button_panel", "x": 270}
   }
 }

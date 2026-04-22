@@ -27,10 +27,13 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 public class MonitorBlock extends Block implements EntityBlock {
     public static final DirectionProperty FACING = HorizontalDirectionalBlock.FACING;
 
-    private static final VoxelShape SHAPE_NORTH = Block.box(0, 0, 0, 16, 16, 4);
-    private static final VoxelShape SHAPE_SOUTH = Block.box(0, 0, 12, 16, 16, 16);
-    private static final VoxelShape SHAPE_EAST  = Block.box(12, 0, 0, 16, 16, 16);
-    private static final VoxelShape SHAPE_WEST  = Block.box(0, 0, 0, 4, 16, 16);
+    // Monitor slab (4px thick) hugs the side of the cell AWAY from the player, so the slab's
+    // back is flush with the block the monitor is mounted on. FACING = direction the screen points.
+    // For FACING=X, mass sits on the +X side of the cell (so the back is against a wall in +X direction).
+    private static final VoxelShape SHAPE_NORTH = Block.box(0, 0, 12, 16, 16, 16); // back against wall SOUTH
+    private static final VoxelShape SHAPE_SOUTH = Block.box(0, 0, 0, 16, 16, 4);   // back against wall NORTH
+    private static final VoxelShape SHAPE_EAST  = Block.box(0, 0, 0, 4, 16, 16);   // back against wall WEST
+    private static final VoxelShape SHAPE_WEST  = Block.box(12, 0, 0, 16, 16, 16); // back against wall EAST
 
     public MonitorBlock(Properties properties) {
         super(properties);
@@ -44,7 +47,14 @@ public class MonitorBlock extends Block implements EntityBlock {
 
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext context) {
-        return this.defaultBlockState().setValue(FACING, context.getHorizontalDirection().getOpposite());
+        // Mount against the clicked block's face. The monitor's front points AWAY from
+        // that block (toward the player). Monitors only support horizontal (wall) placement.
+        net.minecraft.core.Direction clicked = context.getClickedFace();
+        if (clicked.getAxis().isHorizontal()) {
+            return this.defaultBlockState().setValue(FACING, clicked);
+        }
+        // Clicked on top or bottom face: not supported \u2014 reject placement
+        return null;
     }
 
     @Override

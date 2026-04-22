@@ -254,7 +254,9 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
             default -> { /* NORTH: no transform */ }
         }
 
-        float z = -0.005f;  // slightly in front of the model face
+        // Mass slab is 4px thick hugging the far side of the cell (against mounting wall).
+        // The screen quad sits just in front of the slab's front face at cell-local z=12/16.
+        float z = 12.0f / 16.0f - 0.005f;
         float m = 0.01f;    // tiny margin to prevent edge artifacts
         Matrix4f mat = pose.last().pose();
         VertexConsumer vc = buffers.getBuffer(RenderType.entityCutoutNoCull(st.location));
