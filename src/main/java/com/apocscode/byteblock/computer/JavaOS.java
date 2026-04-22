@@ -132,6 +132,61 @@ public class JavaOS {
               + "\n"
               + "print(\"All tests passed!\")\n");
         }
+
+        // Lamp test script — demonstrates relay API with 3 lamps wired to the relay
+        if (!fileSystem.exists("/Users/User/Documents/lamp_test.lua")) {
+            fileSystem.writeFile("/Users/User/Documents/lamp_test.lua",
+                "-- lamp_test.lua\n"
+              + "-- Controls 3 lamps wired to the Redstone Relay.\n"
+              + "-- Default sides: top lamp = \"top\", side lamps = \"north\" and \"south\".\n"
+              + "-- Change TOP, SIDE1, SIDE2 to match your actual wiring.\n"
+              + "\n"
+              + "local TOP   = \"top\"\n"
+              + "local SIDE1 = \"north\"\n"
+              + "local SIDE2 = \"south\"\n"
+              + "\n"
+              + "print(\"=== Lamp Test ===\")\n"
+              + "\n"
+              + "if not relay.isConnected() then\n"
+              + "  print(\"ERROR: No relay found in Bluetooth range.\")\n"
+              + "  print(\"Place the Redstone Relay near this computer.\")\n"
+              + "  return\n"
+              + "end\n"
+              + "\n"
+              + "print(\"Relay connected!\")\n"
+              + "\n"
+              + "-- Show current outputs on all 6 sides\n"
+              + "print(\"Current relay outputs:\")\n"
+              + "local sides = relay.getSides()\n"
+              + "for i = 1, #sides do\n"
+              + "  local s   = sides[i]\n"
+              + "  local out = relay.getOutput(s)\n"
+              + "  local inp = relay.getInput(s)\n"
+              + "  print(\"  \" .. s .. \": out=\" .. out .. \"  in=\" .. inp)\n"
+              + "end\n"
+              + "print(\"\")\n"
+              + "\n"
+              + "-- Toggle: if all 3 lamps are off, turn them ON; otherwise turn OFF\n"
+              + "local t  = relay.getOutput(TOP)\n"
+              + "local s1 = relay.getOutput(SIDE1)\n"
+              + "local s2 = relay.getOutput(SIDE2)\n"
+              + "local allOff = (t == 0 and s1 == 0 and s2 == 0)\n"
+              + "local level  = allOff and 15 or 0\n"
+              + "\n"
+              + "relay.setOutput(TOP,   level)\n"
+              + "relay.setOutput(SIDE1, level)\n"
+              + "relay.setOutput(SIDE2, level)\n"
+              + "\n"
+              + "print(\"Set all 3 lamps \" .. (allOff and \"ON  (power=15)\" or \"OFF (power=0)\"))\n"
+              + "\n"
+              + "-- Verify write\n"
+              + "print(\"Verify:\")\n"
+              + "print(\"  \" .. TOP   .. \" = \" .. relay.getOutput(TOP))\n"
+              + "print(\"  \" .. SIDE1 .. \" = \" .. relay.getOutput(SIDE1))\n"
+              + "print(\"  \" .. SIDE2 .. \" = \" .. relay.getOutput(SIDE2))\n"
+              + "print(\"\")\n"
+              + "print(\"Run lamp_test again to toggle.\")\n");
+        }
     }
 
     // --- Tick / Main Loop ---

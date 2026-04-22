@@ -10,6 +10,11 @@ import com.apocscode.byteblock.computer.RedstoneLib;
 import com.apocscode.byteblock.computer.TerminalBuffer;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.Arrays;
 
@@ -37,6 +42,9 @@ public class ButtonProgram extends OSProgram {
     private final int[] relayInputs  = new int[6];
     private boolean panelFound = false;
     private boolean relayFound = false;
+
+    // Per-side neighbor classification (6 sides of the relay)
+    private final String[] relayNeighbors = new String[6];  // empty = air
 
     // Per-button mode / duration (refreshed from block entity)
     private final ButtonMode[] buttonModes     = new ButtonMode[16];
@@ -158,6 +166,16 @@ public class ButtonProgram extends OSProgram {
             for (int i = 0; i < 6; i++) {
                 relayOutputs[i] = RedstoneLib.getOutput(os, i);
                 relayInputs[i]  = RedstoneLib.getInput(os, i);
+            }
+            // Scan adjacent blocks for the connected-blocks panel
+            BlockPos relayPos = RedstoneLib.findRelay(os);
+            Level level = os.getLevel();
+            if (level != null && relayPos != null) {
+                for (int i = 0; i < 6; i++) {
+                    Direction dir = Direction.values()[i];
+                    BlockState state = level.getBlockState(relayPos.relative(dir));
+                    relayNeighbors[i] = classifyNeighbor(state);
+                }
             }
         }
     }
@@ -475,6 +493,32 @@ public class ButtonProgram extends OSProgram {
             pb.drawString(relayX + 140, adjY + 2, SIDE_NAMES[selectedSide], ACCENT);
         }
 
+        // ── Right: Connected Blocks panel ─────────────────────────────────
+        int nbX = 340;
+        pb.drawString(nbX, GRID_TOP - 12, "CONNECTED BLOCKS", relayFound ? ACCENT : TEXT_DIM);
+
+        int nbY = GRID_TOP + 16;
+        for (int i = 0; i < 6; i++) {
+            int ry = nbY + i * 18;
+            String neighbor = relayNeighbors[i];
+            boolean hasBlock = neighbor != null && !neighbor.isEmpty();
+
+            // Side label
+            pb.drawString(nbX, ry, SIDE_NAMES[i] + ":", hasBlock ? TEXT_NORM : TEXT_DIM);
+
+            if (!relayFound) {
+                pb.drawString(nbX + 52, ry, "-", TEXT_DIM);
+            } else if (hasBlock) {
+                // Colored dot to indicate something is connected
+                int dotColor = neighborDotColor(neighbor);
+                pb.fillRect(nbX + 52, ry + 2, 7, 7, dotColor);
+                pb.drawRect(nbX + 52, ry + 2, 7, 7, 0xFF000000);
+                pb.drawString(nbX + 63, ry, neighbor, TEXT_NORM);
+            } else {
+                pb.drawString(nbX + 52, ry, "air", TEXT_DIM);
+            }
+        }
+
         // ── Status bar ────────────────────────────────────────────────────
         pb.fillRect(0, h - 14, w, 14, HEADER_BG);
         String hint = "L-click: toggle  |  R-click: configure mode";
@@ -590,6 +634,64 @@ public class ButtonProgram extends OSProgram {
             case DELAY     -> ACCENT;
             case INVERTED  -> RED_COL;
         };
+    }
+
+    /** Dot color for the connected-blocks panel based on block type. */
+    private int neighborDotColor(String label) {
+        if (label == null) return TEXT_DIM;
+        return switch (label) {
+            case "Lamp"         -> YELLOW;
+            case "Redstone"     -> RED_COL;
+            case "RS Block"     -> RED_COL;
+            case "RS Torch"     -> ORANGE;
+            case "Repeater"     -> ORANGE;
+            case "Comparator"   -> ORANGE;
+            case "Lever"        -> GREEN;
+            case "Button"       -> GREEN;
+            case "Pres. Plate"  -> GREEN;
+            case "Observer"     -> ACCENT;
+            case "Piston"       -> TEXT_NORM;
+            case "Note Block"   -> 0xFFCC44CC;  // purple
+            case "Bundled Cable"-> 0xFF8844DD;  // violet
+            default             -> TEXT_DIM;
+        };
+    }
+
+    /**
+     * Classify a neighbor block into a short human-readable label.
+     * Returns empty string for air, or a ≤14-char name for everything else.
+     */
+    private String classifyNeighbor(BlockState state) {
+        ResourceLocation id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+        if (id == null) return "";
+        String path = id.getPath();
+        if (path.equals("air") || path.equals("cave_air") || path.equals("void_air")) return "";
+        // Named redstone components
+        if (path.contains("redstone_lamp"))   return "Lamp";
+        if (path.contains("redstone_block"))  return "RS Block";
+        if (path.contains("redstone_torch"))  return "RS Torch";
+        if (path.contains("redstone_wire")
+            || path.equals("redstone"))       return "Redstone";
+        if (path.contains("repeater"))        return "Repeater";
+        if (path.contains("comparator"))      return "Comparator";
+        if (path.contains("observer"))        return "Observer";
+        if (path.contains("piston"))          return "Piston";
+        if (path.contains("lever"))           return "Lever";
+        if (path.contains("button"))          return "Button";
+        if (path.contains("pressure_plate"))  return "Pres. Plate";
+        if (path.contains("note_block"))      return "Note Block";
+        if (path.contains("dispenser"))       return "Dispenser";
+        if (path.contains("dropper"))         return "Dropper";
+        if (path.contains("hopper"))          return "Hopper";
+        if (path.contains("tnt"))             return "TNT";
+        // Non-vanilla bundled cable check
+        if (!id.getNamespace().equals("minecraft")
+            && (path.contains("cable") || path.contains("bundled"))) return "Bundled Cable";
+        // Generic fallback: namespace:path → prettify
+        String ns = id.getNamespace().equals("minecraft") ? "" : "[" + id.getNamespace() + "] ";
+        String label = ns + path.replace("_", " ");
+        if (label.length() > 14) label = label.substring(0, 13) + "\u2026"; // ellipsis
+        return Character.toUpperCase(label.charAt(0)) + label.substring(1);
     }
 
     private void drawActionButton(PixelBuffer pb, int x, int y, int w, int h,

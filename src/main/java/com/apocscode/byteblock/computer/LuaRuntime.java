@@ -1,6 +1,7 @@
 package com.apocscode.byteblock.computer;
 
 import com.apocscode.byteblock.block.entity.ScannerBlockEntity;
+import com.apocscode.byteblock.computer.RedstoneLib;
 import com.apocscode.byteblock.network.BluetoothNetwork;
 import com.apocscode.byteblock.scanner.PathfindingEngine;
 import com.apocscode.byteblock.scanner.WorldScanData;
@@ -175,6 +176,7 @@ public class LuaRuntime {
         installBluetoothAPI();
         installRednetAPI();
         installRedstoneAPI();
+        installRelayAPI();
         installScannerAPI();
         installPeripheralAPI();
     }
@@ -882,6 +884,91 @@ public class LuaRuntime {
 
         globals.set("redstone", rs);
         globals.set("rs", rs); // CC alias
+    }
+
+    // ── relay API ─────────────────────────────────────────────────────────────
+    // Wraps RedstoneLib to control the nearest Redstone Relay over Bluetooth.
+    // Side names match redstone API: "bottom","top","north","south","west","east"
+
+    private void installRelayAPI() {
+        LuaTable relay = new LuaTable();
+        String[] SIDES = {"bottom", "top", "north", "south", "west", "east"};
+
+        // relay.isConnected() — true if a relay is found in Bluetooth range
+        relay.set("isConnected", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                return LuaValue.valueOf(RedstoneLib.findRelay(os) != null);
+            }
+        });
+
+        // relay.getSides() — returns table of side name strings
+        relay.set("getSides", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                LuaTable t = new LuaTable();
+                for (int i = 0; i < SIDES.length; i++) t.set(i + 1, LuaValue.valueOf(SIDES[i]));
+                return t;
+            }
+        });
+
+        // relay.setOutput(side, power) — set analog output 0-15 on relay side
+        relay.set("setOutput", new TwoArgFunction() {
+            @Override
+            public LuaValue call(LuaValue side, LuaValue power) {
+                int idx = sideToIndex(side.checkjstring(), SIDES);
+                if (idx < 0) return NONE;
+                RedstoneLib.setOutput(os, idx, power.checkint());
+                return NONE;
+            }
+        });
+
+        // relay.getOutput(side) — read the relay's current output on that side
+        relay.set("getOutput", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue side) {
+                int idx = sideToIndex(side.checkjstring(), SIDES);
+                if (idx < 0) return LuaValue.valueOf(0);
+                return LuaValue.valueOf(RedstoneLib.getOutput(os, idx));
+            }
+        });
+
+        // relay.getInput(side) — read incoming world redstone signal on relay side
+        relay.set("getInput", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue side) {
+                int idx = sideToIndex(side.checkjstring(), SIDES);
+                if (idx < 0) return LuaValue.valueOf(0);
+                return LuaValue.valueOf(RedstoneLib.getInput(os, idx));
+            }
+        });
+
+        // relay.getAllOutputs() — returns table[1..6] of current output values
+        relay.set("getAllOutputs", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                LuaTable t = new LuaTable();
+                for (int i = 0; i < 6; i++) {
+                    t.set(i + 1, LuaValue.valueOf(RedstoneLib.getOutput(os, i)));
+                }
+                return t;
+            }
+        });
+
+        // relay.getAllInputs() — returns table[1..6] of current input readings
+        relay.set("getAllInputs", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                LuaTable t = new LuaTable();
+                int[] inputs = RedstoneLib.getAllInputs(os);
+                for (int i = 0; i < inputs.length; i++) {
+                    t.set(i + 1, LuaValue.valueOf(inputs[i]));
+                }
+                return t;
+            }
+        });
+
+        globals.set("relay", relay);
     }
 
     private void installScannerAPI() {
