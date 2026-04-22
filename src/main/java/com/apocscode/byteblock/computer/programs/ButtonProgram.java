@@ -16,7 +16,11 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 
+import com.apocscode.byteblock.network.BluetoothNetwork;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
+import java.util.List;
 
 /**
  * Button App — desktop program for manual redstone control from the computer terminal.
@@ -59,6 +63,16 @@ public class ButtonProgram extends OSProgram {
     // Selected relay side for output editing (-1 = none)
     private int selectedSide = -1;
 
+    // ── Multi-panel state ─────────────────────────────────────────────────────
+    // All discovered button panels sorted nearest-first
+    private final List<BlockPos> panels = new ArrayList<>();
+    // Index into panels[] that is currently being controlled
+    private int selectedPanelIdx = 0;
+
+    // ── Rename overlay state ──────────────────────────────────────────────────
+    private boolean renaming     = false;
+    private String  renameBuffer = "";
+
     // ── Config popup state ────────────────────────────────────────────────────
 
     private int        configButton      = -1;              // -1 = closed
@@ -69,10 +83,11 @@ public class ButtonProgram extends OSProgram {
     // ── Layout ────────────────────────────────────────────────────────────────
 
     private static final int HEADER_H     = 20;
+    private static final int PANEL_BAR_H  = 14;   // second header row: panel nav
     private static final int BTN_SIZE     = 28;
     private static final int BTN_GAP      = 4;
     private static final int GRID_LEFT    = 12;
-    private static final int GRID_TOP     = 28;
+    private static final int GRID_TOP     = 48;   // shifted down by PANEL_BAR_H + 6px gap
     private static final int ACTION_Y_OFFSET = 160;
     private static final int ACTION_BTN_W = 56;
     private static final int ACTION_BTN_H = 14;
@@ -164,18 +179,53 @@ public class ButtonProgram extends OSProgram {
         return running;
     }
 
+    // ── Panel helpers ─────────────────────────────────────────────────────────
+
+    private BlockPos getActivePanelPos() {
+        return (selectedPanelIdx >= 0 && selectedPanelIdx < panels.size())
+               ? panels.get(selectedPanelIdx) : null;
+    }
+
+    private ButtonPanelBlockEntity getActivePanelBE() {
+        BlockPos pos = getActivePanelPos();
+        if (pos == null) return null;
+        Level lvl = os.getLevel();
+        if (lvl == null) return null;
+        Object be = lvl.getBlockEntity(pos);
+        return be instanceof ButtonPanelBlockEntity p ? p : null;
+    }
+
+    private String getPanelDisplayName() {
+        ButtonPanelBlockEntity be = getActivePanelBE();
+        if (be == null) return "Panel";
+        String lbl = be.getLabel();
+        return (lbl == null || lbl.isBlank()) ? "Panel " + (selectedPanelIdx + 1) : lbl;
+    }
+
     // ── State refresh ─────────────────────────────────────────────────────────
 
     private void refreshState() {
-        BlockPos panelPos = RedstoneLib.findButtonPanel(os);
+        Level lvl   = os.getLevel();
+        BlockPos me = os.getBlockPos();
+
+        // Refresh panel list every cycle
+        if (lvl != null && me != null) {
+            List<BlockPos> found = BluetoothNetwork.findAllDevices(
+                    lvl, me, BluetoothNetwork.DeviceType.BUTTON_PANEL);
+            if (!found.equals(panels)) {
+                panels.clear();
+                panels.addAll(found);
+                if (selectedPanelIdx >= panels.size()) selectedPanelIdx = 0;
+            }
+        }
+
+        BlockPos panelPos = getActivePanelPos();
         panelFound = panelPos != null;
         relayFound = RedstoneLib.findRelay(os) != null;
 
-        if (panelFound) {
-            buttonStates = RedstoneLib.getButtonStates(os);
-            // Read per-button modes/durations directly from the block entity
-            var level = os.getLevel();
-            if (level != null && level.getBlockEntity(panelPos) instanceof ButtonPanelBlockEntity panel) {
+        if (panelFound && lvl != null) {
+            if (lvl.getBlockEntity(panelPos) instanceof ButtonPanelBlockEntity panel) {
+                buttonStates = panel.getButtonStates();
                 for (int i = 0; i < 16; i++) {
                     buttonModes[i]     = panel.getMode(i);
                     buttonDurations[i] = panel.getDuration(i);
@@ -187,13 +237,11 @@ public class ButtonProgram extends OSProgram {
                 relayOutputs[i] = RedstoneLib.getOutput(os, i);
                 relayInputs[i]  = RedstoneLib.getInput(os, i);
             }
-            // Scan adjacent blocks for the connected-blocks panel
             BlockPos relayPos = RedstoneLib.findRelay(os);
-            Level level = os.getLevel();
-            if (level != null && relayPos != null) {
+            if (lvl != null && relayPos != null) {
                 for (int i = 0; i < 6; i++) {
                     Direction dir = Direction.values()[i];
-                    BlockState state = level.getBlockState(relayPos.relative(dir));
+                    BlockState state = lvl.getBlockState(relayPos.relative(dir));
                     relayNeighbors[i] = classifyNeighbor(state);
                 }
             }
@@ -209,7 +257,9 @@ public class ButtonProgram extends OSProgram {
                 int mouseBtn = event.getInt(0); // 0 = left, 1 = right
                 int px       = event.getInt(1);
                 int py       = event.getInt(2);
-                if (configButton >= 0) {
+                if (renaming) {
+                    handleRenameClick(px, py);
+                } else if (configButton >= 0) {
                     handleConfigClick(px, py);
                 } else if (mouseBtn == 1) {
                     handleRightClick(px, py);
@@ -217,9 +267,30 @@ public class ButtonProgram extends OSProgram {
                     handleLeftClick(px, py);
                 }
             }
+            case CHAR -> {
+                if (renaming) {
+                    String ch = event.getString(0);
+                    if (!ch.isEmpty() && renameBuffer.length() < 24) renameBuffer += ch;
+                }
+            }
+            case PASTE -> {
+                if (renaming) {
+                    String combined = renameBuffer + event.getString(0);
+                    renameBuffer = combined.length() > 24 ? combined.substring(0, 24) : combined;
+                }
+            }
             case KEY -> {
-                // ESC (256) closes popup without applying
-                if (event.getInt(0) == 256 && configButton >= 0) {
+                int key = event.getInt(0);
+                if (renaming) {
+                    if (key == 256) {                         // ESC → cancel
+                        renaming = false;
+                    } else if (key == 257 || key == 335) {   // Enter / numpad Enter → confirm
+                        applyRename();
+                        renaming = false;
+                    } else if (key == 259 && !renameBuffer.isEmpty()) { // Backspace
+                        renameBuffer = renameBuffer.substring(0, renameBuffer.length() - 1);
+                    }
+                } else if (key == 256 && configButton >= 0) {
                     configButton = -1;
                 }
             }
@@ -231,6 +302,31 @@ public class ButtonProgram extends OSProgram {
 
     private void handleLeftClick(int px, int py) {
 
+        // Panel navigation bar (y = HEADER_H to HEADER_H + PANEL_BAR_H)
+        if (py >= HEADER_H && py < HEADER_H + PANEL_BAR_H && !panels.isEmpty()) {
+            int w = 640;
+            // ◄ left arrow
+            if (px >= 4 && px < 16 && selectedPanelIdx > 0) {
+                selectedPanelIdx--;
+                refreshState();
+                return;
+            }
+            // ► right arrow
+            if (px >= w - 16 && px < w - 4 && selectedPanelIdx < panels.size() - 1) {
+                selectedPanelIdx++;
+                refreshState();
+                return;
+            }
+            // [Lbl] rename button
+            if (px >= w - 44 && px < w - 16) {
+                ButtonPanelBlockEntity be = getActivePanelBE();
+                renameBuffer = (be != null) ? be.getLabel() : "";
+                renaming = true;
+                return;
+            }
+            return;
+        }
+
         // 4×4 button grid — toggle the button
         for (int row = 0; row < 4; row++) {
             for (int col = 0; col < 4; col++) {
@@ -238,9 +334,10 @@ public class ButtonProgram extends OSProgram {
                 int by = GRID_TOP  + row * (BTN_SIZE + BTN_GAP);
                 if (px >= bx && px < bx + BTN_SIZE && py >= by && py < by + BTN_SIZE) {
                     int idx = row * 4 + col;
-                    if (panelFound) {
+                    ButtonPanelBlockEntity clickPanel = getActivePanelBE();
+                    if (clickPanel != null) {
                         boolean cur = (buttonStates & (1 << idx)) != 0;
-                        RedstoneLib.setButton(os, idx, !cur);
+                        clickPanel.setButton(idx, !cur);
                         // Optimistic local update for instant visual response
                         if (cur) buttonStates &= ~(1 << idx);
                         else     buttonStates |=  (1 << idx);
@@ -260,14 +357,16 @@ public class ButtonProgram extends OSProgram {
         int actionY = GRID_TOP + ACTION_Y_OFFSET;
         if (px >= GRID_LEFT && px < GRID_LEFT + ACTION_BTN_W
                 && py >= actionY && py < actionY + ACTION_BTN_H) {
-            if (panelFound) { RedstoneLib.setAllButtons(os, 0xFFFF); buttonStates = 0xFFFF; }
+            ButtonPanelBlockEntity p = getActivePanelBE();
+            if (p != null) { p.setAllButtons(0xFFFF); buttonStates = 0xFFFF; }
             return;
         }
         // "All OFF" button
         int offX = GRID_LEFT + ACTION_BTN_W + 8;
         if (px >= offX && px < offX + ACTION_BTN_W
                 && py >= actionY && py < actionY + ACTION_BTN_H) {
-            if (panelFound) { RedstoneLib.setAllButtons(os, 0); buttonStates = 0; }
+            ButtonPanelBlockEntity p = getActivePanelBE();
+            if (p != null) { p.setAllButtons(0); buttonStates = 0; }
             return;
         }
 
@@ -392,18 +491,30 @@ public class ButtonProgram extends OSProgram {
 
     private void applyConfig() {
         if (configButton < 0) return;
-        BlockPos panelPos = RedstoneLib.findButtonPanel(os);
-        if (panelPos == null) return;
-        var level = os.getLevel();
-        if (level != null && level.getBlockEntity(panelPos) instanceof ButtonPanelBlockEntity panel) {
+        ButtonPanelBlockEntity panel = getActivePanelBE();
+        if (panel != null) {
             panel.setMode(configButton, configMode);
             panel.setDuration(configButton, configDuration);
             // Mirror into local cache for instant visual feedback
             buttonModes[configButton]     = configMode;
             buttonDurations[configButton] = configDuration;
         }
-        // Apply relay assignment (program-side, no BE storage needed)
+        // Apply relay assignment (program-side only, no BE storage needed)
         buttonRelayAssign[configButton] = configRelayAssign;
+    }
+
+    private void applyRename() {
+        ButtonPanelBlockEntity panel = getActivePanelBE();
+        if (panel != null) panel.setLabel(renameBuffer.trim());
+    }
+
+    private void handleRenameClick(int px, int py) {
+        // Click outside the rename popup dismisses without saving
+        int rw = 320, rh = 64;
+        int rx = (640 - rw) / 2, ry = (368 - rh) / 2;
+        if (px < rx || px >= rx + rw || py < ry || py >= ry + rh) {
+            renaming = false;
+        }
     }
 
     // ── Render ────────────────────────────────────────────────────────────────
@@ -426,7 +537,8 @@ public class ButtonProgram extends OSProgram {
             ? (relayFound ? "Panel + Relay" : "Panel Only")
             : (relayFound ? "Relay Only"    : "No Devices");
         pb.drawStringRight(w - 4, 2, status, (panelFound || relayFound) ? GREEN : RED_COL);
-
+        // ── Panel navigation bar ───────────────────────────────────────────────
+        renderPanelBar(pb, w);
         // ── Left: 4×4 button grid ──────────────────────────────────────────
         pb.drawString(GRID_LEFT, GRID_TOP - 12, "BUTTON PANEL", panelFound ? ACCENT : TEXT_DIM);
         if (panelFound) {
@@ -565,7 +677,7 @@ public class ButtonProgram extends OSProgram {
         }
 
         // ── Status bar (at fixed y to stay within the visible window area) ──
-        int statusY = 215;
+        int statusY = 230;
         pb.fillRect(0, statusY, w, 14, HEADER_BG);
         String hint = "L-click: toggle  |  R-click: configure mode + relay assign";
         if (selectedSide >= 0 && relayFound) {
@@ -577,7 +689,69 @@ public class ButtonProgram extends OSProgram {
         // ── Config popup drawn last, always on top ────────────────────────
         if (configButton >= 0) {
             renderConfigPopup(pb);
+        }        // ── Rename overlay drawn on top of everything ───────────────────
+        if (renaming) {
+            renderRenamePopup(pb);
+        }    }
+
+    // ── Panel bar renderer ────────────────────────────────────────────────────
+
+    private void renderPanelBar(PixelBuffer pb, int w) {
+        int barY = HEADER_H;
+        pb.fillRect(0, barY, w, PANEL_BAR_H, 0xFF1E1E30);
+        pb.fillRect(0, barY + PANEL_BAR_H - 1, w, 1, 0xFF334466); // bottom divider
+
+        if (panels.isEmpty()) {
+            pb.drawString(4, barY + 3, "No panels in range", TEXT_DIM);
+            return;
         }
+
+        // ◄ left arrow
+        boolean canLeft = selectedPanelIdx > 0;
+        pb.fillRect(4, barY + 1, 12, 12, canLeft ? 0xFF2A3A5A : 0xFF1A1A28);
+        pb.drawRect (4, barY + 1, 12, 12, canLeft ? POPUP_BRD : 0xFF333355);
+        pb.drawString(7, barY + 3, "<", canLeft ? TEXT_NORM : TEXT_DIM);
+
+        // ► right arrow
+        boolean canRight = selectedPanelIdx < panels.size() - 1;
+        pb.fillRect(w - 16, barY + 1, 12, 12, canRight ? 0xFF2A3A5A : 0xFF1A1A28);
+        pb.drawRect (w - 16, barY + 1, 12, 12, canRight ? POPUP_BRD : 0xFF333355);
+        pb.drawString(w - 13, barY + 3, ">", canRight ? TEXT_NORM : TEXT_DIM);
+
+        // [Lbl] rename button (to the left of the ► arrow)
+        pb.fillRect(w - 44, barY + 1, 26, 12, 0xFF2A2A44);
+        pb.drawRect (w - 44, barY + 1, 26, 12, 0xFF445588);
+        pb.drawString(w - 41, barY + 3, "Lbl", ACCENT);
+
+        // Panel name + index (centred between the two arrows)
+        String name    = getPanelDisplayName();
+        String navText = name + " (" + (selectedPanelIdx + 1) + "/" + panels.size() + ")";
+        int    navX    = (w - navText.length() * 8) / 2;
+        pb.drawString(navX, barY + 3, navText, ACCENT);
+    }
+
+    // ── Rename overlay renderer ───────────────────────────────────────────────
+
+    private void renderRenamePopup(PixelBuffer pb) {
+        int rw = 320, rh = 64;
+        int rx = (640 - rw) / 2, ry = (368 - rh) / 2;
+
+        // Shadow
+        pb.fillRect(rx + 4, ry + 4, rw, rh, 0xFF050508);
+        // Background + border
+        pb.fillRect(rx, ry, rw, rh, POPUP_BG);
+        pb.drawRect (rx, ry, rw, rh, POPUP_BRD);
+        // Title bar
+        pb.fillRect(rx + 1, ry + 1, rw - 2, 16, 0xFF2A2A4A);
+        pb.drawString(rx + 8, ry + 4, "Rename Panel  (Enter=confirm  ESC=cancel)", TEXT_DIM);
+        pb.fillRect(rx + 1, ry + 17, rw - 2, 1, POPUP_BRD);
+        // Text field
+        int tfX = rx + 8, tfY = ry + 22, tfW = rw - 16, tfH = 16;
+        pb.fillRect(tfX, tfY, tfW, tfH, 0xFF111122);
+        pb.drawRect (tfX, tfY, tfW, tfH, 0xFF4455AA);
+        pb.drawString(tfX + 4, tfY + 4, renameBuffer + "|", TEXT_NORM);
+        // Char count hint
+        pb.drawString(rx + 8, ry + 44, renameBuffer.length() + "/24 chars", TEXT_DIM);
     }
 
     // ── Config popup renderer ─────────────────────────────────────────────────

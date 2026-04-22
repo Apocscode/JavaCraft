@@ -55,6 +55,9 @@ public class ButtonPanelBlockEntity extends BlockEntity {
     /** Bluetooth channel (configurable, default 1) */
     private int channel = 1;
 
+    /** User-assigned display label (max 24 chars, persisted in NBT) */
+    private String label = "";
+
     /** Color names for chat messages */
     private static final String[] COLOR_NAMES = {
         "White", "Orange", "Magenta", "Light Blue", "Yellow", "Lime",
@@ -295,6 +298,22 @@ public class ButtonPanelBlockEntity extends BlockEntity {
         }
     }
 
+    public String getLabel() { return label == null ? "" : label; }
+
+    public void setLabel(String lbl) {
+        this.label = (lbl == null) ? "" : lbl.length() > 24 ? lbl.substring(0, 24) : lbl;
+        syncToClient();
+    }
+
+    /** Set all 16 button states at once from a bitmask. */
+    public void setAllButtons(int mask) {
+        int newStates = mask & 0xFFFF;
+        if (newStates == buttonStates) return;
+        buttonStates = newStates;
+        updateRedstoneOutputs();
+        syncToClient();
+    }
+
     // --- Client sync ---
 
     private void syncToClient() {
@@ -312,6 +331,7 @@ public class ButtonPanelBlockEntity extends BlockEntity {
         tag.putUUID("DeviceId", deviceId);
         tag.putInt("ButtonStates", buttonStates);
         tag.putInt("Channel", channel);
+        if (!label.isEmpty()) tag.putString("Label", label);
 
         // Save modes as int array
         int[] modeOrds = new int[16];
@@ -326,6 +346,7 @@ public class ButtonPanelBlockEntity extends BlockEntity {
         if (tag.contains("DeviceId")) deviceId = tag.getUUID("DeviceId");
         if (tag.contains("ButtonStates")) buttonStates = tag.getInt("ButtonStates");
         if (tag.contains("Channel")) channel = tag.getInt("Channel");
+        if (tag.contains("Label")) label = tag.getString("Label");
 
         if (tag.contains("Modes")) {
             int[] modeOrds = tag.getIntArray("Modes");

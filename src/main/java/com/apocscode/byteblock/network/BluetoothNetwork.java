@@ -325,6 +325,27 @@ public class BluetoothNetwork {
     }
 
     /**
+     * Find all devices of a specific type within their declared range of a position.
+     * Returns positions sorted nearest-first.
+     */
+    public static List<BlockPos> findAllDevices(Level level, BlockPos from, DeviceType type) {
+        if (level == null) return List.of();
+        String dim = level.dimension().location().toString();
+        List<DeviceEntry> dimDevices = devices.getOrDefault(dim, List.of());
+        long rangeSq = (long) type.getRange() * type.getRange();
+        List<BlockPos> result = new ArrayList<>();
+        synchronized (dimDevices) {
+            for (DeviceEntry d : dimDevices) {
+                if (d.type == type && d.pos.distSqr(from) <= rangeSq) {
+                    result.add(d.pos);
+                }
+            }
+        }
+        result.sort(Comparator.comparingDouble(pos -> pos.distSqr(from)));
+        return result;
+    }
+
+    /**
      * Find the nearest device of a specific type within its range.
      */
     public static BlockPos findNearestDevice(Level level, BlockPos from, DeviceType type) {
