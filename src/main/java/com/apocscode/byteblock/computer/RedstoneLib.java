@@ -1,6 +1,7 @@
 package com.apocscode.byteblock.computer;
 
 import com.apocscode.byteblock.block.entity.ButtonPanelBlockEntity;
+import com.apocscode.byteblock.block.entity.IButtonPanel;
 import com.apocscode.byteblock.block.entity.RedstoneRelayBlockEntity;
 import com.apocscode.byteblock.network.BluetoothNetwork;
 
@@ -191,7 +192,7 @@ public class RedstoneLib {
         BlockPos panelPos = findButtonPanel(os);
         if (panelPos == null) return;
         Level level = os.getLevel();
-        if (level != null && level.getBlockEntity(panelPos) instanceof ButtonPanelBlockEntity panel) {
+        if (level != null && level.getBlockEntity(panelPos) instanceof IButtonPanel panel) {
             panel.setButton(index, lit);
         }
     }
@@ -203,7 +204,7 @@ public class RedstoneLib {
         BlockPos panelPos = findButtonPanel(os);
         if (panelPos == null) return false;
         Level level = os.getLevel();
-        if (level != null && level.getBlockEntity(panelPos) instanceof ButtonPanelBlockEntity panel) {
+        if (level != null && level.getBlockEntity(panelPos) instanceof IButtonPanel panel) {
             return panel.isButtonOn(index);
         }
         return false;
@@ -216,7 +217,7 @@ public class RedstoneLib {
         BlockPos panelPos = findButtonPanel(os);
         if (panelPos == null) return 0;
         Level level = os.getLevel();
-        if (level != null && level.getBlockEntity(panelPos) instanceof ButtonPanelBlockEntity panel) {
+        if (level != null && level.getBlockEntity(panelPos) instanceof IButtonPanel panel) {
             return panel.getButtonStates();
         }
         return 0;
@@ -229,7 +230,7 @@ public class RedstoneLib {
         BlockPos panelPos = findButtonPanel(os);
         if (panelPos == null) return;
         Level level = os.getLevel();
-        if (level != null && level.getBlockEntity(panelPos) instanceof ButtonPanelBlockEntity panel) {
+        if (level != null && level.getBlockEntity(panelPos) instanceof IButtonPanel panel) {
             for (int i = 0; i < 16; i++) {
                 panel.setButton(i, (mask & (1 << i)) != 0);
             }

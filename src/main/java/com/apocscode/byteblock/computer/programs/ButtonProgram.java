@@ -1,7 +1,7 @@
 package com.apocscode.byteblock.computer.programs;
 
-import com.apocscode.byteblock.block.entity.ButtonPanelBlockEntity;
 import com.apocscode.byteblock.block.entity.ButtonPanelBlockEntity.ButtonMode;
+import com.apocscode.byteblock.block.entity.IButtonPanel;
 import com.apocscode.byteblock.computer.JavaOS;
 import com.apocscode.byteblock.computer.OSEvent;
 import com.apocscode.byteblock.computer.OSProgram;
@@ -54,6 +54,10 @@ public class ButtonProgram extends OSProgram {
     private final ButtonMode[] buttonModes     = new ButtonMode[16];
     private final int[]        buttonDurations = new int[16];
 
+    // Per-button label + color override (refreshed from block entity; -1 color = default)
+    private final String[]     buttonLabelsCache = new String[16];
+    private final int[]        buttonColorsCache = new int[16];
+
     // Per-button relay-side assignment: -1 = none, 0-5 = Down/Up/North/South/West/East
     private final int[] buttonRelayAssign = new int[16];
 
@@ -75,6 +79,8 @@ public class ButtonProgram extends OSProgram {
     // ── Rename overlay state ──────────────────────────────────────────────────
     private boolean renaming     = false;
     private String  renameBuffer = "";
+    /** 0 = panel label, 1 = per-button label (uses configButton as target index). */
+    private int     renameTarget = 0;
 
     // ── Config popup state ────────────────────────────────────────────────────
 
@@ -82,6 +88,8 @@ public class ButtonProgram extends OSProgram {
     private ButtonMode configMode        = ButtonMode.TOGGLE;
     private int        configDuration    = 20;
     private int        configRelayAssign = -1;              // relay side for this button
+    private String     configLabel       = "";              // per-button label
+    private int        configColor       = -1;              // -1 = default wool
 
     // ── Layout ────────────────────────────────────────────────────────────────
 
@@ -96,10 +104,14 @@ public class ButtonProgram extends OSProgram {
     private static final int ACTION_BTN_H = 14;
 
     // Popup (centred on visible window area: 640×368 for h=24 window)
-    private static final int POPUP_W = 280;
-    private static final int POPUP_H = 175;
-    private static final int POPUP_X = (640 - POPUP_W) / 2;  // 180
-    private static final int POPUP_Y = (368 - POPUP_H) / 2;  // 96
+    private static final int POPUP_W = 300;
+    private static final int POPUP_H = 235;
+    private static final int POPUP_X = (640 - POPUP_W) / 2;
+    private static final int POPUP_Y = (368 - POPUP_H) / 2;
+
+    // Popup color palette (16 swatches in one row + "X" reset)
+    private static final int POPUP_SWATCH = 14;
+    private static final int POPUP_SWATCH_GAP = 1;
 
     // ── Colors ────────────────────────────────────────────────────────────────
 
@@ -151,6 +163,8 @@ public class ButtonProgram extends OSProgram {
         Arrays.fill(buttonModes,     ButtonMode.TOGGLE);
         Arrays.fill(buttonDurations, 20);
         Arrays.fill(buttonRelayAssign, -1);
+        Arrays.fill(buttonLabelsCache, "");
+        Arrays.fill(buttonColorsCache, -1);
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -193,17 +207,17 @@ public class ButtonProgram extends OSProgram {
                ? panels.get(selectedPanelIdx) : null;
     }
 
-    private ButtonPanelBlockEntity getActivePanelBE() {
+    private IButtonPanel getActivePanelBE() {
         BlockPos pos = getActivePanelPos();
         if (pos == null) return null;
         Level lvl = os.getLevel();
         if (lvl == null) return null;
         Object be = lvl.getBlockEntity(pos);
-        return be instanceof ButtonPanelBlockEntity p ? p : null;
+        return be instanceof IButtonPanel p ? p : null;
     }
 
     private String getPanelDisplayName() {
-        ButtonPanelBlockEntity be = getActivePanelBE();
+        IButtonPanel be = getActivePanelBE();
         if (be == null) return "Panel";
         String lbl = be.getLabel();
         return (lbl == null || lbl.isBlank()) ? "Panel " + (selectedPanelIdx + 1) : lbl;
@@ -239,11 +253,13 @@ public class ButtonProgram extends OSProgram {
         relayFound = RedstoneLib.findRelay(os) != null;
 
         if (panelFound && lvl != null) {
-            if (lvl.getBlockEntity(panelPos) instanceof ButtonPanelBlockEntity panel) {
+            if (lvl.getBlockEntity(panelPos) instanceof IButtonPanel panel) {
                 buttonStates = panel.getButtonStates();
                 for (int i = 0; i < 16; i++) {
                     buttonModes[i]     = panel.getMode(i);
                     buttonDurations[i] = panel.getDuration(i);
+                    buttonLabelsCache[i] = panel.getButtonLabel(i);
+                    buttonColorsCache[i] = panel.getButtonColor(i);
                 }
             }
         }
@@ -334,8 +350,9 @@ public class ButtonProgram extends OSProgram {
             }
             // [Lbl] rename button
             if (px >= w - 44 && px < w - 16) {
-                ButtonPanelBlockEntity be = getActivePanelBE();
+                IButtonPanel be = getActivePanelBE();
                 renameBuffer = (be != null) ? be.getLabel() : "";
+                renameTarget = 0; // panel label
                 renaming = true;
                 return;
             }
@@ -349,7 +366,7 @@ public class ButtonProgram extends OSProgram {
                 int by = GRID_TOP  + row * (BTN_SIZE + BTN_GAP);
                 if (px >= bx && px < bx + BTN_SIZE && py >= by && py < by + BTN_SIZE) {
                     int idx = row * 4 + col;
-                    ButtonPanelBlockEntity clickPanel = getActivePanelBE();
+                    IButtonPanel clickPanel = getActivePanelBE();
                     if (clickPanel != null) {
                         boolean cur = (buttonStates & (1 << idx)) != 0;
                         clickPanel.setButton(idx, !cur);
@@ -373,14 +390,14 @@ public class ButtonProgram extends OSProgram {
         int actionY = GRID_TOP + ACTION_Y_OFFSET;
         if (px >= GRID_LEFT && px < GRID_LEFT + ACTION_BTN_W
                 && py >= actionY && py < actionY + ACTION_BTN_H) {
-            ButtonPanelBlockEntity p = getActivePanelBE();
+            IButtonPanel p = getActivePanelBE();
             if (p != null) { p.setAllButtons(0xFFFF); buttonStates = 0xFFFF; }
             return;
         }
         // "All OFF" button
         int offX = GRID_LEFT + ACTION_BTN_W + 8;
         if (px >= offX && px < offX + ACTION_BTN_W
-                && py >= actionY && py < actionY + ACTION_BTN_H) {            ButtonPanelBlockEntity p = getActivePanelBE();
+                && py >= actionY && py < actionY + ACTION_BTN_H) {            IButtonPanel p = getActivePanelBE();
             if (p != null) { p.setAllButtons(0); buttonStates = 0; }
             return;
         }
@@ -429,6 +446,8 @@ public class ButtonProgram extends OSProgram {
                     configMode        = buttonModes[idx];
                     configDuration    = buttonDurations[idx];
                     configRelayAssign = buttonRelayAssign[idx];
+                    configLabel       = buttonLabelsCache[idx] == null ? "" : buttonLabelsCache[idx];
+                    configColor       = buttonColorsCache[idx];
                     return;
                 }
             }
@@ -443,6 +462,14 @@ public class ButtonProgram extends OSProgram {
         // Click outside popup → close without applying
         if (px < x || px >= x + POPUP_W || py < y || py >= y + POPUP_H) {
             configButton = -1;
+            return;
+        }
+
+        // Edit-label button (top-right of title bar) — opens rename overlay
+        if (px >= x + POPUP_W - 48 && px < x + POPUP_W - 8 && py >= y + 3 && py < y + 17) {
+            renameBuffer = configLabel == null ? "" : configLabel;
+            renameTarget = 1;
+            renaming = true;
             return;
         }
 
@@ -479,13 +506,30 @@ public class ButtonProgram extends OSProgram {
             }
         }
 
-        // Relay assign ◄ arrow (cycles: None → Down → Up → North → South → West → East → None)
-        if (px >= x + 8 && px < x + 26 && py >= y + 108 && py < y + 122) {
+        // Color palette row (16 swatches + "X" reset) at y+108..y+122
+        int palY = y + 108;
+        int palX = x + 8;
+        for (int i = 0; i < 16; i++) {
+            int sx = palX + i * (POPUP_SWATCH + POPUP_SWATCH_GAP);
+            if (px >= sx && px < sx + POPUP_SWATCH && py >= palY && py < palY + POPUP_SWATCH) {
+                configColor = BUTTON_COLORS[i] & 0xFFFFFF;
+                return;
+            }
+        }
+        // Reset swatch ("X") at right of palette
+        int resetX = palX + 16 * (POPUP_SWATCH + POPUP_SWATCH_GAP) + 4;
+        if (px >= resetX && px < resetX + POPUP_SWATCH && py >= palY && py < palY + POPUP_SWATCH) {
+            configColor = -1;
+            return;
+        }
+
+        // Relay assign ◄ arrow
+        if (px >= x + 8 && px < x + 26 && py >= y + 140 && py < y + 154) {
             configRelayAssign = (configRelayAssign <= -1) ? 5 : configRelayAssign - 1;
             return;
         }
         // Relay assign ► arrow
-        if (px >= x + POPUP_W - 26 && px < x + POPUP_W - 8 && py >= y + 108 && py < y + 122) {
+        if (px >= x + POPUP_W - 26 && px < x + POPUP_W - 8 && py >= y + 140 && py < y + 154) {
             configRelayAssign = (configRelayAssign >= 5) ? -1 : configRelayAssign + 1;
             return;
         }
@@ -506,21 +550,34 @@ public class ButtonProgram extends OSProgram {
 
     private void applyConfig() {
         if (configButton < 0) return;
-        ButtonPanelBlockEntity panel = getActivePanelBE();
+        IButtonPanel panel = getActivePanelBE();
         if (panel != null) {
             panel.setMode(configButton, configMode);
             panel.setDuration(configButton, configDuration);
+            panel.setButtonLabel(configButton, configLabel);
+            panel.setButtonColor(configButton, configColor);
             // Mirror into local cache for instant visual feedback
-            buttonModes[configButton]     = configMode;
-            buttonDurations[configButton] = configDuration;
+            buttonModes[configButton]        = configMode;
+            buttonDurations[configButton]    = configDuration;
+            buttonLabelsCache[configButton]  = configLabel;
+            buttonColorsCache[configButton]  = configColor;
         }
         // Apply relay assignment (program-side only, no BE storage needed)
         buttonRelayAssign[configButton] = configRelayAssign;
     }
 
     private void applyRename() {
-        ButtonPanelBlockEntity panel = getActivePanelBE();
-        if (panel != null) panel.setLabel(renameBuffer.trim());
+        IButtonPanel panel = getActivePanelBE();
+        if (panel == null) return;
+        String trimmed = renameBuffer.trim();
+        if (renameTarget == 1 && configButton >= 0) {
+            // Per-button label edit: update config state AND BE immediately
+            configLabel = trimmed;
+            panel.setButtonLabel(configButton, trimmed);
+            buttonLabelsCache[configButton] = trimmed;
+        } else {
+            panel.setLabel(trimmed);
+        }
     }
 
     private void handleRenameClick(int px, int py) {
@@ -783,10 +840,21 @@ public class ButtonProgram extends OSProgram {
 
         // Title bar
         pb.fillRect(x + 1, y + 1, POPUP_W - 2, 18, 0xFF2A2A4A);
-        // Colour swatch
-        pb.fillRect(x + 6, y + 4, 10, 10, panelFound ? BUTTON_COLORS[configButton] : 0xFF555566);
+        // Colour swatch (shows effective colour: override if set, else default)
+        int titleColor = panelFound
+                ? (configColor >= 0 ? (0xFF000000 | configColor) : BUTTON_COLORS[configButton])
+                : 0xFF555566;
+        pb.fillRect(x + 6, y + 4, 10, 10, titleColor);
         pb.drawRect (x + 6, y + 4, 10, 10, 0xFF888899);
-        pb.drawString(x + 20, y + 5, "#" + (configButton + 1) + " " + COLOR_NAMES[configButton], ACCENT);
+        String titleText = (configLabel != null && !configLabel.isEmpty())
+                ? ("#" + (configButton + 1) + " " + configLabel)
+                : ("#" + (configButton + 1) + " " + COLOR_NAMES[configButton]);
+        if (titleText.length() > 22) titleText = titleText.substring(0, 22);
+        pb.drawString(x + 20, y + 5, titleText, ACCENT);
+        // [Edit] label button in title bar
+        pb.fillRect(x + POPUP_W - 48, y + 3, 40, 14, 0xFF2A3A5A);
+        pb.drawRect (x + POPUP_W - 48, y + 3, 40, 14, POPUP_BRD);
+        pb.drawString(x + POPUP_W - 44, y + 5, "Label", TEXT_NORM);
         // Divider
         pb.fillRect(x + 1, y + 19, POPUP_W - 2, 1, POPUP_BRD);
 
@@ -847,26 +915,47 @@ public class ButtonProgram extends OSProgram {
             pb.drawString(x + 8, y + 92, "Not used by this mode", TEXT_DIM);
         }
 
+        // ── Color palette row ─────────────────────────────────────────────
+        pb.drawString(x + 8, y + 102, "Color:", TEXT_NORM);
+        int palY = y + 108;
+        int palX = x + 8;
+        for (int i = 0; i < 16; i++) {
+            int sx = palX + i * (POPUP_SWATCH + POPUP_SWATCH_GAP);
+            pb.fillRect(sx, palY, POPUP_SWATCH, POPUP_SWATCH, BUTTON_COLORS[i]);
+            // Highlight if currently chosen
+            if (configColor >= 0 && (BUTTON_COLORS[i] & 0xFFFFFF) == configColor) {
+                pb.drawRect(sx - 1, palY - 1, POPUP_SWATCH + 2, POPUP_SWATCH + 2, 0xFFFFFFFF);
+            } else {
+                pb.drawRect(sx, palY, POPUP_SWATCH, POPUP_SWATCH, 0xFF111122);
+            }
+        }
+        // "X" reset swatch
+        int resetX = palX + 16 * (POPUP_SWATCH + POPUP_SWATCH_GAP) + 4;
+        pb.fillRect(resetX, palY, POPUP_SWATCH, POPUP_SWATCH, 0xFF333344);
+        pb.drawRect (resetX, palY, POPUP_SWATCH, POPUP_SWATCH,
+                configColor < 0 ? YELLOW : POPUP_BRD);
+        pb.drawString(resetX + 4, palY + 3, "X", configColor < 0 ? YELLOW : TEXT_NORM);
+
         // ── Relay Assign row ──────────────────────────────────────────────
-        pb.drawString(x + 8, y + 104, "Relay Side:", TEXT_NORM);
+        pb.drawString(x + 8, y + 132, "Relay Side:", TEXT_NORM);
 
         // ◄ arrow
-        pb.fillRect(x + 8, y + 108, 18, 14, 0xFF2A3A5A);
-        pb.drawRect (x + 8, y + 108, 18, 14, POPUP_BRD);
-        pb.drawString(x + 12, y + 111, "<", TEXT_NORM);
+        pb.fillRect(x + 8, y + 140, 18, 14, 0xFF2A3A5A);
+        pb.drawRect (x + 8, y + 140, 18, 14, POPUP_BRD);
+        pb.drawString(x + 12, y + 143, "<", TEXT_NORM);
 
         // Relay assign value (centred)
         String relayName = configRelayAssign < 0 ? "None" : SIDE_NAMES[configRelayAssign];
         int relayNameX = x + (POPUP_W - relayName.length() * 8) / 2;
-        pb.fillRect(x + 30, y + 108, POPUP_W - 60, 14, 0xFF1A1A30);
-        pb.drawString(relayNameX, y + 111, relayName, configRelayAssign < 0 ? TEXT_DIM : ACCENT);
+        pb.fillRect(x + 30, y + 140, POPUP_W - 60, 14, 0xFF1A1A30);
+        pb.drawString(relayNameX, y + 143, relayName, configRelayAssign < 0 ? TEXT_DIM : ACCENT);
 
         // ► arrow
-        pb.fillRect(x + POPUP_W - 26, y + 108, 18, 14, 0xFF2A3A5A);
-        pb.drawRect (x + POPUP_W - 26, y + 108, 18, 14, POPUP_BRD);
-        pb.drawString(x + POPUP_W - 22, y + 111, ">", TEXT_NORM);
+        pb.fillRect(x + POPUP_W - 26, y + 140, 18, 14, 0xFF2A3A5A);
+        pb.drawRect (x + POPUP_W - 26, y + 140, 18, 14, POPUP_BRD);
+        pb.drawString(x + POPUP_W - 22, y + 143, ">", TEXT_NORM);
 
-        pb.drawString(x + 8, y + 126, "Press button \u2192 fires relay side", TEXT_DIM);
+        pb.drawString(x + 8, y + 158, "Press button \u2192 fires relay side", TEXT_DIM);
 
         // ── APPLY / CANCEL buttons ─────────────────────────────────────────
         int btnY = y + POPUP_H - 28;

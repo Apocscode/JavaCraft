@@ -22,7 +22,7 @@ import java.util.UUID;
  * Stores 16 button states with configurable modes (toggle, momentary, timer, delay, inverted).
  * Broadcasts events via Bluetooth, accepts commands, and outputs redstone/bundled cable signals.
  */
-public class ButtonPanelBlockEntity extends BlockEntity {
+public class ButtonPanelBlockEntity extends BlockEntity implements IButtonPanel {
     private UUID deviceId = UUID.randomUUID();
 
     /** 16-bit mask: bit i = button i is lit/active */
@@ -58,6 +58,12 @@ public class ButtonPanelBlockEntity extends BlockEntity {
     /** User-assigned display label (max 24 chars, persisted in NBT) */
     private String label = "";
 
+    /** Per-button user label (max 16 chars each). Empty = use default color name. */
+    private final String[] buttonLabels = new String[16];
+
+    /** Per-button color override as 0xRRGGBB. -1 = use default wool color. */
+    private final int[] buttonColors = new int[16];
+
     /** Color names for chat messages */
     private static final String[] COLOR_NAMES = {
         "White", "Orange", "Magenta", "Light Blue", "Yellow", "Lime",
@@ -69,6 +75,8 @@ public class ButtonPanelBlockEntity extends BlockEntity {
         super(ModBlockEntities.BUTTON_PANEL.get(), pos, state);
         Arrays.fill(modes, ButtonMode.TOGGLE);
         Arrays.fill(durations, 20); // 1 second default
+        Arrays.fill(buttonLabels, "");
+        Arrays.fill(buttonColors, -1);
     }
 
     public void serverTick() {
@@ -305,6 +313,34 @@ public class ButtonPanelBlockEntity extends BlockEntity {
         syncToClient();
     }
 
+    /** Get per-button user label ("" if unset). */
+    public String getButtonLabel(int index) {
+        if (index < 0 || index >= 16) return "";
+        return buttonLabels[index] == null ? "" : buttonLabels[index];
+    }
+
+    /** Set per-button user label (max 16 chars, trimmed, persisted in NBT). */
+    public void setButtonLabel(int index, String lbl) {
+        if (index < 0 || index >= 16) return;
+        String v = (lbl == null) ? "" : lbl;
+        if (v.length() > 16) v = v.substring(0, 16);
+        buttonLabels[index] = v;
+        syncToClient();
+    }
+
+    /** Get per-button color override (0xRRGGBB) or -1 if using default. */
+    public int getButtonColor(int index) {
+        if (index < 0 || index >= 16) return -1;
+        return buttonColors[index];
+    }
+
+    /** Set per-button color override as 0xRRGGBB; pass -1 to clear. */
+    public void setButtonColor(int index, int rgb) {
+        if (index < 0 || index >= 16) return;
+        buttonColors[index] = (rgb < 0) ? -1 : (rgb & 0xFFFFFF);
+        syncToClient();
+    }
+
     /** Set all 16 button states at once from a bitmask. */
     public void setAllButtons(int mask) {
         int newStates = mask & 0xFFFF;
@@ -340,6 +376,15 @@ public class ButtonPanelBlockEntity extends BlockEntity {
         for (int i = 0; i < 16; i++) modeOrds[i] = modes[i].ordinal();
         tag.putIntArray("Modes", modeOrds);
         tag.putIntArray("Durations", durations.clone());
+        tag.putIntArray("ButtonColors", buttonColors.clone());
+
+        // Save per-button labels as ListTag of strings
+        net.minecraft.nbt.ListTag lblList = new net.minecraft.nbt.ListTag();
+        for (int i = 0; i < 16; i++) {
+            lblList.add(net.minecraft.nbt.StringTag.valueOf(
+                    buttonLabels[i] == null ? "" : buttonLabels[i]));
+        }
+        tag.put("ButtonLabels", lblList);
     }
 
     @Override
@@ -359,6 +404,18 @@ public class ButtonPanelBlockEntity extends BlockEntity {
         if (tag.contains("Durations")) {
             int[] dur = tag.getIntArray("Durations");
             System.arraycopy(dur, 0, durations, 0, Math.min(16, dur.length));
+        }
+        if (tag.contains("ButtonColors")) {
+            int[] cols = tag.getIntArray("ButtonColors");
+            for (int i = 0; i < Math.min(16, cols.length); i++) {
+                buttonColors[i] = cols[i];
+            }
+        }
+        if (tag.contains("ButtonLabels")) {
+            net.minecraft.nbt.ListTag lblList = tag.getList("ButtonLabels", net.minecraft.nbt.Tag.TAG_STRING);
+            for (int i = 0; i < Math.min(16, lblList.size()); i++) {
+                buttonLabels[i] = lblList.getString(i);
+            }
         }
     }
 

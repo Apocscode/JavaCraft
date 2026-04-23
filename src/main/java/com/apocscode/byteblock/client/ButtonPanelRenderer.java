@@ -7,6 +7,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderer;
@@ -64,10 +65,20 @@ public class ButtonPanelRenderer implements BlockEntityRenderer<ButtonPanelBlock
     public ButtonPanelRenderer(BlockEntityRendererProvider.Context context) {
     }
 
+    /** Returns the effective button color: BE override if set, otherwise default wool color. */
+    private static int colorFor(ButtonPanelBlockEntity be, int index) {
+        int override = be.getButtonColor(index);
+        return (override >= 0) ? override : BUTTON_COLORS[index];
+    }
+
     @Override
     public void render(ButtonPanelBlockEntity be, float partialTick, PoseStack pose,
                        MultiBufferSource buffers, int packedLight, int packedOverlay) {
         if (be.getLevel() == null) return;
+
+        // In Fabulous! graphics mode, entityTranslucentEmissive composites AFTER the GUI.
+        // Skip emissive passes while any screen is open so they don't bleed over the GUI.
+        boolean screenOpen = Minecraft.getInstance().screen != null;
 
         Direction facing = be.getBlockState().getValue(ButtonPanelBlock.FACING);
         int states = be.getButtonStates();
@@ -89,7 +100,7 @@ public class ButtonPanelRenderer implements BlockEntityRenderer<ButtonPanelBlock
             for (int col = 0; col < 4; col++) {
                 int index = row * 4 + col;
                 boolean lit = (states & (1 << index)) != 0;
-                int color = BUTTON_COLORS[index];
+                int color = colorFor(be, index);
                 int r = (color >> 16) & 0xFF, g = (color >> 8) & 0xFF, b = color & 0xFF;
 
                 float x0 = MARGIN + col * CELL_SIZE + BUTTON_GAP / 2;
@@ -135,13 +146,13 @@ public class ButtonPanelRenderer implements BlockEntityRenderer<ButtonPanelBlock
         }
 
         // ---------- PASS 2: Emissive caps for LIT buttons ----------
-        if (states != 0) {
+        if (states != 0 && !screenOpen) {
             VertexConsumer vcEmissive = buffers.getBuffer(RenderType.entityTranslucentEmissive(WHITE_TEX));
             for (int row = 0; row < 4; row++) {
                 for (int col = 0; col < 4; col++) {
                     int index = row * 4 + col;
                     if ((states & (1 << index)) == 0) continue;
-                    int color = BUTTON_COLORS[index];
+                    int color = colorFor(be, index);
                     int r = (color >> 16) & 0xFF, g = (color >> 8) & 0xFF, b = color & 0xFF;
                     float x0 = MARGIN + col * CELL_SIZE + BUTTON_GAP / 2;
                     float x1 = x0 + BUTTON_SIZE;
@@ -163,7 +174,7 @@ public class ButtonPanelRenderer implements BlockEntityRenderer<ButtonPanelBlock
             for (int col = 0; col < 4; col++) {
                 int index = row * 4 + col;
                 boolean lit = (states & (1 << index)) != 0;
-                int color = BUTTON_COLORS[index];
+                int color = colorFor(be, index);
 
                 float x0 = MARGIN + col * CELL_SIZE + BUTTON_GAP / 2 + LENS_INSET;
                 float x1 = MARGIN + col * CELL_SIZE + BUTTON_GAP / 2 + BUTTON_SIZE - LENS_INSET;
@@ -194,13 +205,13 @@ public class ButtonPanelRenderer implements BlockEntityRenderer<ButtonPanelBlock
         }
 
         // ---------- PASS 4: Soft outer halo for LIT buttons ----------
-        if (states != 0) {
+        if (states != 0 && !screenOpen) {
             VertexConsumer vcHalo = buffers.getBuffer(RenderType.entityTranslucentEmissive(WHITE_TEX));
             for (int row = 0; row < 4; row++) {
                 for (int col = 0; col < 4; col++) {
                     int index = row * 4 + col;
                     if ((states & (1 << index)) == 0) continue;
-                    int color = BUTTON_COLORS[index];
+                    int color = colorFor(be, index);
                     int r = (color >> 16) & 0xFF, g = (color >> 8) & 0xFF, b = color & 0xFF;
 
                     float bx0 = MARGIN + col * CELL_SIZE + BUTTON_GAP / 2;

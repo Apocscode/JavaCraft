@@ -133,59 +133,58 @@ public class ButtonPanelBlock extends Block implements EntityBlock {
     @Override
     protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos,
                                                Player player, BlockHitResult hitResult) {
-        // Sneak+click: open configuration GUI
+        int buttonIndex = computeButtonIndex(state, pos, hitResult);
+
+        // If the click landed on the slab margin (not on a button face), do nothing.
+        // Neither a normal click nor a shift-click should do anything here.
+        if (buttonIndex < 0) {
+            return InteractionResult.PASS;
+        }
+
+        // Sneak+click on a button face: open the configuration GUI for THAT button.
         if (player.isShiftKeyDown()) {
             if (level.isClientSide()) {
-                openConfigGui(pos);
+                openConfigGui(pos, buttonIndex);
             }
             return InteractionResult.sidedSuccess(level.isClientSide());
         }
 
-        // Normal click: press a button
+        // Normal click: press that button
         if (!level.isClientSide()) {
-            Direction facing = state.getValue(FACING);
-            Vec3 hit = hitResult.getLocation();
-
-            // Local-to-face coordinates (u = column axis, v = row axis), both in 0..1.
-            // Must agree with the renderer's per-facing rotation so that col=0,row=0 in the
-            // hit test corresponds to the SAME visible button as col=0,row=0 in the renderer.
-            // In the renderer, row 0 is always at high render-y (top of the local face quad).
-            // We compute v so that v=0 lines up with row 0 (high render-y), giving row=int(v*4).
-            double u, v;
-            double hx = hit.x - pos.getX();
-            double hy = hit.y - pos.getY();
-            double hz = hit.z - pos.getZ();
-            switch (facing) {
-                case NORTH -> { u = hx;           v = 1.0 - hy; }
-                case SOUTH -> { u = 1.0 - hx;     v = 1.0 - hy; }
-                case WEST  -> { u = 1.0 - hz;     v = 1.0 - hy; }
-                case EAST  -> { u = hz;           v = 1.0 - hy; }
-                case UP    -> { u = hx;           v = 1.0 - hz; } // row 0 at south edge
-                case DOWN  -> { u = hx;           v = hz; }       // row 0 at north edge
-                default    -> { u = hx;           v = 1.0 - hy; }
-            }
-
-            // Map to 4×4 grid — constants must match ButtonPanelRenderer exactly.
-            // Slab is inset 1px (1/16) on each face edge, then buttons have an additional 1px
-            // inner margin → MARGIN = 2/16 = 0.125, CELL_SIZE = 12/16/4 = 0.1875.
-            final float MARGIN = 0.125f;
-            final float CELL_SIZE = (1.0f - 2 * MARGIN) / 4.0f; // 0.1875
-
-            // Subtract the left/top margin, then divide by CELL_SIZE to get the cell index
-            int col = (int) Math.floor((u - MARGIN) / CELL_SIZE);
-            int row = (int) Math.floor((v - MARGIN) / CELL_SIZE);
-            if (col < 0 || col > 3 || row < 0 || row > 3) {
-                // Click landed in the margin around the grid — ignore
-                return InteractionResult.sidedSuccess(level.isClientSide());
-            }
-            int buttonIndex = row * 4 + col;
-
             if (level.getBlockEntity(pos) instanceof ButtonPanelBlockEntity panel) {
                 panel.toggleButton(buttonIndex, player);
                 level.playSound(null, pos, SoundEvents.STONE_BUTTON_CLICK_ON, SoundSource.BLOCKS, 0.3f, 1.2f);
             }
         }
         return InteractionResult.sidedSuccess(level.isClientSide());
+    }
+
+    /**
+     * Ray-trace hit → 0..15 button index, or -1 if the click landed in the margin.
+     * Kept consistent with ButtonPanelRenderer's per-facing orientation.
+     */
+    private static int computeButtonIndex(BlockState state, BlockPos pos, BlockHitResult hitResult) {
+        Direction facing = state.getValue(FACING);
+        Vec3 hit = hitResult.getLocation();
+        double u, v;
+        double hx = hit.x - pos.getX();
+        double hy = hit.y - pos.getY();
+        double hz = hit.z - pos.getZ();
+        switch (facing) {
+            case NORTH -> { u = hx;           v = 1.0 - hy; }
+            case SOUTH -> { u = 1.0 - hx;     v = 1.0 - hy; }
+            case WEST  -> { u = 1.0 - hz;     v = 1.0 - hy; }
+            case EAST  -> { u = hz;           v = 1.0 - hy; }
+            case UP    -> { u = hx;           v = 1.0 - hz; }
+            case DOWN  -> { u = hx;           v = hz; }
+            default    -> { u = hx;           v = 1.0 - hy; }
+        }
+        final float MARGIN = 0.125f;
+        final float CELL_SIZE = (1.0f - 2 * MARGIN) / 4.0f;
+        int col = (int) Math.floor((u - MARGIN) / CELL_SIZE);
+        int row = (int) Math.floor((v - MARGIN) / CELL_SIZE);
+        if (col < 0 || col > 3 || row < 0 || row > 3) return -1;
+        return row * 4 + col;
     }
 
     @Override
@@ -205,10 +204,10 @@ public class ButtonPanelBlock extends Block implements EntityBlock {
         super.neighborChanged(state, level, pos, neighborBlock, neighborPos, movedByPiston);
     }
 
-    /** Opens the button panel config screen (client-side only). */
+    /** Opens the button panel config screen for one specific button (client-side only). */
     @net.neoforged.api.distmarker.OnlyIn(net.neoforged.api.distmarker.Dist.CLIENT)
-    private static void openConfigGui(BlockPos pos) {
+    private static void openConfigGui(BlockPos pos, int buttonIndex) {
         net.minecraft.client.Minecraft.getInstance().setScreen(
-                new com.apocscode.byteblock.client.ButtonPanelScreen(pos));
+                new com.apocscode.byteblock.client.ButtonPanelScreen(pos, buttonIndex));
     }
 }

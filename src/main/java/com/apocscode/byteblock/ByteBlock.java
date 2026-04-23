@@ -2,6 +2,7 @@ package com.apocscode.byteblock;
 
 import org.slf4j.Logger;
 
+import com.apocscode.byteblock.compat.ProjectRedBundledCompat;
 import com.apocscode.byteblock.entity.DroneEntity;
 import com.apocscode.byteblock.entity.RobotEntity;
 import com.apocscode.byteblock.init.*;
@@ -63,6 +64,7 @@ public class ByteBlock {
         LOGGER.info("ByteBlock initializing — in-game Java computer simulator");
         com.apocscode.byteblock.computer.storage.ModLinkRegistry.registerDefaults();
         com.apocscode.byteblock.computer.peripheral.PeripheralRegistry.registerDefaults();
+        event.enqueueWork(ProjectRedBundledCompat::tryRegister);
     }
     private void onRegisterPayloads(RegisterPayloadHandlersEvent event) {
         var registrar = event.registrar("1");
@@ -80,6 +82,11 @@ public class ByteBlock {
             com.apocscode.byteblock.network.ButtonConfigPayload.TYPE,
             com.apocscode.byteblock.network.ButtonConfigPayload.STREAM_CODEC,
             com.apocscode.byteblock.network.ButtonConfigPayload::handle
+        );
+        registrar.playToServer(
+            com.apocscode.byteblock.network.RelayConfigPayload.TYPE,
+            com.apocscode.byteblock.network.RelayConfigPayload.STREAM_CODEC,
+            com.apocscode.byteblock.network.RelayConfigPayload::handle
         );
     }
     private void registerEntityAttributes(EntityAttributeCreationEvent event) {
@@ -133,6 +140,8 @@ public class ByteBlock {
                     com.apocscode.byteblock.client.MonitorRenderer::new);
             event.registerBlockEntityRenderer(ModBlockEntities.BUTTON_PANEL.get(),
                     com.apocscode.byteblock.client.ButtonPanelRenderer::new);
+            event.registerBlockEntityRenderer(ModBlockEntities.REDSTONE_RELAY.get(),
+                    com.apocscode.byteblock.client.RedstoneRelayRenderer::new);
         }
     }
 }

@@ -85,6 +85,13 @@ public class RedstoneRelayBlock extends Block implements EntityBlock {
     @Override
     protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos,
                                                Player player, BlockHitResult hitResult) {
+        if (player.isShiftKeyDown()) {
+            if (level.isClientSide()) {
+                openConfigGui(pos);
+            }
+            return InteractionResult.sidedSuccess(level.isClientSide());
+        }
+
         if (!level.isClientSide()) {
             BlockEntity be = level.getBlockEntity(pos);
             if (be instanceof RedstoneRelayBlockEntity relay) {
@@ -95,8 +102,14 @@ public class RedstoneRelayBlock extends Block implements EntityBlock {
                         Direction d = Direction.from3DDataValue(i);
                         int out = relay.getOutput(i);
                         int in = relay.getInput(i);
-                        if (out > 0 || in > 0) {
-                            sb.append(d.getName()).append(": out=").append(out).append(" in=").append(in).append(" ");
+                        int ch = relay.getFaceChannel(i);
+                        boolean bundled = relay.isBundledFace(i);
+                        if (out > 0 || in > 0 || ch > 0 || bundled) {
+                            sb.append(d.getName()).append(": out=").append(out)
+                                    .append(" in=").append(in)
+                                    .append(" ch=").append(ch)
+                                    .append(bundled ? " bundled" : "")
+                                    .append(" ");
                         }
                     }
                 } else {
@@ -106,6 +119,13 @@ public class RedstoneRelayBlock extends Block implements EntityBlock {
             }
         }
         return InteractionResult.sidedSuccess(level.isClientSide());
+    }
+
+    /** Opens the redstone relay config GUI (client-side only). */
+    @net.neoforged.api.distmarker.OnlyIn(net.neoforged.api.distmarker.Dist.CLIENT)
+    private static void openConfigGui(BlockPos pos) {
+        net.minecraft.client.Minecraft.getInstance().setScreen(
+                new com.apocscode.byteblock.client.RedstoneRelayScreen(pos));
     }
 
     @Override

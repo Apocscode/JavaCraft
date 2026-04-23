@@ -87,6 +87,24 @@ public class BluetoothNetwork {
         }
     }
 
+    /**
+     * Register one device on multiple channels for the same tick.
+     * Existing entries for the same device are replaced.
+     */
+    public static void registerMulti(Level level, UUID deviceId, BlockPos pos, Collection<Integer> channels, DeviceType type) {
+        if (level == null) return;
+        String dim = level.dimension().location().toString();
+        devices.computeIfAbsent(dim, k -> Collections.synchronizedList(new ArrayList<>()));
+        List<DeviceEntry> dimDevices = devices.get(dim);
+
+        synchronized (dimDevices) {
+            dimDevices.removeIf(d -> d.deviceId.equals(deviceId));
+            for (int channel : channels) {
+                dimDevices.add(new DeviceEntry(deviceId, pos, channel, level.getGameTime(), type, dim));
+            }
+        }
+    }
+
     /** Backward-compatible register (defaults to COMPUTER type) */
     public static void register(Level level, UUID deviceId, BlockPos pos, int channel) {
         register(level, deviceId, pos, channel, DeviceType.COMPUTER);

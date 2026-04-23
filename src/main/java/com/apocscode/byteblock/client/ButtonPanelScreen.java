@@ -14,20 +14,25 @@ import net.minecraft.network.chat.Component;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 /**
- * Button Panel configuration GUI — opened by sneak+right-clicking the panel block.
- * Shows a 4×4 button grid (click to select), mode picker, duration field, and channel setting.
+ * Dedicated single-button configuration GUI.
+ *
+ * Opened by shift+right-clicking a SPECIFIC button face on a ButtonPanel block.
+ * Each button has its own instance of this GUI, titled with that button's color.
  */
 public class ButtonPanelScreen extends Screen {
 
     private final BlockPos panelPos;
-    private int selectedButton = 0;
+    private final int buttonIndex;
 
-    // Cached config from block entity
-    private final ButtonMode[] modes = new ButtonMode[16];
-    private final int[] durations = new int[16];
-    private int channel = 1;
+    private ButtonMode mode;
+    private int duration;
+    private String label;
+    private int colorOverride;   // -1 = default, else 0xRRGGBB
+    private int channel;
+    private String panelLabel;
 
     // Widgets
+    private EditBox labelField;
     private Button modeButton;
     private EditBox durationField;
     private EditBox channelField;
@@ -35,14 +40,27 @@ public class ButtonPanelScreen extends Screen {
     // Layout
     private int guiLeft, guiTop;
     private static final int GUI_WIDTH = 260;
-    private static final int GUI_HEIGHT = 200;
-    private static final int GRID_SIZE = 120;
-    private static final int GRID_LEFT = 12;
-    private static final int GRID_TOP = 30;
-    private static final int CELL = 28;
-    private static final int GAP = 2;
+    private static final int GUI_HEIGHT = 260;
 
-    // Button colors matching the panel renderer
+    // Row Y offsets (all relative to guiTop). Each widget has its own row with
+    // no overlap with the one below it.
+    private static final int ROW_LABEL_LBL    =  36;
+    private static final int ROW_LABEL_FIELD  =  46;   // 16h -> ends 62
+    private static final int ROW_MODE_LBL     =  68;
+    private static final int ROW_MODE_BTN     =  78;   // 18h -> ends 96
+    private static final int ROW_MODE_DESC    = 102;   // 9h  -> ends 111
+    private static final int ROW_DUR_LBL      = 116;
+    private static final int ROW_DUR_FIELD    = 126;   // 16h -> ends 142
+    private static final int ROW_COLOR_LBL    = 150;
+    private static final int ROW_PALETTE      = 160;   // two rows of 14h -> ends 190
+    private static final int ROW_CHANNEL_LBL  = 198;
+    private static final int ROW_CHANNEL_FLD  = 208;   // 16h -> ends 224
+    private static final int ROW_BUTTONS      = 232;   // 20h -> ends 252
+
+    // Color palette layout
+    private static final int PALETTE_SWATCH = 14;
+    private static final int PALETTE_GAP = 2;
+
     private static final int[] BUTTON_COLORS = {
         0xFFF9FFFE, 0xFFF9801D, 0xFFC74EBD, 0xFF3AB3DA,
         0xFFFED83D, 0xFF80C71F, 0xFFF38BAA, 0xFF474F52,
@@ -50,28 +68,31 @@ public class ButtonPanelScreen extends Screen {
         0xFF835432, 0xFF5E7C16, 0xFFB02E26, 0xFF1D1D21
     };
     private static final String[] COLOR_NAMES = {
-        "White", "Orange", "Magenta", "Lt Blue", "Yellow", "Lime",
-        "Pink", "Gray", "Lt Gray", "Cyan", "Purple", "Blue",
+        "White", "Orange", "Magenta", "Light Blue", "Yellow", "Lime",
+        "Pink", "Gray", "Light Gray", "Cyan", "Purple", "Blue",
         "Brown", "Green", "Red", "Black"
     };
 
-    public ButtonPanelScreen(BlockPos pos) {
-        super(Component.literal("Button Panel Config"));
+    public ButtonPanelScreen(BlockPos pos, int buttonIndex) {
+        super(Component.literal(COLOR_NAMES[buttonIndex] + " Button"));
         this.panelPos = pos;
+        this.buttonIndex = buttonIndex;
 
-        // Load config from client-side block entity
-        if (Minecraft.getInstance().level != null &&
-            Minecraft.getInstance().level.getBlockEntity(pos) instanceof ButtonPanelBlockEntity panel) {
-            for (int i = 0; i < 16; i++) {
-                modes[i] = panel.getMode(i);
-                durations[i] = panel.getDuration(i);
-            }
-            channel = panel.getChannel();
+        if (Minecraft.getInstance().level != null
+                && Minecraft.getInstance().level.getBlockEntity(pos) instanceof ButtonPanelBlockEntity panel) {
+            this.mode = panel.getMode(buttonIndex);
+            this.duration = panel.getDuration(buttonIndex);
+            this.label = panel.getButtonLabel(buttonIndex);
+            this.colorOverride = panel.getButtonColor(buttonIndex);
+            this.channel = panel.getChannel();
+            this.panelLabel = panel.getLabel();
         } else {
-            for (int i = 0; i < 16; i++) {
-                modes[i] = ButtonMode.TOGGLE;
-                durations[i] = 20;
-            }
+            this.mode = ButtonMode.TOGGLE;
+            this.duration = 20;
+            this.label = "";
+            this.colorOverride = -1;
+            this.channel = 1;
+            this.panelLabel = "";
         }
     }
 
@@ -80,216 +101,206 @@ public class ButtonPanelScreen extends Screen {
         guiLeft = (width - GUI_WIDTH) / 2;
         guiTop = (height - GUI_HEIGHT) / 2;
 
-        int rightCol = guiLeft + GRID_LEFT + GRID_SIZE + 16;
-        int rightWidth = GUI_WIDTH - GRID_SIZE - GRID_LEFT - 28;
+        int fieldX = guiLeft + 12;
+        int fieldW = GUI_WIDTH - 24;
+
+        // Label field
+        labelField = new EditBox(font, fieldX, guiTop + ROW_LABEL_FIELD, fieldW, 16, Component.literal("Label"));
+        labelField.setMaxLength(16);
+        labelField.setValue(label == null ? "" : label);
+        addRenderableWidget(labelField);
 
         // Mode cycle button
-        modeButton = Button.builder(Component.literal(modes[selectedButton].name()),
-                b -> cycleMode())
-                .bounds(rightCol, guiTop + 52, rightWidth, 20)
+        modeButton = Button.builder(Component.literal(mode.name()), b -> cycleMode())
+                .bounds(fieldX, guiTop + ROW_MODE_BTN, fieldW, 18)
                 .build();
         addRenderableWidget(modeButton);
 
         // Duration field
-        durationField = new EditBox(font, rightCol, guiTop + 94, rightWidth, 16,
-                Component.literal("Duration"));
+        durationField = new EditBox(font, fieldX, guiTop + ROW_DUR_FIELD, fieldW, 16, Component.literal("Duration"));
         durationField.setMaxLength(5);
-        durationField.setValue(String.valueOf(durations[selectedButton]));
+        durationField.setValue(String.valueOf(duration));
         addRenderableWidget(durationField);
+        updateDurationEditable();
 
         // Channel field
-        channelField = new EditBox(font, rightCol, guiTop + 134, 40, 16,
-                Component.literal("Channel"));
+        channelField = new EditBox(font, fieldX, guiTop + ROW_CHANNEL_FLD, 50, 16, Component.literal("Channel"));
         channelField.setMaxLength(3);
         channelField.setValue(String.valueOf(channel));
         addRenderableWidget(channelField);
 
-        // Apply button
-        addRenderableWidget(Button.builder(Component.literal("Apply"),
-                b -> applyConfig())
-                .bounds(rightCol, guiTop + GUI_HEIGHT - 28, rightWidth / 2 - 2, 20)
-                .build());
-
-        // Done button
-        addRenderableWidget(Button.builder(Component.literal("Done"),
-                b -> onClose())
-                .bounds(rightCol + rightWidth / 2 + 2, guiTop + GUI_HEIGHT - 28, rightWidth / 2 - 2, 20)
-                .build());
-
-        updateWidgets();
+        // Apply + Done
+        addRenderableWidget(Button.builder(Component.literal("Apply"), b -> applyConfig())
+                .bounds(fieldX, guiTop + ROW_BUTTONS, fieldW / 2 - 2, 20).build());
+        addRenderableWidget(Button.builder(Component.literal("Done"), b -> onClose())
+                .bounds(fieldX + fieldW / 2 + 2, guiTop + ROW_BUTTONS, fieldW / 2 - 2, 20).build());
     }
 
     private void cycleMode() {
-        modes[selectedButton] = modes[selectedButton].next();
-        updateWidgets();
+        mode = mode.next();
+        modeButton.setMessage(Component.literal(mode.name()));
+        updateDurationEditable();
     }
 
-    private void updateWidgets() {
-        if (modeButton != null) {
-            modeButton.setMessage(Component.literal(modes[selectedButton].name()));
-        }
-        if (durationField != null) {
-            durationField.setValue(String.valueOf(durations[selectedButton]));
-            // Duration only relevant for TIMER and DELAY
-            boolean needsDuration = modes[selectedButton] == ButtonMode.TIMER
-                    || modes[selectedButton] == ButtonMode.DELAY;
-            durationField.setEditable(needsDuration);
-        }
+    private void updateDurationEditable() {
+        boolean needs = (mode == ButtonMode.TIMER || mode == ButtonMode.DELAY);
+        if (durationField != null) durationField.setEditable(needs);
     }
 
     private void applyConfig() {
-        // Parse duration
         try {
-            int dur = Integer.parseInt(durationField.getValue());
-            durations[selectedButton] = Math.max(1, Math.min(6000, dur));
+            int d = Integer.parseInt(durationField.getValue());
+            duration = Math.max(1, Math.min(6000, d));
         } catch (NumberFormatException ignored) {}
-
-        // Parse channel
         try {
-            int ch = Integer.parseInt(channelField.getValue());
-            channel = Math.max(1, Math.min(256, ch));
+            int c = Integer.parseInt(channelField.getValue());
+            channel = Math.max(1, Math.min(256, c));
         } catch (NumberFormatException ignored) {}
+        label = labelField.getValue();
 
-        // Send packet to server
         PacketDistributor.sendToServer(new ButtonConfigPayload(
-                panelPos, selectedButton, modes[selectedButton].ordinal(),
-                durations[selectedButton], channel));
+                panelPos, buttonIndex, mode.ordinal(), duration, channel,
+                panelLabel == null ? "" : panelLabel,
+                label == null ? "" : label,
+                colorOverride));
     }
+
+    private int getPaletteX() { return guiLeft + 12; }
+    private int getPaletteY() { return guiTop + ROW_PALETTE; }
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        // Check if clicked on the grid
-        int gx = guiLeft + GRID_LEFT;
-        int gy = guiTop + GRID_TOP;
-        if (mouseX >= gx && mouseX < gx + GRID_SIZE && mouseY >= gy && mouseY < gy + GRID_SIZE) {
-            int col = (int) ((mouseX - gx) / (CELL + GAP));
-            int row = (int) ((mouseY - gy) / (CELL + GAP));
-            if (col >= 0 && col < 4 && row >= 0 && row < 4) {
-                // Auto-apply previous before switching
-                applyConfig();
-                selectedButton = row * 4 + col;
-                updateWidgets();
+        // Palette (8 across, 2 rows)
+        int palX = getPaletteX();
+        int palY = getPaletteY();
+        for (int i = 0; i < 16; i++) {
+            int sx = palX + (i % 8) * (PALETTE_SWATCH + PALETTE_GAP);
+            int sy = palY + (i / 8) * (PALETTE_SWATCH + PALETTE_GAP);
+            if (mouseX >= sx && mouseX < sx + PALETTE_SWATCH
+                    && mouseY >= sy && mouseY < sy + PALETTE_SWATCH) {
+                colorOverride = BUTTON_COLORS[i] & 0xFFFFFF;
                 return true;
             }
+        }
+        // "X" reset
+        int resetX = palX + 8 * (PALETTE_SWATCH + PALETTE_GAP) + 6;
+        if (mouseX >= resetX && mouseX < resetX + PALETTE_SWATCH
+                && mouseY >= palY && mouseY < palY + PALETTE_SWATCH) {
+            colorOverride = -1;
+            return true;
         }
         return super.mouseClicked(mouseX, mouseY, button);
     }
 
     @Override
     public void render(GuiGraphics gui, int mouseX, int mouseY, float partialTick) {
-        // Darken background
-        renderBackground(gui, mouseX, mouseY, partialTick);
+        // Skip renderBackground() — bypass blur pipeline entirely.
+        // Full-screen opaque fill so nothing from the world bleeds through.
+        gui.fill(0, 0, width, height, 0xFF101018);
 
-        int x = guiLeft;
-        int y = guiTop;
+        int x = guiLeft, y = guiTop;
 
-        // Main panel background
-        gui.fill(x, y, x + GUI_WIDTH, y + GUI_HEIGHT, 0xFF1E1E2E);
-        // Border
-        gui.fill(x, y, x + GUI_WIDTH, y + 1, 0xFF3A4A6A);
-        gui.fill(x, y, x + 1, y + GUI_HEIGHT, 0xFF3A4A6A);
-        gui.fill(x + GUI_WIDTH - 1, y, x + GUI_WIDTH, y + GUI_HEIGHT, 0xFF0A0A15);
-        gui.fill(x, y + GUI_HEIGHT - 1, x + GUI_WIDTH, y + GUI_HEIGHT, 0xFF0A0A15);
+        // Panel (fully opaque, slightly lighter to improve text contrast)
+        gui.fill(x, y, x + GUI_WIDTH, y + GUI_HEIGHT, 0xFF2A2A3C);
+        // 2-tone bevel border
+        gui.fill(x, y, x + GUI_WIDTH, y + 1, 0xFF8090B0);
+        gui.fill(x, y, x + 1, y + GUI_HEIGHT, 0xFF8090B0);
+        gui.fill(x + GUI_WIDTH - 1, y, x + GUI_WIDTH, y + GUI_HEIGHT, 0xFF101020);
+        gui.fill(x, y + GUI_HEIGHT - 1, x + GUI_WIDTH, y + GUI_HEIGHT, 0xFF101020);
 
-        // Title bar
-        gui.fill(x + 1, y + 1, x + GUI_WIDTH - 1, y + 22, 0xFF2A2A3E);
-        gui.drawString(font, "Button Panel Config", x + 8, y + 7, 0xFF5588DD, false);
+        // ── Title bar tinted with the button's effective color ──────────────
+        int effColor = (colorOverride >= 0) ? (0xFF000000 | colorOverride) : BUTTON_COLORS[buttonIndex];
+        int r = (effColor >> 16) & 0xFF;
+        int g = (effColor >> 8)  & 0xFF;
+        int b =  effColor        & 0xFF;
 
-        // Channel display in title bar
+        // Darkened tint (40%) for the bar background
+        int barBg = 0xFF000000 | (((r * 2) / 5) << 16) | (((g * 2) / 5) << 8) | ((b * 2) / 5);
+        gui.fill(x + 1, y + 1, x + GUI_WIDTH - 1, y + 30, barBg);
+
+        // Full-color chip
+        gui.fill(x + 8, y + 8, x + 24, y + 24, effColor);
+        gui.fill(x + 8, y + 8, x + 24, y + 9, 0xFFFFFFFF);
+        gui.fill(x + 8, y + 8, x + 9, y + 24, 0xFFFFFFFF);
+        gui.fill(x + 23, y + 8, x + 24, y + 24, 0xFF000000);
+        gui.fill(x + 8, y + 23, x + 24, y + 24, 0xFF000000);
+
+        // Contrast-aware text color
+        int barLum = ((((r * 2) / 5) * 299) + (((g * 2) / 5) * 587) + (((b * 2) / 5) * 114)) / 1000;
+        int titleFg = barLum > 110 ? 0xFF000000 : 0xFFFFFFFF;
+
+        String colorName = (colorOverride >= 0) ? "Custom" : COLOR_NAMES[buttonIndex];
+        gui.drawString(font, colorName + " Button", x + 32, y + 8, titleFg, true);
+        gui.drawString(font, "#" + (buttonIndex + 1), x + 32, y + 18, titleFg, true);
+
         String chStr = "CH " + channel;
-        gui.drawString(font, chStr, x + GUI_WIDTH - font.width(chStr) - 8, y + 7, 0xFF44CCDD, false);
+        gui.drawString(font, chStr, x + GUI_WIDTH - font.width(chStr) - 8, y + 12, titleFg, true);
 
-        // Draw 4×4 button grid
-        int gx = x + GRID_LEFT;
-        int gy = y + GRID_TOP;
-        for (int row = 0; row < 4; row++) {
-            for (int col = 0; col < 4; col++) {
-                int idx = row * 4 + col;
-                int bx = gx + col * (CELL + GAP);
-                int by = gy + row * (CELL + GAP);
+        // ── Field labels ───────────────────────────────────────────────────
+        int lx = x + 12;
+        gui.drawString(font, "Label:", lx, y + ROW_LABEL_LBL, 0xFFAABBCC, true);
+        gui.drawString(font, "Mode:",  lx, y + ROW_MODE_LBL,  0xFFAABBCC, true);
 
-                // Button color fill
-                gui.fill(bx, by, bx + CELL, by + CELL, BUTTON_COLORS[idx]);
+        // Mode description (its own row, no overlap with Duration)
+        String desc = switch (mode) {
+            case TOGGLE    -> "Click to toggle on/off.";
+            case MOMENTARY -> "Short pulse (4 ticks) on press.";
+            case TIMER     -> "On for " + duration + "t (" + String.format("%.1fs", duration / 20.0) + "), then off.";
+            case DELAY     -> "Wait " + duration + "t, then toggle.";
+            case INVERTED  -> "Toggle; output is inverted.";
+        };
+        gui.drawString(font, desc, lx, y + ROW_MODE_DESC, 0xFF778899, true);
 
-                // Selection highlight
-                if (idx == selectedButton) {
-                    // White border for selected
-                    gui.fill(bx - 2, by - 2, bx + CELL + 2, by - 1, 0xFFFFFFFF);
-                    gui.fill(bx - 2, by + CELL + 1, bx + CELL + 2, by + CELL + 2, 0xFFFFFFFF);
-                    gui.fill(bx - 2, by - 1, bx - 1, by + CELL + 1, 0xFFFFFFFF);
-                    gui.fill(bx + CELL + 1, by - 1, bx + CELL + 2, by + CELL + 1, 0xFFFFFFFF);
-                }
+        boolean needsDuration = (mode == ButtonMode.TIMER || mode == ButtonMode.DELAY);
+        String durCaption = needsDuration
+                ? "Duration (ticks, 20 = 1s):"
+                : "Duration (unused for " + mode.name() + "):";
+        gui.drawString(font, durCaption, lx, y + ROW_DUR_LBL,
+                needsDuration ? 0xFFAABBCC : 0xFF556677, true);
 
-                // Mode letter indicator
-                String letter = switch (modes[idx]) {
-                    case TOGGLE -> "T";
-                    case MOMENTARY -> "M";
-                    case TIMER -> "R";
-                    case DELAY -> "D";
-                    case INVERTED -> "I";
-                };
-                // Shadow for readability
-                gui.drawString(font, letter, bx + 2, by + 2, 0xFF000000, false);
-                gui.drawString(font, letter, bx + 1, by + 1, 0xFFFFFFFF, false);
+        // ── Color palette ──────────────────────────────────────────────────
+        gui.drawString(font, "Color:", lx, y + ROW_COLOR_LBL, 0xFFAABBCC, true);
+        int palX = getPaletteX();
+        int palY = getPaletteY();
+        for (int i = 0; i < 16; i++) {
+            int sx = palX + (i % 8) * (PALETTE_SWATCH + PALETTE_GAP);
+            int sy = palY + (i / 8) * (PALETTE_SWATCH + PALETTE_GAP);
+            gui.fill(sx, sy, sx + PALETTE_SWATCH, sy + PALETTE_SWATCH, BUTTON_COLORS[i]);
+            if (colorOverride >= 0 && (BUTTON_COLORS[i] & 0xFFFFFF) == colorOverride) {
+                gui.fill(sx - 1, sy - 1, sx + PALETTE_SWATCH + 1, sy,                         0xFFFFFFFF);
+                gui.fill(sx - 1, sy + PALETTE_SWATCH, sx + PALETTE_SWATCH + 1, sy + PALETTE_SWATCH + 1, 0xFFFFFFFF);
+                gui.fill(sx - 1, sy, sx, sy + PALETTE_SWATCH,                                 0xFFFFFFFF);
+                gui.fill(sx + PALETTE_SWATCH, sy, sx + PALETTE_SWATCH + 1, sy + PALETTE_SWATCH, 0xFFFFFFFF);
+            } else {
+                gui.fill(sx, sy, sx + PALETTE_SWATCH, sy + 1, 0xFF000000);
+                gui.fill(sx, sy, sx + 1, sy + PALETTE_SWATCH, 0xFF000000);
             }
         }
-
-        // Right side labels
-        int rightCol = x + GRID_LEFT + GRID_SIZE + 16;
-
-        // Selected button info
-        gui.drawString(font, "Button " + selectedButton, rightCol, y + 30, 0xFFCCCCCC, false);
-        gui.drawString(font, COLOR_NAMES[selectedButton], rightCol + font.width("Button " + selectedButton + " "),
-                y + 30, BUTTON_COLORS[selectedButton], false);
-
-        // Mode label
-        gui.drawString(font, "Mode:", rightCol, y + 42, 0xFF888899, false);
-
-        // Duration label
-        boolean needsDuration = modes[selectedButton] == ButtonMode.TIMER
-                || modes[selectedButton] == ButtonMode.DELAY;
-        String durLabel = needsDuration ? "Duration (ticks):" : "Duration (N/A):";
-        gui.drawString(font, durLabel, rightCol, y + 82, 0xFF888899, false);
+        // Reset swatch
+        int resetX = palX + 8 * (PALETTE_SWATCH + PALETTE_GAP) + 6;
+        gui.fill(resetX, palY, resetX + PALETTE_SWATCH, palY + PALETTE_SWATCH, 0xFF333344);
+        gui.drawString(font, "X", resetX + 4, palY + 3,
+                colorOverride < 0 ? 0xFFFFCC44 : 0xFFAAAAAA, true);
 
         // Channel label
-        gui.drawString(font, "BT Channel:", rightCol, y + 124, 0xFF888899, false);
+        gui.drawString(font, "BT Channel:", x + 12, y + ROW_CHANNEL_LBL, 0xFFAABBCC, true);
 
-        // Mode description
-        String desc = switch (modes[selectedButton]) {
-            case TOGGLE -> "Click on / click off";
-            case MOMENTARY -> "Short pulse (4 ticks)";
-            case TIMER -> "On for " + durations[selectedButton] + "t, then off";
-            case DELAY -> "Wait " + durations[selectedButton] + "t, then toggle";
-            case INVERTED -> "Toggle, inverted output";
-        };
-        gui.drawString(font, desc, rightCol, y + 115, 0xFF666677, false);
-
-        // Render widgets (buttons, text fields)
         super.render(gui, mouseX, mouseY, partialTick);
+    }
 
-        // Tooltip on hover over buttons
-        for (int row = 0; row < 4; row++) {
-            for (int col = 0; col < 4; col++) {
-                int idx = row * 4 + col;
-                int bx = gx + col * (CELL + GAP);
-                int by = gy + row * (CELL + GAP);
-                if (mouseX >= bx && mouseX < bx + CELL && mouseY >= by && mouseY < by + CELL) {
-                    gui.renderTooltip(font,
-                            Component.literal(COLOR_NAMES[idx] + " — " + modes[idx].name()),
-                            (int) mouseX, (int) mouseY);
-                }
-            }
-        }
+    // Suppress the default background (blur + dim) entirely.
+    // Screen.render() calls renderBackground() before rendering widgets — without this
+    // no-op it re-draws the blur ON TOP of our fills and labels every frame.
+    @Override
+    public void renderBackground(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
+        // intentionally empty
     }
 
     @Override
-    public boolean isPauseScreen() {
-        return false;
-    }
+    public boolean isPauseScreen() { return true; }
 
     @Override
     public void onClose() {
-        // Auto-apply on close
         applyConfig();
         super.onClose();
     }

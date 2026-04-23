@@ -1,32 +1,147 @@
 {
+  "credit": "ByteBlock - Redstone Relay (Network Switch)",
   "parent": "minecraft:block/block",
+  "ambientocclusion": false,
   "textures": {
-    "body": "minecraft:block/deepslate_tiles",
-    "front": "minecraft:block/gray_concrete",
-    "accent": "minecraft:block/red_concrete",
-    "particle": "minecraft:block/deepslate_tiles"
+    "case": "minecraft:block/polished_deepslate",
+    "side": "minecraft:block/deepslate_tiles",
+    "panel": "minecraft:block/black_concrete",
+    "screen": "minecraft:block/blue_concrete",
+    "vent": "minecraft:block/smooth_basalt",
+    "antenna": "minecraft:block/iron_block",
+    "tip": "minecraft:block/red_concrete",
+    "particle": "minecraft:block/polished_deepslate"
   },
   "elements": [
     {
-      "comment": "Main body",
+      "name": "body",
       "from": [0, 0, 0],
       "to": [16, 16, 16],
       "faces": {
-        "north": {"uv": [0, 0, 16, 16], "texture": "#front"},
-        "south": {"uv": [0, 0, 16, 16], "texture": "#body"},
-        "east":  {"uv": [0, 0, 16, 16], "texture": "#body"},
-        "west":  {"uv": [0, 0, 16, 16], "texture": "#body"},
-        "up":    {"uv": [0, 0, 16, 16], "texture": "#body"},
-        "down":  {"uv": [0, 0, 16, 16], "texture": "#body"}
+        "north": {"uv": [0, 0, 16, 16], "texture": "#case"},
+        "south": {"uv": [0, 0, 16, 16], "texture": "#side"},
+        "east":  {"uv": [0, 0, 16, 16], "texture": "#side"},
+        "west":  {"uv": [0, 0, 16, 16], "texture": "#side"},
+        "up":    {"uv": [0, 0, 16, 16], "texture": "#case"},
+        "down":  {"uv": [0, 0, 16, 16], "texture": "#side", "cullface": "down"}
       }
     },
     {
-      "comment": "Red accent stripe on front",
-      "from": [1, 7, -0.1],
-      "to": [15, 9, 0],
+      "name": "front_bezel",
+      "from": [2, 2, -0.02],
+      "to": [14, 14, 0.2],
       "faces": {
-        "north": {"uv": [1, 7, 15, 9], "texture": "#accent"}
+        "north": {"uv": [2, 2, 14, 14], "texture": "#panel"}
+      }
+    },
+    {
+      "name": "front_screen",
+      "from": [3, 10, -0.05],
+      "to": [13, 13, 0],
+      "faces": {
+        "north": {"uv": [3, 3, 13, 6], "texture": "#screen"}
+      }
+    },
+    {
+      "name": "front_status_bar",
+      "from": [3, 8, -0.05],
+      "to": [13, 9.5, 0],
+      "faces": {
+        "north": {"uv": [3, 6.5, 13, 8], "texture": "#vent"}
+      }
+    },
+    {
+      "name": "north_port",
+      "from": [6, 3.5, -0.06],
+      "to": [10, 7, 0],
+      "faces": {
+        "north": {"uv": [6, 9, 10, 12.5], "texture": "#vent"}
+      }
+    },
+    {
+      "name": "south_port",
+      "from": [6, 6, 16],
+      "to": [10, 10, 16.06],
+      "faces": {
+        "south": {"uv": [6, 6, 10, 10], "texture": "#vent"}
+      }
+    },
+    {
+      "name": "east_port",
+      "from": [16, 6, 6],
+      "to": [16.06, 10, 10],
+      "faces": {
+        "east": {"uv": [6, 6, 10, 10], "texture": "#vent"}
+      }
+    },
+    {
+      "name": "west_port",
+      "from": [-0.06, 6, 6],
+      "to": [0, 10, 10],
+      "faces": {
+        "west": {"uv": [6, 6, 10, 10], "texture": "#vent"}
+      }
+    },
+    {
+      "name": "top_port",
+      "from": [4, 16, 6],
+      "to": [7, 16.06, 10],
+      "faces": {
+        "up": {"uv": [4, 6, 7, 10], "texture": "#vent"}
+      }
+    },
+    {
+      "name": "bottom_port",
+      "from": [6, -0.06, 6],
+      "to": [10, 0, 10],
+      "faces": {
+        "down": {"uv": [6, 6, 10, 10], "texture": "#vent"}
+      }
+    },
+    {
+      "name": "antenna_base",
+      "from": [9, 16, 7],
+      "to": [12, 17, 10],
+      "faces": {
+        "north": {"uv": [9, 15, 12, 16], "texture": "#antenna"},
+        "east":  {"uv": [6, 15, 9, 16], "texture": "#antenna"},
+        "south": {"uv": [9, 15, 12, 16], "texture": "#antenna"},
+        "west":  {"uv": [6, 15, 9, 16], "texture": "#antenna"},
+        "up":    {"uv": [9, 6, 12, 9], "texture": "#antenna"}
+      }
+    },
+    {
+      "name": "antenna_rod",
+      "from": [10.25, 17, 8.25],
+      "to": [10.75, 19.5, 8.75],
+      "faces": {
+        "north": {"uv": [10.25, 13.5, 10.75, 16], "texture": "#antenna"},
+        "east":  {"uv": [8.25, 13.5, 8.75, 16], "texture": "#antenna"},
+        "south": {"uv": [10.25, 13.5, 10.75, 16], "texture": "#antenna"},
+        "west":  {"uv": [8.25, 13.5, 8.75, 16], "texture": "#antenna"}
+      }
+    },
+    {
+      "name": "antenna_tip",
+      "from": [10, 19.5, 8],
+      "to": [11, 20.5, 9],
+      "shade": false,
+      "faces": {
+        "north": {"uv": [10, 12.5, 11, 13.5], "texture": "#tip"},
+        "east":  {"uv": [8, 12.5, 9, 13.5], "texture": "#tip"},
+        "south": {"uv": [10, 12.5, 11, 13.5], "texture": "#tip"},
+        "west":  {"uv": [8, 12.5, 9, 13.5], "texture": "#tip"},
+        "up":    {"uv": [10, 8, 11, 9], "texture": "#tip"}
       }
     }
-  ]
+  ],
+  "display": {
+    "thirdperson_righthand": {"rotation": [75, 45, 0], "translation": [0, 2.5, 0], "scale": [0.375, 0.375, 0.375]},
+    "thirdperson_lefthand":  {"rotation": [75, 45, 0], "translation": [0, 2.5, 0], "scale": [0.375, 0.375, 0.375]},
+    "firstperson_righthand": {"rotation": [0, 45, 0], "scale": [0.4, 0.4, 0.4]},
+    "firstperson_lefthand":  {"rotation": [0, 225, 0], "scale": [0.4, 0.4, 0.4]},
+    "gui":    {"rotation": [30, 225, 0], "scale": [0.625, 0.625, 0.625]},
+    "ground": {"translation": [0, 3, 0], "scale": [0.25, 0.25, 0.25]},
+    "fixed":  {"scale": [0.5, 0.5, 0.5]}
+  }
 }
