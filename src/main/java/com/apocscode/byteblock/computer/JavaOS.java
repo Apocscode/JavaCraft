@@ -482,6 +482,7 @@ public class JavaOS {
               + "  local sent = glasses.flush()\n"
               + "  if tick % 8 == 1 then\n"
               + "    print('flush -> '..tostring(sent)..' wearer(s) on ch '..tostring(glasses.getChannel and glasses.getChannel() or '?'))\n"
+              + "    if sent == 0 and glasses.diag then print('  diag: '..glasses.diag()) end\n"
               + "  end\n"
               + "\n"
               + "  sleep(0.25)\n"

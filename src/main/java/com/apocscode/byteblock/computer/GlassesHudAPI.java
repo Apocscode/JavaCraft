@@ -74,12 +74,13 @@ public final class GlassesHudAPI {
 
     private GlassesHudAPI() {}
 
+    /** Last push diagnostic — exposed via Lua glasses.diag() for in-terminal debugging. */
+    public static volatile String lastDiag = "no push yet";
+
     /** Push a list of widgets to all glasses-wearing players within BT range and on the matching channel. */
     public static int push(Level level, BlockPos pos, int channel, List<Widget> widgets) {
         if (!(level instanceof ServerLevel sl) || pos == null) {
-            org.slf4j.LoggerFactory.getLogger("ByteBlock/Glasses").info(
-                "push: bailed early — level={} pos={} (need ServerLevel + non-null pos)",
-                level == null ? "null" : level.getClass().getSimpleName(), pos);
+            lastDiag = "bad level/pos: level=" + (level == null ? "null" : level.getClass().getSimpleName()) + " pos=" + pos;
             return 0;
         }
         CompoundTag data = new CompoundTag();
@@ -113,9 +114,12 @@ public final class GlassesHudAPI {
             sent++;
         }
         if (sent == 0) {
-            org.slf4j.LoggerFactory.getLogger("ByteBlock/Glasses").info(
-                "push: 0 wearers matched (players={}, noGlasses={}, wrongCh={}, outOfRange={}, ch={}, pos={})",
+            lastDiag = String.format("0 wearers (players=%d noGlasses=%d wrongCh=%d outOfRange=%d ch=%d pos=%s)",
                 playerCount, noGlasses, wrongCh, outOfRange, channel, pos);
+            org.slf4j.LoggerFactory.getLogger("ByteBlock/Glasses").info("push: {}", lastDiag);
+        } else {
+            lastDiag = String.format("OK sent=%d (players=%d noGlasses=%d wrongCh=%d outOfRange=%d ch=%d)",
+                sent, playerCount, noGlasses, wrongCh, outOfRange, channel);
         }
         return sent;
     }

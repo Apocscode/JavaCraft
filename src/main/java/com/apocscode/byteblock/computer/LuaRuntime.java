@@ -2252,6 +2252,11 @@ public class LuaRuntime {
                 return LuaValue.valueOf(sent);
             }
         });
+        glasses.set("diag", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                return LuaValue.valueOf(GlassesHudAPI.lastDiag);
+            }
+        });
         glasses.set("wipe", new ZeroArgFunction() {
             @Override public LuaValue call() {
                 int sent = GlassesHudAPI.clear(os.getLevel(), os.getBlockPos(), glassesChannel);
