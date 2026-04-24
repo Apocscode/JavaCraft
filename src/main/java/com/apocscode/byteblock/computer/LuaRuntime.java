@@ -33,6 +33,12 @@ public class LuaRuntime {
     private final java.util.List<GlassesHudAPI.Widget> glassesWidgets = new java.util.ArrayList<>();
     private int glassesChannel = 1;
 
+    // --- Coroutine event-loop state (CC-style) ---
+    private LuaThread programThread = null;
+    private boolean programYielded = false;
+    private final java.util.ArrayDeque<Varargs> programEventQueue = new java.util.ArrayDeque<>();
+
+
     // Sandbox instruction limit per resume (~500K ops)
     private static final int INSTRUCTION_LIMIT = 500_000;
 
@@ -48,6 +54,7 @@ public class LuaRuntime {
         g.load(new PackageLib());         // require/module
         g.load(new Bit32Lib());           // bit32
         g.load(new TableLib());           // table.*
+        g.load(new org.luaj.vm2.lib.CoroutineLib()); // coroutine.create/resume/yield/wrap/status
         g.load(new StringLib());          // string.*
         g.load(new JseMathLib());        // math.*
         LoadState.install(g);
@@ -117,9 +124,18 @@ public class LuaRuntime {
             @Override
             public LuaValue call(LuaValue arg) {
                 double secs = arg.optdouble(1.0);
-                int ticks = Math.max(1, (int)(secs * 20));
-                os.startTimer(secs);
-                return NONE;
+                int id = os.startTimer(secs);
+                while (true) {
+                    Varargs evt = globals.running.state.lua_yield(LuaValue.NONE);
+                    LuaValue name = evt.arg1();
+                    if (name.isstring() && "timer".equals(name.tojstring())
+                            && evt.arg(2).toint() == id) {
+                        return NONE;
+                    }
+                    if (name.isstring() && "terminate".equals(name.tojstring())) {
+                        throw new LuaError("Terminated");
+                    }
+                }
             }
         });
 
@@ -462,8 +478,66 @@ public class LuaRuntime {
         osTable.set("sleep", new OneArgFunction() {
             @Override
             public LuaValue call(LuaValue arg) {
-                // Non-blocking: just starts a timer. The shell handles the actual wait.
-                os.startTimer(arg.optdouble(1.0));
+                // Yielding sleep: start a timer and pullEvent until it matches.
+                double secs = arg.optdouble(1.0);
+                int id = os.startTimer(secs);
+                while (true) {
+                    Varargs evt = globals.running.state.lua_yield(LuaValue.NONE);
+                    LuaValue name = evt.arg1();
+                    if (name.isstring() && "timer".equals(name.tojstring())
+                            && evt.arg(2).toint() == id) {
+                        return NONE;
+                    }
+                    if (name.isstring() && "terminate".equals(name.tojstring())) {
+                        throw new LuaError("Terminated");
+                    }
+                }
+            }
+        });
+
+        // os.pullEvent(filter?) — yields until a matching event arrives.
+        // "terminate" always passes through (CC semantics).
+        osTable.set("pullEvent", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs a) {
+                String filter = a.isnoneornil(1) ? null : a.checkjstring(1);
+                while (true) {
+                    Varargs evt = globals.running.state.lua_yield(LuaValue.NONE);
+                    String n = evt.arg1().isstring() ? evt.arg1().tojstring() : "";
+                    if ("terminate".equals(n)) {
+                        throw new LuaError("Terminated");
+                    }
+                    if (filter == null || filter.equals(n)) {
+                        return evt;
+                    }
+                }
+            }
+        });
+
+        // os.pullEventRaw(filter?) — like pullEvent but doesn't throw on "terminate".
+        osTable.set("pullEventRaw", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs a) {
+                String filter = a.isnoneornil(1) ? null : a.checkjstring(1);
+                while (true) {
+                    Varargs evt = globals.running.state.lua_yield(LuaValue.NONE);
+                    String n = evt.arg1().isstring() ? evt.arg1().tojstring() : "";
+                    if (filter == null || filter.equals(n)) {
+                        return evt;
+                    }
+                }
+            }
+        });
+
+        // os.queueEvent(name, ...) — push an event onto the program queue.
+        osTable.set("queueEvent", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs a) {
+                int n = a.narg();
+                if (n < 1) return NONE;
+                LuaValue[] vals = new LuaValue[n];
+                for (int i = 0; i < n; i++) vals[i] = a.arg(i + 1);
+                programEventQueue.offer(LuaValue.varargsOf(vals));
                 return NONE;
             }
         });
@@ -2181,6 +2255,103 @@ public class LuaRuntime {
         }
     }
 
+    // ========================================================================
+    // Coroutine event-loop (CC-style pullEvent/queueEvent/sleep/read/parallel)
+    // ========================================================================
+
+    /**
+     * Kick off a long-running program as a Lua coroutine. Does NOT block.
+     * Call {@link #pump()} or {@link #queueEvent(String, Object...)} to drive it.
+     * If the chunk never yields, it runs to completion here and is done on return.
+     */
+    public void runProgram(String code, String chunkName) {
+        if (programThread != null) {
+            queueEvent("terminate");
+            programThread = null;
+            programYielded = false;
+            programEventQueue.clear();
+        }
+        try {
+            InputStream is = new ByteArrayInputStream(code.getBytes(StandardCharsets.UTF_8));
+            LuaValue chunk = globals.load(is, chunkName, "bt", globals);
+            LuaThread t = new LuaThread(globals, chunk);
+            programThread = t;
+            programYielded = false;
+            resumeProgram(LuaValue.NONE);
+        } catch (LuaError e) {
+            pushOutput("Lua Error: " + e.getMessage() + "\n");
+            programThread = null;
+        } catch (Exception e) {
+            pushOutput("Error: " + e.getMessage() + "\n");
+            programThread = null;
+        }
+    }
+
+    /** True while a coroutine-based program is running (possibly suspended). */
+    public boolean isProgramRunning() {
+        return programThread != null;
+    }
+
+    /**
+     * Push a CC-style event into the program's event queue and drive the pump.
+     */
+    public void queueEvent(String name, Object... args) {
+        if (programThread == null) return;
+        LuaValue[] vals = new LuaValue[args.length + 1];
+        vals[0] = LuaValue.valueOf(name);
+        for (int i = 0; i < args.length; i++) {
+            vals[i + 1] = toLua(args[i]);
+        }
+        programEventQueue.offer(LuaValue.varargsOf(vals));
+        pump();
+    }
+
+    /** Drive the program coroutine with any queued events. */
+    public void pump() {
+        while (programThread != null && programYielded && !programEventQueue.isEmpty()) {
+            resumeProgram(programEventQueue.poll());
+        }
+    }
+
+    private void resumeProgram(Varargs args) {
+        LuaThread t = programThread;
+        if (t == null) return;
+        try {
+            Varargs r = t.resume(args);
+            boolean ok = r.arg(1).toboolean();
+            if (!ok) {
+                String err = r.arg(2).isnil() ? "unknown error" : r.arg(2).tojstring();
+                pushOutput("Lua Error: " + err + "\n");
+                programThread = null;
+                programYielded = false;
+                return;
+            }
+            LuaThread.State st = t.state;
+            if (st == null || st.status == LuaThread.STATUS_DEAD) {
+                programThread = null;
+                programYielded = false;
+            } else {
+                programYielded = true;
+            }
+        } catch (Throwable th) {
+            pushOutput("Runtime error: " + th.getMessage() + "\n");
+            programThread = null;
+            programYielded = false;
+        }
+    }
+
+    private static LuaValue toLua(Object o) {
+        if (o == null) return LuaValue.NIL;
+        if (o instanceof LuaValue) return (LuaValue) o;
+        if (o instanceof String)   return LuaValue.valueOf((String) o);
+        if (o instanceof Integer)  return LuaValue.valueOf((int) (Integer) o);
+        if (o instanceof Long)     return LuaValue.valueOf((long) (Long) o);
+        if (o instanceof Double)   return LuaValue.valueOf((double) (Double) o);
+        if (o instanceof Float)    return LuaValue.valueOf((double) (float) (Float) o);
+        if (o instanceof Boolean)  return LuaValue.valueOf((boolean) (Boolean) o);
+        return LuaValue.valueOf(o.toString());
+    }
+
     /**
      * Execute a single REPL expression/statement and return display text.
      */
@@ -2421,30 +2592,80 @@ public class LuaRuntime {
         LuaTable p = new LuaTable();
         // CC semantics rely on coroutines + event loop, which the current runtime
         // does not suspend. We invoke each function sequentially and return on
-        // the first that returns (waitForAny) or after all complete (waitForAll).
+        // True parallel via nested coroutines. Each argument function runs as its
+        // own coroutine. Events from the outer scheduler are broadcast to every
+        // child in turn. waitForAny returns when any child dies; waitForAll
+        // returns when all have died.
         p.set("waitForAny", new VarArgFunction() {
             @Override public Varargs invoke(Varargs a) {
-                for (int i = 1; i <= a.narg(); i++) {
-                    LuaValue f = a.arg(i);
-                    if (f.isfunction()) {
-                        try { f.call(); return LuaValue.valueOf(i); } catch (LuaError ignored) {}
-                    }
-                }
-                return LuaValue.valueOf(0);
+                return runParallel(a, true);
             }
         });
         p.set("waitForAll", new VarArgFunction() {
             @Override public Varargs invoke(Varargs a) {
-                for (int i = 1; i <= a.narg(); i++) {
-                    LuaValue f = a.arg(i);
-                    if (f.isfunction()) {
-                        try { f.call(); } catch (LuaError ignored) {}
-                    }
-                }
-                return NONE;
+                return runParallel(a, false);
             }
         });
         globals.set("parallel", p);
+    }
+
+    /** Drive a set of child coroutines with events from the outer scheduler. */
+    private Varargs runParallel(Varargs a, boolean any) {
+        int n = a.narg();
+        if (n == 0) return LuaValue.NONE;
+        LuaThread[] threads = new LuaThread[n];
+        boolean[] dead = new boolean[n];
+        String[] filters = new String[n];
+        int aliveCount = 0;
+        for (int i = 0; i < n; i++) {
+            LuaValue f = a.arg(i + 1);
+            if (!f.isfunction()) { dead[i] = true; continue; }
+            threads[i] = new LuaThread(globals, f);
+            aliveCount++;
+        }
+        // Initial resume for each.
+        for (int i = 0; i < n; i++) {
+            if (dead[i]) continue;
+            try {
+                Varargs r = threads[i].resume(LuaValue.NONE);
+                if (!r.arg(1).toboolean()) {
+                    throw new LuaError(r.arg(2).tojstring());
+                }
+                if (threads[i].state == null || threads[i].state.status == LuaThread.STATUS_DEAD) {
+                    dead[i] = true; aliveCount--;
+                    if (any) return LuaValue.valueOf(i + 1);
+                } else {
+                    // Filter is the first yielded value if any (CC ignores filters here).
+                    filters[i] = null;
+                }
+            } catch (LuaError e) {
+                dead[i] = true; aliveCount--;
+                if (any) throw e;
+            }
+        }
+        // Dispatch loop.
+        while (aliveCount > 0) {
+            Varargs evt = globals.running.state.lua_yield(LuaValue.NONE);
+            String en = evt.arg1().isstring() ? evt.arg1().tojstring() : "";
+            if ("terminate".equals(en)) throw new LuaError("Terminated");
+            for (int i = 0; i < n; i++) {
+                if (dead[i]) continue;
+                try {
+                    Varargs r = threads[i].resume(evt);
+                    if (!r.arg(1).toboolean()) {
+                        throw new LuaError(r.arg(2).tojstring());
+                    }
+                    if (threads[i].state == null || threads[i].state.status == LuaThread.STATUS_DEAD) {
+                        dead[i] = true; aliveCount--;
+                        if (any) return LuaValue.valueOf(i + 1);
+                    }
+                } catch (LuaError e) {
+                    dead[i] = true; aliveCount--;
+                    if (any) throw e;
+                }
+            }
+        }
+        return LuaValue.NONE;
     }
 
     // ---------- vector ----------
@@ -3051,13 +3272,82 @@ public class LuaRuntime {
 
     // ---------- read() ----------
     private void installReadGlobal() {
-        // Non-interactive stub: returns empty string. Interactive line editing is
-        // handled by the shell/LuaShellProgram; Lua scripts that need blocking
-        // input should use os.queueEvent / os.pullEvent once implemented.
+        // CC read([replaceChar[, history[, completeFn[, default]]]])
+        // Yields on char / key / paste events, builds a line, returns on Enter.
         globals.set("read", new VarArgFunction() {
             @Override public Varargs invoke(Varargs a) {
-                // TODO: hook into LuaShellProgram's line editor via event queue.
-                return LuaValue.valueOf("");
+                String replaceChar = (a.arg(1).isstring() && !a.arg(1).tojstring().isEmpty())
+                    ? a.arg(1).tojstring().substring(0, 1) : null;
+                LuaTable history = a.arg(2).istable() ? a.arg(2).checktable() : null;
+                String def = a.arg(4).isstring() ? a.arg(4).tojstring() : "";
+
+                StringBuilder buf = new StringBuilder(def);
+                int historyIdx = history == null ? 0 : history.length() + 1;
+                // Echo any default.
+                if (!def.isEmpty()) {
+                    pushOutput(replaceChar != null ? replaceChar.repeat(def.length()) : def);
+                }
+                while (true) {
+                    Varargs evt = globals.running.state.lua_yield(LuaValue.NONE);
+                    String n = evt.arg1().isstring() ? evt.arg1().tojstring() : "";
+                    if ("terminate".equals(n)) throw new LuaError("Terminated");
+                    switch (n) {
+                        case "char" -> {
+                            String c = evt.arg(2).isstring() ? evt.arg(2).tojstring() : "";
+                            if (!c.isEmpty()) {
+                                buf.append(c);
+                                pushOutput(replaceChar != null ? replaceChar : c);
+                            }
+                        }
+                        case "paste" -> {
+                            String p = evt.arg(2).isstring() ? evt.arg(2).tojstring() : "";
+                            buf.append(p);
+                            pushOutput(replaceChar != null ? replaceChar.repeat(p.length()) : p);
+                        }
+                        case "key" -> {
+                            int k = evt.arg(2).toint();
+                            if (k == 257 || k == 335) {          // Enter
+                                pushOutput("\n");
+                                return LuaValue.valueOf(buf.toString());
+                            } else if (k == 259) {                // Backspace
+                                if (buf.length() > 0) {
+                                    buf.deleteCharAt(buf.length() - 1);
+                                    pushOutput("\b \b");
+                                }
+                            } else if (k == 265 && history != null) { // Up
+                                if (historyIdx > 1) {
+                                    historyIdx--;
+                                    LuaValue h = history.get(historyIdx);
+                                    if (h.isstring()) {
+                                        // Clear current line visually with backspaces.
+                                        for (int i = 0; i < buf.length(); i++) pushOutput("\b \b");
+                                        buf.setLength(0);
+                                        buf.append(h.tojstring());
+                                        pushOutput(replaceChar != null
+                                            ? replaceChar.repeat(buf.length()) : buf.toString());
+                                    }
+                                }
+                            } else if (k == 264 && history != null) { // Down
+                                if (historyIdx < history.length()) {
+                                    historyIdx++;
+                                    LuaValue h = history.get(historyIdx);
+                                    for (int i = 0; i < buf.length(); i++) pushOutput("\b \b");
+                                    buf.setLength(0);
+                                    if (h.isstring()) {
+                                        buf.append(h.tojstring());
+                                        pushOutput(replaceChar != null
+                                            ? replaceChar.repeat(buf.length()) : buf.toString());
+                                    }
+                                } else if (historyIdx == history.length()) {
+                                    historyIdx++;
+                                    for (int i = 0; i < buf.length(); i++) pushOutput("\b \b");
+                                    buf.setLength(0);
+                                }
+                            }
+                        }
+                        default -> { /* ignore */ }
+                    }
+                }
             }
         });
         globals.set("printError", new VarArgFunction() {

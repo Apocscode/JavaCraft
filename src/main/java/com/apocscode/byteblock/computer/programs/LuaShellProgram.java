@@ -16,6 +16,7 @@ public class LuaShellProgram extends OSProgram {
     private boolean needsRedraw = true;
     private final java.util.List<String> history = new java.util.ArrayList<>();
     private int historyIndex = -1;
+    private boolean programFinishedPrinted = false;
 
     // Optional: run a file immediately on launch
     private final String runFile;
@@ -46,9 +47,8 @@ public class LuaShellProgram extends OSProgram {
             appendOutput("Running: " + runFile + "\n");
             String content = os.getFileSystem().readFile(runFile);
             if (content != null) {
-                lua.execute(content, runFile);
+                lua.runProgram(content, runFile);
                 drainLuaOutput();
-                appendOutput("\n-- Program finished --\n");
             } else {
                 appendOutput("File not found: " + runFile + "\n");
             }
@@ -57,12 +57,24 @@ public class LuaShellProgram extends OSProgram {
 
     @Override
     public boolean tick() {
+        if (lua != null) lua.pump();
         drainLuaOutput();
+        if (runFile != null && lua != null && !lua.isProgramRunning() && !programFinishedPrinted) {
+            appendOutput("\n-- Program finished --\n");
+            programFinishedPrinted = true;
+            needsRedraw = true;
+        }
         return running;
     }
 
     @Override
     public void handleEvent(OSEvent event) {
+        // While a program coroutine is running, forward events to Lua as CC-style events.
+        if (lua != null && lua.isProgramRunning()) {
+            forwardEventToLua(event);
+            return;
+        }
+        // Otherwise drive the REPL line editor.
         switch (event.getType()) {
             case CHAR -> {
                 char c = event.getString(0).charAt(0);
@@ -77,6 +89,26 @@ public class LuaShellProgram extends OSProgram {
             }
             default -> {}
         }
+    }
+
+    private void forwardEventToLua(OSEvent event) {
+        switch (event.getType()) {
+            case CHAR          -> lua.queueEvent("char", event.getString(0));
+            case KEY           -> lua.queueEvent("key", event.getInt(0), false);
+            case KEY_UP        -> lua.queueEvent("key_up", event.getInt(0));
+            case MOUSE_CLICK   -> lua.queueEvent("mouse_click", event.getInt(0), event.getInt(1), event.getInt(2));
+            case MOUSE_UP      -> lua.queueEvent("mouse_up", event.getInt(0), event.getInt(1), event.getInt(2));
+            case MOUSE_DRAG    -> lua.queueEvent("mouse_drag", event.getInt(0), event.getInt(1), event.getInt(2));
+            case MOUSE_SCROLL  -> lua.queueEvent("mouse_scroll", event.getInt(0), event.getInt(1), event.getInt(2));
+            case TIMER         -> lua.queueEvent("timer", event.getInt(0));
+            case BLUETOOTH     -> lua.queueEvent("rednet_message", event.getInt(0), event.getData(1), event.getInt(2));
+            case REDSTONE      -> lua.queueEvent("redstone");
+            case PASTE         -> lua.queueEvent("paste", event.getString(0));
+            case TERMINATE     -> lua.queueEvent("terminate");
+            case TASK_COMPLETE -> lua.queueEvent("task_complete", event.getInt(0));
+            default            -> {}
+        }
+        needsRedraw = true;
     }
 
     private void handleKey(int keyCode) {
@@ -162,7 +194,8 @@ public class LuaShellProgram extends OSProgram {
             if (content == null) {
                 appendOutput("File not found: " + file + "\n");
             } else {
-                lua.execute(content, file);
+                programFinishedPrinted = false;
+                lua.runProgram(content, file);
                 drainLuaOutput();
             }
             return;
