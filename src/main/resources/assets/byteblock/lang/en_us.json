@@ -9,6 +9,9 @@
   "block.byteblock.printer": "Printer",
   "block.byteblock.charging_station": "Charging Station",
   "block.byteblock.byte_chest": "ByteChest",
+  "block.byteblock.monitor": "Monitor",
+  "block.byteblock.redstone_relay": "Redstone Relay",
+  "block.byteblock.button_panel": "Button Panel",
 
   "container.byteblock.byte_chest": "ByteChest",
 

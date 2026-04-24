@@ -125,6 +125,23 @@ public class ByteBlock {
         @SubscribeEvent
         public static void onClientSetup(FMLClientSetupEvent event) {
             LOGGER.info("ByteBlock client setup");
+            event.enqueueWork(() -> {
+                net.minecraft.client.renderer.item.ItemProperties.register(
+                    ModItems.GLASSES.get(),
+                    net.minecraft.resources.ResourceLocation.fromNamespaceAndPath(MODID, "bt_active"),
+                    (stack, level, entity, seed) -> {
+                        if (entity instanceof net.minecraft.world.entity.LivingEntity living
+                                && living.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.HEAD) == stack
+                                && living.level() != null) {
+                            var pos = living.blockPosition();
+                            int devs = com.apocscode.byteblock.network.BluetoothNetwork
+                                    .getDevicesInRange(living.level(), pos,
+                                            com.apocscode.byteblock.network.BluetoothNetwork.BLOCK_RANGE).size();
+                            return devs > 0 ? 1.0f : 0.0f;
+                        }
+                        return 0.0f;
+                    });
+            });
         }
 
         @SubscribeEvent

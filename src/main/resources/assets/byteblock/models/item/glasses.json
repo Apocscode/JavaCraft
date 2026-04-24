@@ -2,5 +2,11 @@
   "parent": "minecraft:item/generated",
   "textures": {
     "layer0": "byteblock:item/glasses"
-  }
+  },
+  "overrides": [
+    {
+      "predicate": { "byteblock:bt_active": 1.0 },
+      "model": "byteblock:item/glasses_on"
+    }
+  ]
 }
