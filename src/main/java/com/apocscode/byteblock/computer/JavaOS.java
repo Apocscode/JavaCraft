@@ -45,6 +45,9 @@ public class JavaOS {
     private transient net.minecraft.world.level.Level level;
     private transient net.minecraft.core.BlockPos blockPos;
 
+    // Optional entity host (set by entity-hosted computers like RobotEntity)
+    private transient net.minecraft.world.entity.Entity host;
+
     // Process management
     private final List<OSProgram> processes;
     private OSProgram foregroundProgram;
@@ -279,6 +282,122 @@ public class JavaOS {
               + "\n"
               + "See also `/Users/User/Documents/button_demo.lua`.\n");
         }
+
+        // Robot demo (only meaningful when this OS is hosted by a RobotEntity;
+        // on normal computers the calls return false)
+        if (!fileSystem.exists("/Users/User/Documents/robot_demo.lua")) {
+            fileSystem.writeFile("/Users/User/Documents/robot_demo.lua",
+                "-- robot_demo.lua — queues a small dig-and-move routine\n"
+              + "-- Only runs on a RobotEntity. Normal computers: robot.* returns false.\n"
+              + "if not robot or not robot.queue then\n"
+              + "  print(\"No robot API (not hosted by a robot).\")\n"
+              + "  return\n"
+              + "end\n"
+              + "\n"
+              + "print(\"Fuel: \" .. robot.getFuel())\n"
+              + "print(\"Facing: \" .. tostring(robot.getFacing()))\n"
+              + "\n"
+              + "for i = 1, 3 do\n"
+              + "  robot.dig()\n"
+              + "  robot.forward()\n"
+              + "end\n"
+              + "robot.turnLeft()\n"
+              + "print(\"Queued: \" .. robot.commandsQueued() .. \" commands\")\n");
+        }
+
+        // Drone demo — broadcasts BT commands to any drone on the OS channel.
+        if (!fileSystem.exists("/Users/User/Documents/drone_demo.lua")) {
+            fileSystem.writeFile("/Users/User/Documents/drone_demo.lua",
+                "-- drone_demo.lua — sends a patrol pattern via Bluetooth\n"
+              + "-- Any DroneEntity tuned to this computer's channel obeys.\n"
+              + "local ch = os.getComputerChannel and os.getComputerChannel() or 1\n"
+              + "print(\"Broadcasting on channel \" .. ch)\n"
+              + "\n"
+              + "drone.clear()\n"
+              + "drone.waypoint(100, 70, 100)\n"
+              + "drone.waypoint(120, 70, 100)\n"
+              + "drone.waypoint(120, 70, 120)\n"
+              + "drone.waypoint(100, 70, 120)\n"
+              + "drone.home()\n"
+              + "print(\"Patrol queued.\")\n");
+        }
+
+        // Robot API docs
+        if (!fileSystem.exists("/Users/User/Documents/docs/robot.md")) {
+            fileSystem.writeFile("/Users/User/Documents/docs/robot.md",
+                "# robot API\n"
+              + "\n"
+              + "Available only when the OS is hosted by a RobotEntity. All calls\n"
+              + "return `false` / `0` / `nil` on non-robot computers so scripts\n"
+              + "can safely feature-detect with `if robot and robot.queue then ...`.\n"
+              + "\n"
+              + "Commands are appended to an internal queue (max 256) and executed\n"
+              + "one per tick while the robot has ≥10 FE stored.\n"
+              + "\n"
+              + "## Movement / action\n"
+              + "| Fn | Effect |\n"
+              + "|---|---|\n"
+              + "| `robot.forward()` | Step 1 block forward |\n"
+              + "| `robot.back()` | Step 1 block backward |\n"
+              + "| `robot.up()` / `robot.down()` | Step vertically |\n"
+              + "| `robot.turnLeft()` / `robot.turnRight()` | Rotate 90° |\n"
+              + "| `robot.dig()` / `robot.digUp()` / `robot.digDown()` | Mine block, drops into inventory |\n"
+              + "| `robot.place()` | Place selected slot in front |\n"
+              + "| `robot.queue(str)` | Append a raw command string |\n"
+              + "| `robot.clear()` | Empty the command queue |\n"
+              + "\n"
+              + "## Inspection\n"
+              + "| Fn | Returns |\n"
+              + "|---|---|\n"
+              + "| `robot.isBusy()` | `true` if queue non-empty |\n"
+              + "| `robot.commandsQueued()` | queue length |\n"
+              + "| `robot.getFuel()` | stored FE |\n"
+              + "| `robot.getFacing()` | `north`/`south`/`east`/`west` |\n"
+              + "| `robot.getPos()` | returns `x, y, z` (multi-return) |\n"
+              + "| `robot.detect()` / `detectUp()` / `detectDown()` | `true` if solid block there |\n"
+              + "\n"
+              + "## Inventory (1-indexed slots 1..16)\n"
+              + "| Fn | Purpose |\n"
+              + "|---|---|\n"
+              + "| `robot.select(slot)` | Set active slot |\n"
+              + "| `robot.getSelected()` | Current active slot |\n"
+              + "| `robot.getItemCount(slot)` | Stack size in slot |\n"
+              + "| `robot.getItemName(slot)` | Registry id, e.g. `minecraft:cobblestone` |\n"
+              + "| `robot.refuel(slot)` | Burn a fuel item → FE. Returns FE added. |\n"
+              + "\n"
+              + "Fuel values: coal/charcoal 1600, blaze rod 2400, coal block 16000, lava bucket 20000.\n");
+        }
+
+        // Drone API docs
+        if (!fileSystem.exists("/Users/User/Documents/docs/drone.md")) {
+            fileSystem.writeFile("/Users/User/Documents/docs/drone.md",
+                "# drone API\n"
+              + "\n"
+              + "All calls are fire-and-forget Bluetooth broadcasts on the chosen\n"
+              + "channel (defaults to the OS's current channel). Any DroneEntity\n"
+              + "listening on that channel within range will obey.\n"
+              + "\n"
+              + "| Fn | Effect |\n"
+              + "|---|---|\n"
+              + "| `drone.waypoint(x, y, z [, ch])` | Append a flight waypoint |\n"
+              + "| `drone.home([ch])` | Clear waypoints & return to home |\n"
+              + "| `drone.clear([ch])` | Clear waypoints, stay in place |\n"
+              + "| `drone.hover(bool [, ch])` | Toggle idle hover |\n"
+              + "| `drone.refuel(ticks [, ch])` | Remote fuel grant (0..72000) |\n"
+              + "\n"
+              + "## Binding drones to a channel\n"
+              + "1. Right-click a drone with a fuel item (coal, blaze rod, lava\n"
+              + "   bucket) to fuel it.\n"
+              + "2. The drone registers on BT under its own UUID and listens on\n"
+              + "   its own channel (shown when you right-click it bare-handed).\n"
+              + "3. Set this computer's channel to match with `bluetooth.setChannel(n)`\n"
+              + "   or use `drone.waypoint(x, y, z, n)` to target a specific channel.\n"
+              + "\n"
+              + "## Protocol (for custom senders)\n"
+              + "Plain strings on the drone's channel:\n"
+              + "`drone:waypoint:<x>:<y>:<z>` · `drone:home` · `drone:clear`\n"
+              + "`drone:hover:<true|false>` · `drone:refuel:<ticks>`\n");
+        }
     }
 
     // --- Tick / Main Loop ---
@@ -508,6 +627,9 @@ public class JavaOS {
         this.level = level;
         this.blockPos = pos;
     }
+
+    public net.minecraft.world.entity.Entity getHost() { return host; }
+    public void setHost(net.minecraft.world.entity.Entity host) { this.host = host; }
 
     // --- Drive Mount System ---
 

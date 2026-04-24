@@ -178,6 +178,8 @@ public class LuaRuntime {
         installRedstoneAPI();
         installRelayAPI();
         installButtonsAPI();
+        installRobotAPI();
+        installDroneAPI();
         installScannerAPI();
         installPeripheralAPI();
     }
@@ -1076,6 +1078,258 @@ public class LuaRuntime {
         });
 
         globals.set("buttons", buttons);
+    }
+
+    // ------------------------------------------------------------------
+    // robot.* — programmatic control of the RobotEntity hosting this OS.
+    // Only active when the OS is hosted by a RobotEntity.
+    // ------------------------------------------------------------------
+    private void installRobotAPI() {
+        LuaTable robot = new LuaTable();
+
+        // Queue a raw command string.
+        robot.set("queue", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue cmd) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                r.queueCommand(cmd.tojstring());
+                return LuaValue.TRUE;
+            }
+        });
+
+        // Movement commands
+        String[] moves = {"forward", "back", "up", "down", "turnLeft", "turnRight",
+                          "dig", "digUp", "digDown", "place"};
+        for (String m : moves) {
+            final String cmd = m;
+            robot.set(m, new ZeroArgFunction() {
+                @Override
+                public LuaValue call() {
+                    com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                    if (r == null) return LuaValue.FALSE;
+                    r.queueCommand(cmd);
+                    return LuaValue.TRUE;
+                }
+            });
+        }
+
+        robot.set("clear", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                r.clearCommands();
+                return LuaValue.TRUE;
+            }
+        });
+
+        robot.set("isBusy", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                return LuaValue.valueOf(r.isBusy());
+            }
+        });
+
+        robot.set("commandsQueued", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.valueOf(0);
+                return LuaValue.valueOf(r.getCommandsQueued());
+            }
+        });
+
+        robot.set("getFuel", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.valueOf(0);
+                return LuaValue.valueOf(r.getEnergyStorage().getEnergyStored());
+            }
+        });
+
+        robot.set("refuel", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue slot) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.valueOf(0);
+                return LuaValue.valueOf(r.refuel(slot.checkint() - 1));
+            }
+        });
+
+        robot.set("select", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue slot) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                r.setSelectedSlot(slot.checkint() - 1);
+                return LuaValue.TRUE;
+            }
+        });
+
+        robot.set("getSelected", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.valueOf(0);
+                return LuaValue.valueOf(r.getSelectedSlot() + 1);
+            }
+        });
+
+        robot.set("getItemCount", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue slot) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.valueOf(0);
+                int s = slot.checkint() - 1;
+                if (s < 0 || s >= r.getInventory().getContainerSize()) return LuaValue.valueOf(0);
+                return LuaValue.valueOf(r.getInventory().getItem(s).getCount());
+            }
+        });
+
+        robot.set("getItemName", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue slot) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.NIL;
+                int s = slot.checkint() - 1;
+                if (s < 0 || s >= r.getInventory().getContainerSize()) return LuaValue.NIL;
+                net.minecraft.world.item.ItemStack stack = r.getInventory().getItem(s);
+                if (stack.isEmpty()) return LuaValue.NIL;
+                return LuaValue.valueOf(net.minecraft.core.registries.BuiltInRegistries.ITEM
+                        .getKey(stack.getItem()).toString());
+            }
+        });
+
+        robot.set("getFacing", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.NIL;
+                return LuaValue.valueOf(r.getRobotFacing().getName());
+            }
+        });
+
+        robot.set("getPos", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.NIL;
+                net.minecraft.core.BlockPos p = r.blockPosition();
+                return LuaValue.varargsOf(
+                        LuaValue.valueOf(p.getX()),
+                        LuaValue.valueOf(p.getY()),
+                        LuaValue.valueOf(p.getZ()));
+            }
+        });
+
+        robot.set("detect", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() { return detectAt(0); }
+        });
+        robot.set("detectUp", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() { return detectAt(1); }
+        });
+        robot.set("detectDown", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() { return detectAt(-1); }
+        });
+
+        globals.set("robot", robot);
+    }
+
+    /** Returns the RobotEntity hosting this OS, or null. */
+    private com.apocscode.byteblock.entity.RobotEntity asRobot() {
+        net.minecraft.world.entity.Entity h = os.getHost();
+        return (h instanceof com.apocscode.byteblock.entity.RobotEntity r) ? r : null;
+    }
+
+    /** Probe block ahead (0), above (+1) or below (-1) the robot. */
+    private LuaValue detectAt(int yOffset) {
+        com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+        if (r == null || r.level() == null) return LuaValue.FALSE;
+        net.minecraft.core.BlockPos pos;
+        if (yOffset == 0) {
+            pos = r.blockPosition().relative(r.getRobotFacing());
+        } else if (yOffset > 0) {
+            pos = r.blockPosition().above();
+        } else {
+            pos = r.blockPosition().below();
+        }
+        return LuaValue.valueOf(!r.level().getBlockState(pos).isAir());
+    }
+
+    // ------------------------------------------------------------------
+    // drone.* — control nearby drones via Bluetooth on a given channel.
+    // Commands are fire-and-forget broadcasts; any drone tuned to the
+    // same channel and within range will obey.
+    // ------------------------------------------------------------------
+    private void installDroneAPI() {
+        LuaTable drone = new LuaTable();
+
+        // drone.waypoint(x, y, z [, channel])
+        drone.set("waypoint", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                double x = args.checkdouble(1);
+                double y = args.checkdouble(2);
+                double z = args.checkdouble(3);
+                int ch = args.narg() >= 4 ? args.checkint(4) : os.getBluetoothChannel();
+                return LuaValue.valueOf(sendDrone(ch, "drone:waypoint:" + x + ":" + y + ":" + z));
+            }
+        });
+
+        // drone.home([channel])
+        drone.set("home", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                int ch = args.narg() >= 1 ? args.checkint(1) : os.getBluetoothChannel();
+                return LuaValue.valueOf(sendDrone(ch, "drone:home"));
+            }
+        });
+
+        // drone.clear([channel])
+        drone.set("clear", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                int ch = args.narg() >= 1 ? args.checkint(1) : os.getBluetoothChannel();
+                return LuaValue.valueOf(sendDrone(ch, "drone:clear"));
+            }
+        });
+
+        // drone.hover(true/false [, channel])
+        drone.set("hover", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                boolean h = args.checkboolean(1);
+                int ch = args.narg() >= 2 ? args.checkint(2) : os.getBluetoothChannel();
+                return LuaValue.valueOf(sendDrone(ch, "drone:hover:" + h));
+            }
+        });
+
+        // drone.refuel(ticks [, channel]) — remote fuel grant, for ops that stock drones via another system
+        drone.set("refuel", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                int ticks = args.checkint(1);
+                int ch = args.narg() >= 2 ? args.checkint(2) : os.getBluetoothChannel();
+                return LuaValue.valueOf(sendDrone(ch, "drone:refuel:" + ticks));
+            }
+        });
+
+        globals.set("drone", drone);
+    }
+
+    private boolean sendDrone(int channel, String message) {
+        net.minecraft.world.level.Level lvl = os.getLevel();
+        net.minecraft.core.BlockPos pos = os.getBlockPos();
+        if (lvl == null || pos == null) return false;
+        BluetoothNetwork.broadcast(lvl, pos, channel, message);
+        return true;
     }
 
     private void installScannerAPI() {

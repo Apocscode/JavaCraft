@@ -7,6 +7,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.SimpleContainer;
@@ -20,9 +21,11 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.FluidState;
 import net.neoforged.neoforge.energy.EnergyStorage;
 
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Queue;
 import java.util.UUID;
 
@@ -66,6 +69,10 @@ public class RobotEntity extends PathfinderMob {
 
         // Tick the OS on both sides (client needs it for screen rendering)
         os.tick();
+
+        // Keep the OS's world + host context fresh each tick for Lua APIs
+        os.setWorldContext(level(), blockPosition());
+        os.setHost(this);
 
         if (level().isClientSide()) return;
 
@@ -119,7 +126,11 @@ public class RobotEntity extends PathfinderMob {
 
     private boolean canMoveTo(BlockPos pos) {
         BlockState state = level().getBlockState(pos);
-        return state.isAir() || !state.isSolid();
+        if (!state.isAir() && state.isSolid()) return false;
+        // Avoid water/lava (they're non-solid but would drown/damage the robot)
+        FluidState fluid = state.getFluidState();
+        if (!fluid.isEmpty()) return false;
+        return true;
     }
 
     // --- Mining ---
@@ -141,8 +152,18 @@ public class RobotEntity extends PathfinderMob {
         BlockState state = level().getBlockState(pos);
         if (state.isAir() || state.getDestroySpeed(level(), pos) < 0) return; // Can't mine bedrock etc.
 
-        // Drop items into robot inventory
-        Block.dropResources(state, level(), pos);
+        // Collect drops and deposit into the robot's inventory; spill overflow into the world.
+        if (level() instanceof ServerLevel server) {
+            List<ItemStack> drops = Block.getDrops(state, server, pos, null);
+            for (ItemStack drop : drops) {
+                ItemStack leftover = inventory.addItem(drop);
+                if (!leftover.isEmpty()) {
+                    Block.popResource(level(), pos, leftover);
+                }
+            }
+        } else {
+            Block.dropResources(state, level(), pos);
+        }
         level().setBlock(pos, Blocks.AIR.defaultBlockState(), 3);
     }
 
@@ -194,6 +215,36 @@ public class RobotEntity extends PathfinderMob {
     }
 
     public void clearCommands() { commandQueue.clear(); }
+    public int getCommandsQueued() { return commandQueue.size(); }
+    public boolean isBusy() { return !commandQueue.isEmpty(); }
+
+    /**
+     * Consume one fuel item from the given inventory slot and convert it to stored FE.
+     * Returns the amount of FE added (0 if no suitable item or no capacity).
+     */
+    public int refuel(int slot) {
+        if (slot < 0 || slot >= inventory.getContainerSize()) return 0;
+        ItemStack stack = inventory.getItem(slot);
+        if (stack.isEmpty()) return 0;
+
+        int fe = fuelValueFor(stack);
+        if (fe <= 0) return 0;
+        int accepted = energyStorage.receiveEnergy(fe, false);
+        if (accepted <= 0) return 0;
+        stack.shrink(1);
+        return accepted;
+    }
+
+    private static int fuelValueFor(ItemStack stack) {
+        var item = stack.getItem();
+        if (item == net.minecraft.world.item.Items.COAL) return 1600;
+        if (item == net.minecraft.world.item.Items.CHARCOAL) return 1600;
+        if (item == net.minecraft.world.item.Items.COAL_BLOCK) return 16000;
+        if (item == net.minecraft.world.item.Items.BLAZE_ROD) return 2400;
+        if (item == net.minecraft.world.item.Items.LAVA_BUCKET) return 20000;
+        return 0;
+    }
+
     public SimpleContainer getInventory() { return inventory; }
     public int getSelectedSlot() { return selectedSlot; }
     public void setSelectedSlot(int slot) { this.selectedSlot = Math.clamp(slot, 0, 15); }
