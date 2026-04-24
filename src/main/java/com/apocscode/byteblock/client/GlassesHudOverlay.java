@@ -45,10 +45,25 @@ public final class GlassesHudOverlay {
         if (head.isEmpty() || head.getItem() != ModItems.GLASSES.get()) return;
 
         List<GlassesHudState.Widget> widgets = GlassesHudState.getWidgets();
-        if (widgets.isEmpty()) return;
-
         GuiGraphics gg = event.getGuiGraphics();
         Font font = mc.font;
+
+        // No widgets received yet — show a "no signal" placeholder so the wearer
+        // knows the HUD is alive and waiting for a computer to push widgets.
+        if (widgets.isEmpty()) {
+            int ch = com.apocscode.byteblock.item.GlassesItem.getChannel(head);
+            int panelH = PAD * 2 + 28;
+            gg.fill(PANEL_X, PANEL_Y, PANEL_X + PANEL_W, PANEL_Y + panelH, BG_COL);
+            gg.fill(PANEL_X, PANEL_Y, PANEL_X + PANEL_W, PANEL_Y + 1, ACC_COL);
+            gg.fill(PANEL_X, PANEL_Y + panelH - 1, PANEL_X + PANEL_W, PANEL_Y + panelH, ACC_COL);
+            gg.drawString(font, Component.literal("BYTEBLOCK HUD").withStyle(ChatFormatting.AQUA),
+                PANEL_X + PAD, PANEL_Y + PAD, 0xFFFFFFFF, false);
+            gg.drawString(font, Component.literal("ch " + ch + " — no signal").withStyle(ChatFormatting.GRAY),
+                PANEL_X + PAD, PANEL_Y + PAD + 12, 0xFFCCCCCC, false);
+            gg.drawString(font, Component.literal("run glasses_test.lua").withStyle(ChatFormatting.DARK_GRAY),
+                PANEL_X + PAD, PANEL_Y + PAD + 22, 0xFF888888, false);
+            return;
+        }
 
         int rows = widgets.size();
         // Compute total height: each widget contributes its own height, or ROW_H by default.
