@@ -349,6 +349,8 @@ public class ComputerBlockEntity extends BlockEntity implements IButtonPanel {
         if (tag.contains("BluetoothChannel")) os.setBluetoothChannel(tag.getInt("BluetoothChannel"));
         if (tag.contains("Filesystem", net.minecraft.nbt.Tag.TAG_COMPOUND)) {
             os.getFileSystem().load(tag.getCompound("Filesystem"));
+            // Re-seed any new default files added in mod updates (idempotent — uses !exists guards)
+            os.installSystemPrograms();
         }
 
         // Virtual button panel

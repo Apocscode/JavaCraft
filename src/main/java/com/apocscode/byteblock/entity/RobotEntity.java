@@ -588,7 +588,10 @@ public class RobotEntity extends PathfinderMob {
         os = new JavaOS(computerId);
         if (tag.contains("Label")) os.setLabel(tag.getString("Label"));
         if (tag.contains("OSBluetoothChannel")) os.setBluetoothChannel(tag.getInt("OSBluetoothChannel"));
-        if (tag.contains("Filesystem")) os.getFileSystem().load(tag.getCompound("Filesystem"));
+        if (tag.contains("Filesystem")) {
+            os.getFileSystem().load(tag.getCompound("Filesystem"));
+            os.installSystemPrograms(); // re-seed new default files (idempotent)
+        }
         // Restore inventory
         if (tag.contains("Inventory")) {
             CompoundTag invTag = tag.getCompound("Inventory");

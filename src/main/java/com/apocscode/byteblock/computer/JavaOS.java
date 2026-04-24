@@ -83,7 +83,7 @@ public class JavaOS {
         installSystemPrograms();
     }
 
-    private void installSystemPrograms() {
+    public void installSystemPrograms() {
         // Write built-in program stubs to /Program Files/
         fileSystem.installSystemFile("/Program Files/shell", "Built-in shell program");
         fileSystem.installSystemFile("/Program Files/edit", "Built-in text editor");
