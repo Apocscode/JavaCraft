@@ -346,9 +346,9 @@ public class DroneProgram extends OSProgram {
         pb.clear(COL_BG);
 
         // Header.
-        pb.drawString(MAP_X, 6, "Drone Fleet Control", 15);
+        pb.drawString(MAP_X, 6, "Drone Fleet Control", COL_TEXT);
         pb.drawStringRight(SIDEBAR_X + SIDEBAR_W, 6,
-                "ch=" + os.getBluetoothChannel() + "  scale=1:" + mapBlockScale, 7);
+                "ch=" + os.getBluetoothChannel() + "  scale=1:" + mapBlockScale, COL_DIM);
 
         // Map area border.
         pb.fillRect(MAP_X - 1, MAP_Y - 1, MAP_SIZE + 2, MAP_SIZE + 2, COL_BORDER);
@@ -404,13 +404,13 @@ public class DroneProgram extends OSProgram {
             int bx = MAP_X + i * (btnW + btnGap);
             pb.fillRect(bx, TOOLBAR_Y, btnW, btnH, COL_BTN);
             pb.drawRect(bx, TOOLBAR_Y, btnW, btnH, COL_BORDER);
-            pb.drawStringCentered(bx, btnW, TOOLBAR_Y + 3, labels[i], 15);
+            pb.drawStringCentered(bx, btnW, TOOLBAR_Y + 3, labels[i], COL_TEXT);
         }
 
         // Sidebar drone list.
         pb.fillRect(SIDEBAR_X - 1, MAP_Y - 1, SIDEBAR_W + 2, MAP_SIZE + 2, COL_BORDER);
         pb.fillRect(SIDEBAR_X, MAP_Y, SIDEBAR_W, MAP_SIZE, COL_PANEL);
-        pb.drawString(SIDEBAR_X + 4, MAP_Y + 2, "Drones (" + drones.size() + ")", 11);
+        pb.drawString(SIDEBAR_X + 4, MAP_Y + 2, "Drones (" + drones.size() + ")", 0xFF60ffff);
         int rowY = MAP_Y + 18;
         for (DroneBlip d : drones) {
             if (rowY > MAP_Y + MAP_SIZE - 14) break;
@@ -423,7 +423,7 @@ public class DroneProgram extends OSProgram {
                     + (d.group.isEmpty() ? "" : "[" + d.group + "]")
                     + " F" + d.fuel;
             pb.drawString(SIDEBAR_X + 16, rowY, line.substring(0, Math.min(line.length(), 18)),
-                    sel ? 15 : 7);
+                    sel ? 0xFFffffff : COL_TEXT);
             rowY += 14;
         }
         if (drones.isEmpty()) {
@@ -433,7 +433,7 @@ public class DroneProgram extends OSProgram {
 
         // Footer help.
         pb.drawString(MAP_X, TOOLBAR_Y + 24,
-                "L-click: waypoint | R-click: home | click dot: select | scroll: zoom | ESC: exit", 15);
+                "L-click: waypoint | R-click: home | click dot: select | scroll: zoom | ESC: exit", COL_TEXT);
     }
 
     private int droneColor(DroneBlip d) {
