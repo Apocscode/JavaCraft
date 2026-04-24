@@ -88,6 +88,11 @@ public class ByteBlock {
             com.apocscode.byteblock.network.RelayConfigPayload.STREAM_CODEC,
             com.apocscode.byteblock.network.RelayConfigPayload::handle
         );
+        registrar.playToServer(
+            com.apocscode.byteblock.network.GpsModeCyclePayload.TYPE,
+            com.apocscode.byteblock.network.GpsModeCyclePayload.STREAM_CODEC,
+            com.apocscode.byteblock.network.GpsModeCyclePayload::handle
+        );
     }
     private void registerEntityAttributes(EntityAttributeCreationEvent event) {
         event.put(ModEntities.DRONE.get(), DroneEntity.createAttributes().build());

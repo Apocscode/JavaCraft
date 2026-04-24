@@ -61,6 +61,16 @@ public class DroneEntity extends PathfinderMob {
     private String swarmGroup = "";    // if non-empty, drone only obeys "drone:swarm:<group>:..." on its channel
     private DroneVariant variant = DroneVariant.STANDARD;
 
+    // GPS-tool programming — persistent fleet tasks.
+    private BlockPos routeSource = null;
+    private BlockPos routeDest = null;
+    private boolean routeActive = false;
+    private int routePhase = 0; // 0 = heading to source, 1 = heading to dest
+    private BlockPos patrolMin = null;
+    private BlockPos patrolMax = null;
+    private boolean patrolActive = false;
+    private int patrolCornerIdx = 0;
+
     public DroneEntity(EntityType<? extends DroneEntity> type, Level level) {
         super(type, level);
         this.setNoGravity(true);
@@ -110,6 +120,47 @@ public class DroneEntity extends PathfinderMob {
                 Vec3 move = direction.normalize().scale(0.2);
                 setDeltaMovement(move);
                 fuelTicks--;
+            }
+        }
+
+        // GPS programmed tasks — refill waypoints when the queue runs dry.
+        if (waypoints.isEmpty() && fuelTicks > 0) {
+            if (routeActive && routeSource != null && routeDest != null) {
+                if (routePhase == 0) {
+                    // Head to source, then pickup.
+                    Vec3 src = new Vec3(routeSource.getX() + 0.5, routeSource.getY() + 1.5, routeSource.getZ() + 0.5);
+                    if (position().distanceToSqr(src) < 4.0) {
+                        pickupFromContainer(routeSource, 64);
+                        routePhase = 1;
+                        addWaypoint(new Vec3(routeDest.getX() + 0.5, routeDest.getY() + 1.5, routeDest.getZ() + 0.5));
+                    } else {
+                        addWaypoint(src);
+                    }
+                } else {
+                    Vec3 dst = new Vec3(routeDest.getX() + 0.5, routeDest.getY() + 1.5, routeDest.getZ() + 0.5);
+                    if (position().distanceToSqr(dst) < 4.0) {
+                        dropIntoContainer(routeDest, 64);
+                        routePhase = 0;
+                        addWaypoint(new Vec3(routeSource.getX() + 0.5, routeSource.getY() + 1.5, routeSource.getZ() + 0.5));
+                    } else {
+                        addWaypoint(dst);
+                    }
+                }
+            } else if (patrolActive && patrolMin != null && patrolMax != null) {
+                // 4-corner orbit at patrolMax.y + 1
+                int minX = Math.min(patrolMin.getX(), patrolMax.getX());
+                int maxX = Math.max(patrolMin.getX(), patrolMax.getX());
+                int minZ = Math.min(patrolMin.getZ(), patrolMax.getZ());
+                int maxZ = Math.max(patrolMin.getZ(), patrolMax.getZ());
+                int y = Math.max(patrolMin.getY(), patrolMax.getY()) + 1;
+                Vec3 corner = switch (patrolCornerIdx % 4) {
+                    case 0 -> new Vec3(minX + 0.5, y + 0.5, minZ + 0.5);
+                    case 1 -> new Vec3(maxX + 0.5, y + 0.5, minZ + 0.5);
+                    case 2 -> new Vec3(maxX + 0.5, y + 0.5, maxZ + 0.5);
+                    default -> new Vec3(minX + 0.5, y + 0.5, maxZ + 0.5);
+                };
+                addWaypoint(corner);
+                patrolCornerIdx = (patrolCornerIdx + 1) % 4;
             }
         }
 
@@ -240,6 +291,57 @@ public class DroneEntity extends PathfinderMob {
                                 : 8;
                         broadcastScanResults(radius);
                     }
+                }
+                case "route" -> {
+                    if (effectiveParts.length >= 8) {
+                        routeSource = new BlockPos(
+                                Integer.parseInt(effectiveParts[2]),
+                                Integer.parseInt(effectiveParts[3]),
+                                Integer.parseInt(effectiveParts[4]));
+                        routeDest = new BlockPos(
+                                Integer.parseInt(effectiveParts[5]),
+                                Integer.parseInt(effectiveParts[6]),
+                                Integer.parseInt(effectiveParts[7]));
+                        routeActive = true;
+                        routePhase = 0;
+                        patrolActive = false;
+                        waypoints.clear();
+                    }
+                }
+                case "patrol" -> {
+                    if (effectiveParts.length >= 8) {
+                        patrolMin = new BlockPos(
+                                Integer.parseInt(effectiveParts[2]),
+                                Integer.parseInt(effectiveParts[3]),
+                                Integer.parseInt(effectiveParts[4]));
+                        patrolMax = new BlockPos(
+                                Integer.parseInt(effectiveParts[5]),
+                                Integer.parseInt(effectiveParts[6]),
+                                Integer.parseInt(effectiveParts[7]));
+                        patrolActive = true;
+                        patrolCornerIdx = 0;
+                        routeActive = false;
+                        waypoints.clear();
+                    }
+                }
+                case "path" -> {
+                    // drone:path:x1:y1:z1:x2:y2:z2:...
+                    waypoints.clear();
+                    routeActive = false;
+                    patrolActive = false;
+                    int i = 2;
+                    while (i + 2 < effectiveParts.length) {
+                        addWaypoint(new Vec3(
+                                Double.parseDouble(effectiveParts[i]) + 0.5,
+                                Double.parseDouble(effectiveParts[i + 1]) + 1.5,
+                                Double.parseDouble(effectiveParts[i + 2]) + 0.5));
+                        i += 3;
+                    }
+                }
+                case "stop" -> {
+                    waypoints.clear();
+                    routeActive = false;
+                    patrolActive = false;
                 }
                 default -> { /* unknown */ }
             }

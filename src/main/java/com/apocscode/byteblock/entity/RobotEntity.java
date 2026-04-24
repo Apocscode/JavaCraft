@@ -50,6 +50,19 @@ public class RobotEntity extends PathfinderMob {
     private EnergyStorage energyStorage;
     private JavaOS os;
 
+    // GPS-tool nav state.
+    private BlockPos navTarget = null;
+    private java.util.List<BlockPos> navPath = null;
+    private int navPathIdx = 0;
+    private BlockPos routeSrc = null;
+    private BlockPos routeDst = null;
+    private boolean routeActive = false;
+    private int routePhase = 0;
+    private BlockPos patrolMin = null;
+    private BlockPos patrolMax = null;
+    private boolean patrolActive = false;
+    private int patrolCornerIdx = 0;
+
     public RobotEntity(EntityType<? extends RobotEntity> type, Level level) {
         super(type, level);
         this.computerId = UUID.randomUUID();
@@ -84,11 +97,24 @@ public class RobotEntity extends PathfinderMob {
             energyStorage.extractEnergy(ENERGY_PER_ACTION, false);
         }
 
+        // Per-tick GPS nav stepper (runs when the command queue is idle).
+        if (commandQueue.isEmpty() && energyStorage.getEnergyStored() >= ENERGY_PER_ACTION) {
+            if (tickNavStep()) {
+                energyStorage.extractEnergy(ENERGY_PER_ACTION, false);
+            }
+        }
+
         // Register on Bluetooth
         BluetoothNetwork.register(level(), computerId, blockPosition(), bluetoothChannel);
     }
 
     private void executeCommand(String cmd) {
+        // Programmed macros from the GPS tool.
+        if (cmd.startsWith("goto:") || cmd.startsWith("route:") || cmd.startsWith("patrol:") || cmd.startsWith("path:")
+                || "stop".equals(cmd) || "clearNav".equals(cmd)) {
+            handleNavCommand(cmd);
+            return;
+        }
         switch (cmd) {
             case "forward" -> moveForward();
             case "back" -> moveBack();
@@ -107,6 +133,131 @@ public class RobotEntity extends PathfinderMob {
             case "suckUp" -> suck(blockPosition().above());
             case "suckDown" -> suck(blockPosition().below());
         }
+    }
+
+    private void handleNavCommand(String cmd) {
+        String[] p = cmd.split(":");
+        try {
+            switch (p[0]) {
+                case "goto" -> {
+                    if (p.length >= 4) {
+                        navTarget = new BlockPos(Integer.parseInt(p[1]), Integer.parseInt(p[2]), Integer.parseInt(p[3]));
+                        routeActive = false; patrolActive = false; navPath = null;
+                    }
+                }
+                case "route" -> {
+                    if (p.length >= 7) {
+                        routeSrc = new BlockPos(Integer.parseInt(p[1]), Integer.parseInt(p[2]), Integer.parseInt(p[3]));
+                        routeDst = new BlockPos(Integer.parseInt(p[4]), Integer.parseInt(p[5]), Integer.parseInt(p[6]));
+                        routeActive = true; routePhase = 0;
+                        patrolActive = false; navPath = null; navTarget = null;
+                    }
+                }
+                case "patrol" -> {
+                    if (p.length >= 7) {
+                        patrolMin = new BlockPos(Integer.parseInt(p[1]), Integer.parseInt(p[2]), Integer.parseInt(p[3]));
+                        patrolMax = new BlockPos(Integer.parseInt(p[4]), Integer.parseInt(p[5]), Integer.parseInt(p[6]));
+                        patrolActive = true; patrolCornerIdx = 0;
+                        routeActive = false; navPath = null; navTarget = null;
+                    }
+                }
+                case "path" -> {
+                    java.util.List<BlockPos> list = new java.util.ArrayList<>();
+                    int i = 1;
+                    while (i + 2 < p.length) {
+                        list.add(new BlockPos(Integer.parseInt(p[i]), Integer.parseInt(p[i + 1]), Integer.parseInt(p[i + 2])));
+                        i += 3;
+                    }
+                    if (!list.isEmpty()) {
+                        navPath = list; navPathIdx = 0;
+                        routeActive = false; patrolActive = false; navTarget = null;
+                    }
+                }
+                case "stop", "clearNav" -> {
+                    navTarget = null; navPath = null;
+                    routeActive = false; patrolActive = false;
+                }
+            }
+        } catch (NumberFormatException ignored) { }
+    }
+
+    /**
+     * Greedy one-tile step toward the current nav target. Returns true if a step
+     * (or pickup/drop) happened this tick so energy is consumed.
+     */
+    private boolean tickNavStep() {
+        // Resolve the active goal into a single BlockPos target.
+        BlockPos target = null;
+        boolean endAction = false; // pickup/drop at endpoint
+
+        if (navTarget != null) {
+            target = navTarget;
+        } else if (navPath != null && navPathIdx < navPath.size()) {
+            target = navPath.get(navPathIdx);
+        } else if (routeActive && routeSrc != null && routeDst != null) {
+            target = routePhase == 0 ? routeSrc : routeDst;
+        } else if (patrolActive && patrolMin != null && patrolMax != null) {
+            int minX = Math.min(patrolMin.getX(), patrolMax.getX());
+            int maxX = Math.max(patrolMin.getX(), patrolMax.getX());
+            int minZ = Math.min(patrolMin.getZ(), patrolMax.getZ());
+            int maxZ = Math.max(patrolMin.getZ(), patrolMax.getZ());
+            int y = patrolMin.getY();
+            target = switch (patrolCornerIdx % 4) {
+                case 0 -> new BlockPos(minX, y, minZ);
+                case 1 -> new BlockPos(maxX, y, minZ);
+                case 2 -> new BlockPos(maxX, y, maxZ);
+                default -> new BlockPos(minX, y, maxZ);
+            };
+        }
+
+        if (target == null) return false;
+
+        BlockPos here = blockPosition();
+        if (here.equals(target) || here.distSqr(target) < 1.1) {
+            // Arrived — advance the current goal.
+            if (navTarget != null) {
+                navTarget = null;
+            } else if (navPath != null) {
+                navPathIdx++;
+                if (navPathIdx >= navPath.size()) navPath = null;
+            } else if (routeActive) {
+                if (routePhase == 0) {
+                    suck(routeSrc); // pickup from source
+                    routePhase = 1;
+                } else {
+                    drop(routeDst); // drop at destination
+                    routePhase = 0;
+                }
+                endAction = true;
+            } else if (patrolActive) {
+                patrolCornerIdx = (patrolCornerIdx + 1) % 4;
+            }
+            return endAction;
+        }
+
+        // Greedy step: pick the largest axis delta, try that first, fall back to others.
+        int dx = Integer.signum(target.getX() - here.getX());
+        int dy = Integer.signum(target.getY() - here.getY());
+        int dz = Integer.signum(target.getZ() - here.getZ());
+
+        // Try Y first when blocked isn't a concern, else prefer horizontal.
+        if (dx != 0 && tryStep(here.offset(dx, 0, 0))) return true;
+        if (dz != 0 && tryStep(here.offset(0, 0, dz))) return true;
+        if (dy != 0 && tryStep(here.offset(0, dy, 0))) return true;
+        return false;
+    }
+
+    private boolean tryStep(BlockPos to) {
+        if (!canMoveTo(to)) return false;
+        // Face the movement direction for visual consistency.
+        int dx = to.getX() - blockPosition().getX();
+        int dz = to.getZ() - blockPosition().getZ();
+        if (dx > 0) facing = Direction.EAST;
+        else if (dx < 0) facing = Direction.WEST;
+        else if (dz > 0) facing = Direction.SOUTH;
+        else if (dz < 0) facing = Direction.NORTH;
+        moveTo(to.getX() + 0.5, to.getY(), to.getZ() + 0.5);
+        return true;
     }
 
     // --- Movement ---
