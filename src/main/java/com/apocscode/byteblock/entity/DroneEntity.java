@@ -9,8 +9,12 @@ import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.SimpleContainer;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.PathfinderMob;
+import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Player;
@@ -18,6 +22,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.LinkedList;
@@ -51,6 +56,9 @@ public class DroneEntity extends PathfinderMob {
     private int hoverDrainCounter = 0;
     private final SimpleContainer inventory = new SimpleContainer(9);
     private BlockPos homePos = null;
+    private boolean defender = false;  // attack nearby hostiles if true
+    private int attackCooldown = 0;
+    private String swarmGroup = "";    // if non-empty, drone only obeys "drone:swarm:<group>:..." on its channel
 
     public DroneEntity(EntityType<? extends DroneEntity> type, Level level) {
         super(type, level);
@@ -110,21 +118,73 @@ public class DroneEntity extends PathfinderMob {
         while ((msg = BluetoothNetwork.receive(droneId)) != null) {
             handleBluetoothMessage(msg.content());
         }
+
+        // Defender behavior — attack nearest hostile mob every 2s if armed
+        if (defender) {
+            if (attackCooldown > 0) attackCooldown--;
+            if (attackCooldown <= 0) {
+                LivingEntity target = findNearestHostile(5.0);
+                if (target != null) {
+                    Vec3 dir = target.position().subtract(position()).normalize().scale(0.3);
+                    setDeltaMovement(dir);
+                    if (position().distanceTo(target.position()) < 2.0) {
+                        target.hurt(damageSources().mobAttack(this), 4.0f);
+                        attackCooldown = 40;
+                    }
+                }
+            }
+        }
+    }
+
+    private LivingEntity findNearestHostile(double radius) {
+        AABB area = getBoundingBox().inflate(radius);
+        LivingEntity best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (Monster m : level().getEntitiesOfClass(Monster.class, area)) {
+            if (!m.isAlive()) continue;
+            double d = m.position().distanceToSqr(position());
+            if (d < bestDist) {
+                bestDist = d;
+                best = m;
+            }
+        }
+        return best;
     }
 
     private void handleBluetoothMessage(String raw) {
         if (raw == null || !raw.startsWith("drone:")) return;
         String[] parts = raw.split(":");
         if (parts.length < 2) return;
-        String cmd = parts[1];
+
+        // Swarm routing: "drone:swarm:<group>:<real-cmd>:..." is only obeyed
+        // if the drone's swarmGroup matches. Non-swarm messages are always
+        // obeyed (unless a swarm group is set and the message isn't targeted).
+        String cmd;
+        String[] effectiveParts;
+        if ("swarm".equals(parts[1])) {
+            if (parts.length < 4) return;
+            if (!swarmGroup.equals(parts[2])) return;
+            cmd = parts[3];
+            // Strip the "drone:swarm:<group>:" prefix: remap parts[0..] to ["drone", cmd, ...tail]
+            String[] tail = new String[parts.length - 4];
+            System.arraycopy(parts, 4, tail, 0, tail.length);
+            effectiveParts = new String[tail.length + 2];
+            effectiveParts[0] = "drone";
+            effectiveParts[1] = cmd;
+            System.arraycopy(tail, 0, effectiveParts, 2, tail.length);
+        } else {
+            cmd = parts[1];
+            effectiveParts = parts;
+        }
+
         try {
             switch (cmd) {
                 case "waypoint" -> {
-                    if (parts.length >= 5) {
+                    if (effectiveParts.length >= 5) {
                         addWaypoint(new Vec3(
-                                Double.parseDouble(parts[2]),
-                                Double.parseDouble(parts[3]),
-                                Double.parseDouble(parts[4])));
+                                Double.parseDouble(effectiveParts[2]),
+                                Double.parseDouble(effectiveParts[3]),
+                                Double.parseDouble(effectiveParts[4])));
                     }
                 }
                 case "home" -> {
@@ -135,32 +195,37 @@ public class DroneEntity extends PathfinderMob {
                 }
                 case "clear" -> waypoints.clear();
                 case "hover" -> {
-                    if (parts.length >= 3) hovering = Boolean.parseBoolean(parts[2]);
+                    if (effectiveParts.length >= 3) hovering = Boolean.parseBoolean(effectiveParts[2]);
                 }
                 case "refuel" -> {
-                    if (parts.length >= 3) addFuel(Integer.parseInt(parts[2]));
+                    if (effectiveParts.length >= 3) addFuel(Integer.parseInt(effectiveParts[2]));
                 }
                 case "pickup" -> {
-                    // drone:pickup:x:y:z[:max]
-                    if (parts.length >= 5) {
+                    if (effectiveParts.length >= 5) {
                         BlockPos target = new BlockPos(
-                                Integer.parseInt(parts[2]),
-                                Integer.parseInt(parts[3]),
-                                Integer.parseInt(parts[4]));
-                        int max = parts.length >= 6 ? Integer.parseInt(parts[5]) : 64;
+                                Integer.parseInt(effectiveParts[2]),
+                                Integer.parseInt(effectiveParts[3]),
+                                Integer.parseInt(effectiveParts[4]));
+                        int max = effectiveParts.length >= 6 ? Integer.parseInt(effectiveParts[5]) : 64;
                         pickupFromContainer(target, max);
                     }
                 }
                 case "drop" -> {
-                    // drone:drop:x:y:z[:max]
-                    if (parts.length >= 5) {
+                    if (effectiveParts.length >= 5) {
                         BlockPos target = new BlockPos(
-                                Integer.parseInt(parts[2]),
-                                Integer.parseInt(parts[3]),
-                                Integer.parseInt(parts[4]));
-                        int max = parts.length >= 6 ? Integer.parseInt(parts[5]) : 64;
+                                Integer.parseInt(effectiveParts[2]),
+                                Integer.parseInt(effectiveParts[3]),
+                                Integer.parseInt(effectiveParts[4]));
+                        int max = effectiveParts.length >= 6 ? Integer.parseInt(effectiveParts[5]) : 64;
                         dropIntoContainer(target, max);
                     }
+                }
+                case "defender" -> {
+                    if (effectiveParts.length >= 3) defender = Boolean.parseBoolean(effectiveParts[2]);
+                }
+                case "group" -> {
+                    if (effectiveParts.length >= 3) swarmGroup = effectiveParts[2];
+                    else swarmGroup = "";
                 }
                 default -> { /* unknown */ }
             }
@@ -228,6 +293,10 @@ public class DroneEntity extends PathfinderMob {
     public SimpleContainer getInventory() { return inventory; }
     public BlockPos getHomePos() { return homePos; }
     public void setHomePos(BlockPos pos) { this.homePos = pos; }
+    public boolean isDefender() { return defender; }
+    public void setDefender(boolean d) { this.defender = d; }
+    public String getSwarmGroup() { return swarmGroup; }
+    public void setSwarmGroup(String g) { this.swarmGroup = g == null ? "" : g; }
 
     /** True if a ChargingStation is actively charging this drone (AABB overlap, within 3 blocks). */
     public boolean isCharging() {
@@ -342,6 +411,8 @@ public class DroneEntity extends PathfinderMob {
             tag.putInt("HomeY", homePos.getY());
             tag.putInt("HomeZ", homePos.getZ());
         }
+        tag.putBoolean("Defender", defender);
+        tag.putString("SwarmGroup", swarmGroup);
         CompoundTag invTag = new CompoundTag();
         for (int i = 0; i < inventory.getContainerSize(); i++) {
             ItemStack stack = inventory.getItem(i);
@@ -364,6 +435,8 @@ public class DroneEntity extends PathfinderMob {
         if (tag.contains("HomeX")) {
             homePos = new BlockPos(tag.getInt("HomeX"), tag.getInt("HomeY"), tag.getInt("HomeZ"));
         }
+        if (tag.contains("Defender")) defender = tag.getBoolean("Defender");
+        if (tag.contains("SwarmGroup")) swarmGroup = tag.getString("SwarmGroup");
         if (tag.contains("Inventory")) {
             CompoundTag invTag = tag.getCompound("Inventory");
             for (String key : invTag.getAllKeys()) {

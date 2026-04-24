@@ -10,6 +10,7 @@ import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.entity.EntityRenderer;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.texture.OverlayTexture;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.resources.ResourceLocation;
 
 import org.joml.Matrix4f;
@@ -30,6 +31,25 @@ public class DroneRenderer extends EntityRenderer<DroneEntity> {
     @Override
     public void render(DroneEntity entity, float yaw, float partialTick, PoseStack pose,
                        MultiBufferSource buffers, int packedLight) {
+        // Low-fuel visual alert — spawn smoke particles below the drone (~20 TPS rate-limited)
+        if (entity.level() != null && entity.getFuel() > 0 && entity.getFuel() < 400
+                && entity.tickCount % 4 == 0) {
+            double dx = (entity.getRandom().nextDouble() - 0.5) * 0.3;
+            double dz = (entity.getRandom().nextDouble() - 0.5) * 0.3;
+            entity.level().addParticle(ParticleTypes.SMOKE,
+                    entity.getX() + dx, entity.getY() - 0.1, entity.getZ() + dz,
+                    0.0, -0.02, 0.0);
+        }
+        // Defender mode — angry red particles around the drone while armed
+        if (entity.level() != null && entity.isDefender() && entity.tickCount % 10 == 0) {
+            double dx = (entity.getRandom().nextDouble() - 0.5) * 0.8;
+            double dy = entity.getRandom().nextDouble() * 0.4;
+            double dz = (entity.getRandom().nextDouble() - 0.5) * 0.8;
+            entity.level().addParticle(ParticleTypes.ANGRY_VILLAGER,
+                    entity.getX() + dx, entity.getY() + 0.3 + dy, entity.getZ() + dz,
+                    0.0, 0.0, 0.0);
+        }
+
         pose.pushPose();
 
         // Gentle hover bob

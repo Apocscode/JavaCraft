@@ -45,6 +45,7 @@ public class RobotEntity extends PathfinderMob {
     private Direction facing = Direction.NORTH;
     private int selectedSlot = 0;
     private final SimpleContainer inventory = new SimpleContainer(16);
+    private ItemStack equippedTool = ItemStack.EMPTY; // dedicated tool slot (pick/axe/shovel/sword/shears)
     private final Queue<String> commandQueue = new LinkedList<>();
     private EnergyStorage energyStorage;
     private JavaOS os;
@@ -158,14 +159,19 @@ public class RobotEntity extends PathfinderMob {
         BlockState state = level().getBlockState(pos);
         if (state.isAir() || state.getDestroySpeed(level(), pos) < 0) return; // Can't mine bedrock etc.
 
-        // Collect drops and deposit into the robot's inventory; spill overflow into the world.
+        // Collect drops (with enchantments from equipped tool) and deposit into the robot's inventory.
         if (level() instanceof ServerLevel server) {
-            List<ItemStack> drops = Block.getDrops(state, server, pos, null);
+            ItemStack tool = equippedTool.isEmpty() ? ItemStack.EMPTY : equippedTool;
+            List<ItemStack> drops = Block.getDrops(state, server, pos, null, this, tool);
             for (ItemStack drop : drops) {
                 ItemStack leftover = inventory.addItem(drop);
                 if (!leftover.isEmpty()) {
                     Block.popResource(level(), pos, leftover);
                 }
+            }
+            // Damage the tool (if damageable) once per dig
+            if (!equippedTool.isEmpty() && equippedTool.isDamageableItem()) {
+                equippedTool.hurtAndBreak(1, server, null, it -> equippedTool = ItemStack.EMPTY);
             }
         } else {
             Block.dropResources(state, level(), pos);
@@ -357,6 +363,33 @@ public class RobotEntity extends PathfinderMob {
     public int getSelectedSlot() { return selectedSlot; }
     public void setSelectedSlot(int slot) { this.selectedSlot = Math.clamp(slot, 0, 15); }
     public Direction getRobotFacing() { return facing; }
+    public ItemStack getEquippedTool() { return equippedTool; }
+
+    /**
+     * Move the item from inventory[slot] into the dedicated tool slot.
+     * The currently equipped tool (if any) is swapped back into that slot.
+     * Returns true on success.
+     */
+    public boolean equipTool(int slot) {
+        if (slot < 0 || slot >= inventory.getContainerSize()) return false;
+        ItemStack fromInv = inventory.getItem(slot);
+        // Accept any damageable item (tools are all damageable) or empty-to-unequip
+        ItemStack prev = equippedTool;
+        equippedTool = fromInv.isEmpty() ? ItemStack.EMPTY : fromInv.copy();
+        inventory.setItem(slot, prev);
+        return true;
+    }
+
+    /** Move the equipped tool back into the first empty inventory slot (or drops if full). */
+    public boolean unequipTool() {
+        if (equippedTool.isEmpty()) return false;
+        ItemStack leftover = inventory.addItem(equippedTool);
+        if (!leftover.isEmpty()) {
+            Block.popResource(level(), blockPosition(), leftover);
+        }
+        equippedTool = ItemStack.EMPTY;
+        return true;
+    }
     public EnergyStorage getEnergyStorage() { return energyStorage; }
     public JavaOS getOS() { return os; }
     public UUID getComputerId() { return computerId; }
@@ -383,6 +416,9 @@ public class RobotEntity extends PathfinderMob {
             }
         }
         tag.put("Inventory", invTag);
+        if (!equippedTool.isEmpty()) {
+            tag.put("EquippedTool", equippedTool.save(level().registryAccess()));
+        }
     }
 
     @Override
@@ -409,6 +445,10 @@ public class RobotEntity extends PathfinderMob {
                 int slot = Integer.parseInt(key);
                 inventory.setItem(slot, ItemStack.parse(level().registryAccess(), invTag.getCompound(key)).orElse(ItemStack.EMPTY));
             }
+        }
+        if (tag.contains("EquippedTool")) {
+            equippedTool = ItemStack.parse(level().registryAccess(), tag.getCompound("EquippedTool"))
+                    .orElse(ItemStack.EMPTY);
         }
     }
 }

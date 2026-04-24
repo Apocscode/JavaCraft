@@ -1275,6 +1275,35 @@ public class LuaRuntime {
             }
         });
 
+        // Tool slot — equip an inventory slot into the tool bay, or unequip.
+        robot.set("equip", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue slot) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                return LuaValue.valueOf(r.equipTool(slot.checkint() - 1));
+            }
+        });
+        robot.set("unequip", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                return LuaValue.valueOf(r.unequipTool());
+            }
+        });
+        robot.set("getTool", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.NIL;
+                net.minecraft.world.item.ItemStack t = r.getEquippedTool();
+                if (t.isEmpty()) return LuaValue.NIL;
+                return LuaValue.valueOf(net.minecraft.core.registries.BuiltInRegistries.ITEM
+                        .getKey(t.getItem()).toString());
+            }
+        });
+
         globals.set("robot", robot);
     }
 
@@ -1380,6 +1409,50 @@ public class LuaRuntime {
                 int max = args.narg() >= 4 ? args.checkint(4) : 64;
                 int ch = args.narg() >= 5 ? args.checkint(5) : os.getBluetoothChannel();
                 return LuaValue.valueOf(sendDrone(ch, "drone:drop:" + x + ":" + y + ":" + z + ":" + max));
+            }
+        });
+
+        // drone.defender(true/false [, channel])
+        drone.set("defender", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                boolean on = args.checkboolean(1);
+                int ch = args.narg() >= 2 ? args.checkint(2) : os.getBluetoothChannel();
+                return LuaValue.valueOf(sendDrone(ch, "drone:defender:" + on));
+            }
+        });
+
+        // drone.group("name" [, channel]) — assign swarm group (empty string removes)
+        drone.set("group", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                String g = args.checkjstring(1);
+                int ch = args.narg() >= 2 ? args.checkint(2) : os.getBluetoothChannel();
+                return LuaValue.valueOf(sendDrone(ch, "drone:group:" + g));
+            }
+        });
+
+        // drone.swarm("group", "cmd", arg1, arg2, ... [, channel]) — command a whole group
+        // Channel is the LAST arg if it's an integer; otherwise the OS channel is used.
+        drone.set("swarm", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                if (args.narg() < 2) return LuaValue.FALSE;
+                String group = args.checkjstring(1);
+                String cmd = args.checkjstring(2);
+                StringBuilder sb = new StringBuilder("drone:swarm:").append(group).append(':').append(cmd);
+                // Trailing integer is treated as channel; anything else becomes part of the payload.
+                int last = args.narg();
+                int ch = os.getBluetoothChannel();
+                int end = last;
+                if (last >= 3 && args.arg(last).isint()) {
+                    ch = args.checkint(last);
+                    end = last - 1;
+                }
+                for (int i = 3; i <= end; i++) {
+                    sb.append(':').append(args.arg(i).tojstring());
+                }
+                return LuaValue.valueOf(sendDrone(ch, sb.toString()));
             }
         });
 
