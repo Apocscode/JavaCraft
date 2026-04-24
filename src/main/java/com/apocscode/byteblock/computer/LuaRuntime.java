@@ -1304,7 +1304,46 @@ public class LuaRuntime {
             }
         });
 
+        // Portable scanner — robot.scan([radius]) returns entities table keyed 1..n
+        // with fields: type, name, x, y, z, health, maxHealth, player (bool), uuid.
+        // Radius clamped to 1..16 (immediate scan).
+        robot.set("scan", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null || r.level() == null) return LuaValue.NIL;
+                int radius = args.narg() >= 1 ? args.checkint(1) : 8;
+                return doEntityScan(r.level(), r.blockPosition(), radius);
+            }
+        });
+
         globals.set("robot", robot);
+    }
+
+    /** Shared scan helper used by robot.scan() and the drone BT scan response. */
+    private LuaValue doEntityScan(net.minecraft.world.level.Level lvl,
+                                  net.minecraft.core.BlockPos origin, int radius) {
+        int clamped = Math.max(1, Math.min(radius, 16));
+        com.apocscode.byteblock.scanner.WorldScanData data =
+                new com.apocscode.byteblock.scanner.WorldScanData();
+        data.setOrigin(origin);
+        data.scanEntities(lvl, origin, clamped);
+        LuaTable result = new LuaTable();
+        int i = 1;
+        for (com.apocscode.byteblock.scanner.WorldScanData.EntitySnapshot e : data.getEntities()) {
+            LuaTable row = new LuaTable();
+            row.set("type", LuaValue.valueOf(e.type()));
+            row.set("name", LuaValue.valueOf(e.name() == null ? "" : e.name()));
+            row.set("x", LuaValue.valueOf(e.x()));
+            row.set("y", LuaValue.valueOf(e.y()));
+            row.set("z", LuaValue.valueOf(e.z()));
+            row.set("health", LuaValue.valueOf(e.health()));
+            row.set("maxHealth", LuaValue.valueOf(e.maxHealth()));
+            row.set("player", LuaValue.valueOf(e.isPlayer()));
+            row.set("uuid", LuaValue.valueOf(e.uuid() == null ? "" : e.uuid()));
+            result.set(i++, row);
+        }
+        return result;
     }
 
     /** Returns the RobotEntity hosting this OS, or null. */
@@ -1453,6 +1492,28 @@ public class LuaRuntime {
                     sb.append(':').append(args.arg(i).tojstring());
                 }
                 return LuaValue.valueOf(sendDrone(ch, sb.toString()));
+            }
+        });
+
+        // drone.variant("cargo" / "defender" / "scout" / "standard" [, channel])
+        drone.set("variant", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                String name = args.checkjstring(1);
+                int ch = args.narg() >= 2 ? args.checkint(2) : os.getBluetoothChannel();
+                return LuaValue.valueOf(sendDrone(ch, "drone:variant:" + name));
+            }
+        });
+
+        // drone.scan([radius [, channel]]) — triggers drone to scan and broadcast results
+        // as "drone:scanresult:<uuid>:<type>:<x>:<y>:<z>:<health>:<isPlayer>:<name>"
+        // followed by "drone:scandone:<uuid>:<count>". Listen via bluetooth.receive().
+        drone.set("scan", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                int radius = args.narg() >= 1 ? args.checkint(1) : 8;
+                int ch = args.narg() >= 2 ? args.checkint(2) : os.getBluetoothChannel();
+                return LuaValue.valueOf(sendDrone(ch, "drone:scan:" + radius));
             }
         });
 

@@ -159,20 +159,20 @@ public class DesktopProgram extends OSProgram {
     private static final String[] START_LEFT = {
         "Shell", "Lua Shell", "Puzzle", "IDE", "Notepad", "Explorer",
         "Paint", "Calculator", "Task Manager", "Bluetooth", "Buttons", "Monitor", "Materials",
-        "ME Network", "Create"
+        "ME Network", "Create", "Drones"
     };
     private static final String[] START_LEFT_TARGETS = {
         "builtin:shell", "builtin:lua", "builtin:puzzle", "builtin:edit",
         "builtin:notepad", "builtin:explorer", "builtin:paint", "builtin:calculator", "builtin:taskmanager",
         "builtin:bluetooth", "builtin:buttons", "builtin:monitor", "builtin:crafting",
-        "builtin:me_dashboard", "builtin:create_dashboard"
+        "builtin:me_dashboard", "builtin:create_dashboard", "builtin:drones"
     };
     private static final SystemIcons.Icon[] START_LEFT_ICONS = {
         SystemIcons.Icon.TERMINAL, SystemIcons.Icon.LUA_MOON, SystemIcons.Icon.PUZZLE,
         SystemIcons.Icon.FILE_CODE, SystemIcons.Icon.NOTEPAD, SystemIcons.Icon.EXPLORER, SystemIcons.Icon.PAINT,
         SystemIcons.Icon.CALCULATOR, SystemIcons.Icon.TASK_MANAGER, SystemIcons.Icon.BLUETOOTH,
         SystemIcons.Icon.BLUETOOTH, SystemIcons.Icon.COMPUTER, SystemIcons.Icon.DOCUMENTS,
-        SystemIcons.Icon.NETWORK, SystemIcons.Icon.NETWORK
+        SystemIcons.Icon.NETWORK, SystemIcons.Icon.NETWORK, SystemIcons.Icon.NETWORK
     };
     private static final String[] START_RIGHT = {
         "Documents", "Pictures", "Downloads", "This PC"
@@ -1085,6 +1085,7 @@ public class DesktopProgram extends OSProgram {
             case "builtin:crafting"      -> openWindow("Materials",     new CraftingCalculatorProgram(), 0, 0, 80, 23);
             case "builtin:me_dashboard"  -> openWindow("ME Network",    new MEDashboardProgram(),        0, 0, 80, 23);
             case "builtin:create_dashboard" -> openWindow("Create",     new CreateDashboardProgram(),    0, 0, 80, 23);
+            case "builtin:drones"        -> openWindow("Drones",       new DroneProgram(),              0, 0, 80, 25);
             default -> {}
         }
     }
@@ -1101,7 +1102,8 @@ public class DesktopProgram extends OSProgram {
                  "builtin:paint", "builtin:lua", "builtin:puzzle", "builtin:ide",
                  "builtin:notepad", "builtin:calculator", "builtin:taskmanager",
                  "builtin:bluetooth", "builtin:buttons", "builtin:monitor",
-                 "builtin:me_dashboard", "builtin:create_dashboard" -> launchByTarget(
+                 "builtin:me_dashboard", "builtin:create_dashboard",
+                 "builtin:drones" -> launchByTarget(
                      s.target.equals("builtin:ide") ? "builtin:edit" : s.target);
             default -> {
                 if (os.getFileSystem().isDirectory(s.target)) {

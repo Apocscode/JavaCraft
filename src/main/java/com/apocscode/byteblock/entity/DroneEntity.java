@@ -59,6 +59,7 @@ public class DroneEntity extends PathfinderMob {
     private boolean defender = false;  // attack nearby hostiles if true
     private int attackCooldown = 0;
     private String swarmGroup = "";    // if non-empty, drone only obeys "drone:swarm:<group>:..." on its channel
+    private DroneVariant variant = DroneVariant.STANDARD;
 
     public DroneEntity(EntityType<? extends DroneEntity> type, Level level) {
         super(type, level);
@@ -113,22 +114,24 @@ public class DroneEntity extends PathfinderMob {
         }
 
         // Register on Bluetooth under our own UUID and drain the inbox
-        BluetoothNetwork.register(level(), droneId, blockPosition(), bluetoothChannel);
+        BluetoothNetwork.register(level(), droneId, blockPosition(), bluetoothChannel,
+                BluetoothNetwork.DeviceType.DRONE);
         BluetoothNetwork.Message msg;
         while ((msg = BluetoothNetwork.receive(droneId)) != null) {
             handleBluetoothMessage(msg.content());
         }
 
-        // Defender behavior — attack nearest hostile mob every 2s if armed
-        if (defender) {
+        // Defender behavior — attack nearest hostile mob every 2s if armed.
+        // Variant determines damage + aggro radius (DEFENDER is the only one with real combat).
+        if (defender && variant.attackDamage > 0) {
             if (attackCooldown > 0) attackCooldown--;
             if (attackCooldown <= 0) {
-                LivingEntity target = findNearestHostile(5.0);
+                LivingEntity target = findNearestHostile(variant.aggroRadius);
                 if (target != null) {
-                    Vec3 dir = target.position().subtract(position()).normalize().scale(0.3);
+                    Vec3 dir = target.position().subtract(position()).normalize().scale(0.3 * variant.speedMul);
                     setDeltaMovement(dir);
                     if (position().distanceTo(target.position()) < 2.0) {
-                        target.hurt(damageSources().mobAttack(this), 4.0f);
+                        target.hurt(damageSources().mobAttack(this), variant.attackDamage);
                         attackCooldown = 40;
                     }
                 }
@@ -227,10 +230,75 @@ public class DroneEntity extends PathfinderMob {
                     if (effectiveParts.length >= 3) swarmGroup = effectiveParts[2];
                     else swarmGroup = "";
                 }
+                case "variant" -> {
+                    if (effectiveParts.length >= 3) setVariantByName(effectiveParts[2]);
+                }
+                case "scan" -> {
+                    if (level() != null) {
+                        int radius = effectiveParts.length >= 3
+                                ? Math.max(1, Math.min(Integer.parseInt(effectiveParts[2]), 16))
+                                : 8;
+                        broadcastScanResults(radius);
+                    }
+                }
                 default -> { /* unknown */ }
             }
         } catch (NumberFormatException ignored) {
             // Malformed command — ignore silently.
+        }
+    }
+
+    /**
+     * Run an entity scan from our current position and broadcast the results on
+     * our Bluetooth channel as one BT message per entity, plus a final summary.
+     * Controllers listen via bluetooth.receive() and filter on the "drone:scanresult:" prefix.
+     * Format:  drone:scanresult:<droneUuid>:<type>:<x>:<y>:<z>:<health>:<isPlayer>:<name>
+     * Followed by: drone:scandone:<droneUuid>:<count>
+     */
+    private void broadcastScanResults(int radius) {
+        Level lvl = level();
+        if (lvl == null) return;
+        com.apocscode.byteblock.scanner.WorldScanData data =
+                new com.apocscode.byteblock.scanner.WorldScanData();
+        data.scanEntities(lvl, blockPosition(), radius);
+        int count = 0;
+        for (com.apocscode.byteblock.scanner.WorldScanData.EntitySnapshot e : data.getEntities()) {
+            String msg = "drone:scanresult:" + droneId + ":"
+                    + e.type() + ":" + e.x() + ":" + e.y() + ":" + e.z()
+                    + ":" + e.health() + ":" + e.isPlayer()
+                    + ":" + (e.name() == null ? "" : e.name().replace(":", " "));
+            BluetoothNetwork.broadcast(lvl, blockPosition(), bluetoothChannel, msg);
+            count++;
+        }
+        BluetoothNetwork.broadcast(lvl, blockPosition(), bluetoothChannel,
+                "drone:scandone:" + droneId + ":" + count);
+    }
+
+    /** Apply a variant by name (case-insensitive). Unknown names fall back to STANDARD. */
+    public void setVariantByName(String name) {
+        try {
+            this.variant = DroneVariant.valueOf(name.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            this.variant = DroneVariant.STANDARD;
+        }
+    }
+
+    public DroneVariant getVariant() { return variant; }
+    public void setVariant(DroneVariant v) { this.variant = v == null ? DroneVariant.STANDARD : v; }
+
+    /** Drone variants — apply stat multipliers to flight speed, fuel drain and combat. */
+    public enum DroneVariant {
+        STANDARD(1.0f, 1.0f, 4.0f, 5.0),   // speed, fuelDrain, atkDmg, aggroRadius
+        CARGO(0.7f, 1.5f, 0.0f, 0.0),      // slow, thirsty, no combat
+        DEFENDER(1.3f, 1.2f, 7.0f, 10.0),  // fast, heavy hitter, wider aggro
+        SCOUT(1.6f, 0.6f, 0.0f, 0.0);      // very fast, fuel-efficient, no combat
+
+        public final float speedMul;
+        public final float fuelDrainMul;
+        public final float attackDamage;
+        public final double aggroRadius;
+        DroneVariant(float s, float f, float a, double r) {
+            this.speedMul = s; this.fuelDrainMul = f; this.attackDamage = a; this.aggroRadius = r;
         }
     }
 
@@ -413,6 +481,7 @@ public class DroneEntity extends PathfinderMob {
         }
         tag.putBoolean("Defender", defender);
         tag.putString("SwarmGroup", swarmGroup);
+        tag.putString("Variant", variant.name());
         CompoundTag invTag = new CompoundTag();
         for (int i = 0; i < inventory.getContainerSize(); i++) {
             ItemStack stack = inventory.getItem(i);
@@ -437,6 +506,7 @@ public class DroneEntity extends PathfinderMob {
         }
         if (tag.contains("Defender")) defender = tag.getBoolean("Defender");
         if (tag.contains("SwarmGroup")) swarmGroup = tag.getString("SwarmGroup");
+        if (tag.contains("Variant")) setVariantByName(tag.getString("Variant"));
         if (tag.contains("Inventory")) {
             CompoundTag invTag = tag.getCompound("Inventory");
             for (String key : invTag.getAllKeys()) {
