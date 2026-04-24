@@ -99,6 +99,12 @@ public class RobotEntity extends PathfinderMob {
             case "digUp" -> digUp();
             case "digDown" -> digDown();
             case "place" -> place();
+            case "drop" -> drop(blockPosition().relative(facing));
+            case "dropUp" -> drop(blockPosition().above());
+            case "dropDown" -> drop(blockPosition().below());
+            case "suck" -> suck(blockPosition().relative(facing));
+            case "suckUp" -> suck(blockPosition().above());
+            case "suckDown" -> suck(blockPosition().below());
         }
     }
 
@@ -181,6 +187,108 @@ public class RobotEntity extends PathfinderMob {
                 held.shrink(1);
             }
         }
+    }
+
+    // --- Inventory transfer (drop/suck into adjacent containers) ---
+
+    private void drop(BlockPos target) {
+        if (level() == null) return;
+        ItemStack stack = inventory.getItem(selectedSlot);
+        if (stack.isEmpty()) return;
+
+        net.minecraft.world.level.block.entity.BlockEntity be = level().getBlockEntity(target);
+        if (be instanceof net.minecraft.world.Container dst) {
+            int before = stack.getCount();
+            ItemStack leftover = insertIntoContainer(dst, stack.copy());
+            int moved = before - leftover.getCount();
+            if (moved > 0) {
+                stack.shrink(moved);
+                inventory.setItem(selectedSlot, stack.isEmpty() ? ItemStack.EMPTY : stack);
+                dst.setChanged();
+            }
+        } else if (level().getBlockState(target).isAir()) {
+            // No container — pop the full stack into the world.
+            Block.popResource(level(), target, stack.copy());
+            inventory.setItem(selectedSlot, ItemStack.EMPTY);
+        }
+    }
+
+    private void suck(BlockPos target) {
+        if (level() == null) return;
+        net.minecraft.world.level.block.entity.BlockEntity be = level().getBlockEntity(target);
+        if (!(be instanceof net.minecraft.world.Container src)) return;
+
+        for (int i = 0; i < src.getContainerSize(); i++) {
+            ItemStack stack = src.getItem(i);
+            if (stack.isEmpty()) continue;
+            ItemStack leftover = inventory.addItem(stack.copy());
+            int consumed = stack.getCount() - leftover.getCount();
+            if (consumed > 0) {
+                stack.shrink(consumed);
+                src.setItem(i, stack.isEmpty() ? ItemStack.EMPTY : stack);
+                src.setChanged();
+                return; // one action per tick
+            }
+        }
+    }
+
+    private static ItemStack insertIntoContainer(net.minecraft.world.Container dst, ItemStack stack) {
+        for (int i = 0; i < dst.getContainerSize() && !stack.isEmpty(); i++) {
+            ItemStack existing = dst.getItem(i);
+            if (!existing.isEmpty() && ItemStack.isSameItemSameComponents(existing, stack)) {
+                int space = Math.min(existing.getMaxStackSize(), dst.getMaxStackSize()) - existing.getCount();
+                int move = Math.min(space, stack.getCount());
+                if (move > 0) {
+                    existing.grow(move);
+                    stack.shrink(move);
+                }
+            }
+        }
+        for (int i = 0; i < dst.getContainerSize() && !stack.isEmpty(); i++) {
+            if (dst.getItem(i).isEmpty() && dst.canPlaceItem(i, stack)) {
+                int move = Math.min(Math.min(stack.getMaxStackSize(), dst.getMaxStackSize()), stack.getCount());
+                ItemStack placed = stack.copy();
+                placed.setCount(move);
+                dst.setItem(i, placed);
+                stack.shrink(move);
+            }
+        }
+        return stack;
+    }
+
+    /**
+     * Compare the block at offset with the item in the selected slot.
+     * yOffset: 0=ahead, +1=above, -1=below.
+     */
+    public boolean compareBlock(int yOffset) {
+        if (level() == null) return false;
+        BlockPos pos;
+        if (yOffset == 0) pos = blockPosition().relative(facing);
+        else if (yOffset > 0) pos = blockPosition().above();
+        else pos = blockPosition().below();
+
+        BlockState state = level().getBlockState(pos);
+        ItemStack selected = inventory.getItem(selectedSlot);
+        if (selected.isEmpty()) return state.isAir();
+        Block selectedBlock = Block.byItem(selected.getItem());
+        return selectedBlock != Blocks.AIR && state.is(selectedBlock);
+    }
+
+    /** True if a ChargingStation is actively charging this robot. */
+    public boolean isCharging() {
+        if (level() == null) return false;
+        net.minecraft.world.phys.AABB area =
+                new net.minecraft.world.phys.AABB(blockPosition()).inflate(3.0);
+        for (BlockPos p : BlockPos.betweenClosed(
+                BlockPos.containing(area.minX, area.minY, area.minZ),
+                BlockPos.containing(area.maxX, area.maxY, area.maxZ))) {
+            net.minecraft.world.level.block.entity.BlockEntity be = level().getBlockEntity(p);
+            if (be instanceof com.apocscode.byteblock.block.entity.ChargingStationBlockEntity cs
+                    && cs.getEnergyStored() > 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // --- Interaction ---

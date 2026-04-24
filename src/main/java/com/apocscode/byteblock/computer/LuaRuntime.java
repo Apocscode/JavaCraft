@@ -1100,7 +1100,9 @@ public class LuaRuntime {
 
         // Movement commands
         String[] moves = {"forward", "back", "up", "down", "turnLeft", "turnRight",
-                          "dig", "digUp", "digDown", "place"};
+                          "dig", "digUp", "digDown", "place",
+                          "drop", "dropUp", "dropDown",
+                          "suck", "suckUp", "suckDown"};
         for (String m : moves) {
             final String cmd = m;
             robot.set(m, new ZeroArgFunction() {
@@ -1239,6 +1241,40 @@ public class LuaRuntime {
             public LuaValue call() { return detectAt(-1); }
         });
 
+        robot.set("compare", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                return LuaValue.valueOf(r.compareBlock(0));
+            }
+        });
+        robot.set("compareUp", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                return LuaValue.valueOf(r.compareBlock(1));
+            }
+        });
+        robot.set("compareDown", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                return LuaValue.valueOf(r.compareBlock(-1));
+            }
+        });
+
+        robot.set("isCharging", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                return LuaValue.valueOf(r.isCharging());
+            }
+        });
+
         globals.set("robot", robot);
     }
 
@@ -1318,6 +1354,32 @@ public class LuaRuntime {
                 int ticks = args.checkint(1);
                 int ch = args.narg() >= 2 ? args.checkint(2) : os.getBluetoothChannel();
                 return LuaValue.valueOf(sendDrone(ch, "drone:refuel:" + ticks));
+            }
+        });
+
+        // drone.pickup(x, y, z [, max [, channel]]) — broadcast a pickup order at target pos
+        drone.set("pickup", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                int x = args.checkint(1);
+                int y = args.checkint(2);
+                int z = args.checkint(3);
+                int max = args.narg() >= 4 ? args.checkint(4) : 64;
+                int ch = args.narg() >= 5 ? args.checkint(5) : os.getBluetoothChannel();
+                return LuaValue.valueOf(sendDrone(ch, "drone:pickup:" + x + ":" + y + ":" + z + ":" + max));
+            }
+        });
+
+        // drone.drop(x, y, z [, max [, channel]]) — broadcast a deposit order at target pos
+        drone.set("drop", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                int x = args.checkint(1);
+                int y = args.checkint(2);
+                int z = args.checkint(3);
+                int max = args.narg() >= 4 ? args.checkint(4) : 64;
+                int ch = args.narg() >= 5 ? args.checkint(5) : os.getBluetoothChannel();
+                return LuaValue.valueOf(sendDrone(ch, "drone:drop:" + x + ":" + y + ":" + z + ":" + max));
             }
         });
 

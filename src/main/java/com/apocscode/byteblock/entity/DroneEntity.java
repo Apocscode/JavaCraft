@@ -5,6 +5,7 @@ import com.apocscode.byteblock.network.BluetoothNetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.SimpleContainer;
@@ -16,6 +17,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.LinkedList;
@@ -37,6 +39,7 @@ import java.util.UUID;
 public class DroneEntity extends PathfinderMob {
     private static final int MAX_FUEL = 72000;
     private static final int HOVER_DRAIN_PERIOD = 20; // 1 fuel per second while hovering
+    private static final int LOW_FUEL_THRESHOLD = 400; // ~20s — auto-return-home trigger
 
     private UUID ownerId = null;
     private UUID droneId;
@@ -68,6 +71,14 @@ public class DroneEntity extends PathfinderMob {
         if (level().isClientSide()) return;
 
         if (homePos == null) homePos = blockPosition();
+
+        // Auto-return-home when fuel is low and we're idle
+        if (fuelTicks > 0 && fuelTicks < LOW_FUEL_THRESHOLD && waypoints.isEmpty() && homePos != null) {
+            Vec3 home = new Vec3(homePos.getX() + 0.5, homePos.getY() + 1, homePos.getZ() + 0.5);
+            if (position().distanceTo(home) > 1.5) {
+                addWaypoint(home);
+            }
+        }
 
         // Hover drain — once per second rather than every tick
         if (fuelTicks > 0 && hovering && waypoints.isEmpty()) {
@@ -129,6 +140,28 @@ public class DroneEntity extends PathfinderMob {
                 case "refuel" -> {
                     if (parts.length >= 3) addFuel(Integer.parseInt(parts[2]));
                 }
+                case "pickup" -> {
+                    // drone:pickup:x:y:z[:max]
+                    if (parts.length >= 5) {
+                        BlockPos target = new BlockPos(
+                                Integer.parseInt(parts[2]),
+                                Integer.parseInt(parts[3]),
+                                Integer.parseInt(parts[4]));
+                        int max = parts.length >= 6 ? Integer.parseInt(parts[5]) : 64;
+                        pickupFromContainer(target, max);
+                    }
+                }
+                case "drop" -> {
+                    // drone:drop:x:y:z[:max]
+                    if (parts.length >= 5) {
+                        BlockPos target = new BlockPos(
+                                Integer.parseInt(parts[2]),
+                                Integer.parseInt(parts[3]),
+                                Integer.parseInt(parts[4]));
+                        int max = parts.length >= 6 ? Integer.parseInt(parts[5]) : 64;
+                        dropIntoContainer(target, max);
+                    }
+                }
                 default -> { /* unknown */ }
             }
         } catch (NumberFormatException ignored) {
@@ -185,6 +218,7 @@ public class DroneEntity extends PathfinderMob {
     public void setHovering(boolean hover) { this.hovering = hover; }
     public boolean isHovering() { return hovering; }
     public int getFuelTicks() { return fuelTicks; }
+    public int getFuel() { return fuelTicks; } // alias — matches docs naming
     public void addFuel(int ticks) { this.fuelTicks = Math.min(fuelTicks + ticks, MAX_FUEL); }
     public void linkComputer(UUID computerId) { this.linkedComputerId = computerId; }
     public UUID getDroneId() { return droneId; }
@@ -194,6 +228,105 @@ public class DroneEntity extends PathfinderMob {
     public SimpleContainer getInventory() { return inventory; }
     public BlockPos getHomePos() { return homePos; }
     public void setHomePos(BlockPos pos) { this.homePos = pos; }
+
+    /** True if a ChargingStation is actively charging this drone (AABB overlap, within 3 blocks). */
+    public boolean isCharging() {
+        if (level() == null) return false;
+        net.minecraft.world.phys.AABB area =
+                new net.minecraft.world.phys.AABB(blockPosition()).inflate(3.0);
+        for (BlockPos p : BlockPos.betweenClosed(
+                BlockPos.containing(area.minX, area.minY, area.minZ),
+                BlockPos.containing(area.maxX, area.maxY, area.maxZ))) {
+            BlockEntity be = level().getBlockEntity(p);
+            if (be instanceof com.apocscode.byteblock.block.entity.ChargingStationBlockEntity cs
+                    && cs.getEnergyStored() > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Pull up to `max` items from the container at target into this drone's inventory.
+     * Returns number of items moved.
+     */
+    public int pickupFromContainer(BlockPos target, int max) {
+        if (level() == null || position().distanceToSqr(
+                target.getX() + 0.5, target.getY() + 0.5, target.getZ() + 0.5) > 9) return 0;
+        BlockEntity be = level().getBlockEntity(target);
+        if (!(be instanceof Container src)) return 0;
+        int moved = 0;
+        for (int i = 0; i < src.getContainerSize() && moved < max; i++) {
+            ItemStack stack = src.getItem(i);
+            if (stack.isEmpty()) continue;
+            int take = Math.min(stack.getCount(), max - moved);
+            ItemStack piece = stack.copy();
+            piece.setCount(take);
+            ItemStack leftover = inventory.addItem(piece);
+            int consumed = take - leftover.getCount();
+            if (consumed > 0) {
+                stack.shrink(consumed);
+                src.setItem(i, stack.isEmpty() ? ItemStack.EMPTY : stack);
+                src.setChanged();
+                moved += consumed;
+            }
+        }
+        return moved;
+    }
+
+    /**
+     * Push up to `max` items from this drone's inventory into the container at target.
+     * Returns number of items moved.
+     */
+    public int dropIntoContainer(BlockPos target, int max) {
+        if (level() == null || position().distanceToSqr(
+                target.getX() + 0.5, target.getY() + 0.5, target.getZ() + 0.5) > 9) return 0;
+        BlockEntity be = level().getBlockEntity(target);
+        if (!(be instanceof Container dst)) return 0;
+        int moved = 0;
+        for (int i = 0; i < inventory.getContainerSize() && moved < max; i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (stack.isEmpty()) continue;
+            int take = Math.min(stack.getCount(), max - moved);
+            ItemStack piece = stack.copy();
+            piece.setCount(take);
+            ItemStack leftover = insertIntoContainer(dst, piece);
+            int consumed = take - leftover.getCount();
+            if (consumed > 0) {
+                stack.shrink(consumed);
+                inventory.setItem(i, stack.isEmpty() ? ItemStack.EMPTY : stack);
+                dst.setChanged();
+                moved += consumed;
+            }
+        }
+        return moved;
+    }
+
+    private static ItemStack insertIntoContainer(Container dst, ItemStack stack) {
+        // Try to merge with existing stacks first.
+        for (int i = 0; i < dst.getContainerSize() && !stack.isEmpty(); i++) {
+            ItemStack existing = dst.getItem(i);
+            if (!existing.isEmpty() && ItemStack.isSameItemSameComponents(existing, stack)) {
+                int space = Math.min(existing.getMaxStackSize(), dst.getMaxStackSize()) - existing.getCount();
+                int move = Math.min(space, stack.getCount());
+                if (move > 0) {
+                    existing.grow(move);
+                    stack.shrink(move);
+                }
+            }
+        }
+        // Then empty slots.
+        for (int i = 0; i < dst.getContainerSize() && !stack.isEmpty(); i++) {
+            if (dst.getItem(i).isEmpty() && dst.canPlaceItem(i, stack)) {
+                int move = Math.min(Math.min(stack.getMaxStackSize(), dst.getMaxStackSize()), stack.getCount());
+                ItemStack placed = stack.copy();
+                placed.setCount(move);
+                dst.setItem(i, placed);
+                stack.shrink(move);
+            }
+        }
+        return stack;
+    }
 
     @Override
     public void addAdditionalSaveData(CompoundTag tag) {
