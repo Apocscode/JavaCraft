@@ -76,7 +76,12 @@ public final class GlassesHudAPI {
 
     /** Push a list of widgets to all glasses-wearing players within BT range and on the matching channel. */
     public static int push(Level level, BlockPos pos, int channel, List<Widget> widgets) {
-        if (!(level instanceof ServerLevel sl) || pos == null) return 0;
+        if (!(level instanceof ServerLevel sl) || pos == null) {
+            org.slf4j.LoggerFactory.getLogger("ByteBlock/Glasses").info(
+                "push: bailed early — level={} pos={} (need ServerLevel + non-null pos)",
+                level == null ? "null" : level.getClass().getSimpleName(), pos);
+            return 0;
+        }
         CompoundTag data = new CompoundTag();
         ListTag list = new ListTag();
         if (widgets != null) for (Widget w : widgets) list.add(w.toNbt());
@@ -107,7 +112,7 @@ public final class GlassesHudAPI {
             PacketDistributor.sendToPlayer(p, new GlassesHudPayload(data));
             sent++;
         }
-        if (sent == 0 && playerCount > 0) {
+        if (sent == 0) {
             org.slf4j.LoggerFactory.getLogger("ByteBlock/Glasses").info(
                 "push: 0 wearers matched (players={}, noGlasses={}, wrongCh={}, outOfRange={}, ch={}, pos={})",
                 playerCount, noGlasses, wrongCh, outOfRange, channel, pos);
