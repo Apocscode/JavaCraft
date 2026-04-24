@@ -33,6 +33,237 @@ automated factory controller without leaving the game.
 3. **Programmatic** — write a program that calls `ButtonsLib.setButton(os, 0, true)` or
    `RedstoneLib.setOutput(os, side, 15)` to drive signals directly.
 
+## Blocks & Items — block-by-block reference
+
+Every device registers itself on the in-world **Bluetooth network** so programs can discover it
+by `DeviceType` and message it on a numbered channel. Standard blocks have a 15-block range; the
+items below note the specific range/role for each.
+
+### Computer
+
+The brain of the system. Every other block is useless without one.
+
+| Property            | Value |
+|---------------------|-------|
+| Block entity        | `ComputerBlockEntity` |
+| BT device type      | `COMPUTER` (range 15) + virtual `BUTTON_PANEL` |
+| Block state         | `FACING` (horizontal), `CONNECTED` |
+
+- **Right-click** — opens the fullscreen terminal `ComputerScreen`. Auto-reboots if shut down.
+- **Filesystem** — JavaOS persists the in-memory tree to NBT; saves are debounced and only flush
+  when the OS marks the FS dirty.
+- **Bluetooth** — registers as `COMPUTER` on `os.getBluetoothChannel()` and additionally as a
+  `BUTTON_PANEL` on its panel channel so the on-screen Button App discovers it as a device.
+- **Redstone & bundled output** — `isSignalSource = true`. The 16 virtual buttons drive an analog
+  signal `min(15, popcount(active))` on all 6 sides, plus a 16-color bundled mask. `INVERTED`
+  buttons flip their bit before the mask is computed. All outputs are cleared on block removal.
+- **Programs** — drive the virtual panel from Lua via `ButtonsLib.setButton(os, i, true)`; drive
+  external relays/panels via `RedstoneLib.setOutput(os, side, 0..15)`.
+
+### Button Panel
+
+A thin 14×14 px slab with a 4×4 grid of dye-colored buttons. Mounts on **walls, floors, or
+ceilings**.
+
+| Property            | Value |
+|---------------------|-------|
+| Block entity        | `ButtonPanelBlockEntity` |
+| BT device type      | `BUTTON_PANEL` (unlimited range) |
+| Block state         | `FACING` (full 6-direction) |
+| Light emission      | `0` if all off, otherwise `min(15, 6 + activeCount)` (real world light) |
+
+- **Click a button** — toggles it (mode-aware: TOGGLE / MOMENTARY / TIMER / DELAY / INVERTED).
+- **Sneak + click a button** — opens the per-button config GUI (label, color, mode, duration).
+- **Click the slab margin** — does nothing (intentional).
+- **Bluetooth events** — broadcasts `button_press:<i>:<0|1>:<colorName>` to its channel on every
+  state change. Accepts inbound `set_button:<i>:<0|1>` and `set_buttons:<mask>` to drive remotely.
+- **Per-button modes** — TOGGLE flips state, MOMENTARY pulses on for 4t then off, TIMER stays
+  on for `durations[i]` ticks then off, DELAY waits then toggles, INVERTED is TOGGLE with the
+  redstone bit flipped on output.
+- **Redstone & bundled output** — analog `popcount(effectiveMask)` clamped to 0–15 on all 6 sides;
+  16-bit bundled mask (one bit per dye color) on all 6 sides.
+- **Persistence** — NBT stores per-button mode, duration, label (≤16 chars), color override
+  (`0xRRGGBB`, `-1` = default wool), panel label (≤24 chars), channel, and the 16-bit state mask.
+
+### Redstone Relay
+
+The bridge between programs and the physical redstone world. Each side is independently
+configurable.
+
+| Property            | Value |
+|---------------------|-------|
+| Block entity        | `RedstoneRelayBlockEntity` |
+| BT device type      | `REDSTONE_RELAY` (range 15) |
+| Block state         | `FACING` (horizontal), `CONNECTED` |
+
+- **Right-click** — chat status: per-side `out=`, `in=`, `ch=`, `bundled` flags.
+- **Sneak + click** — opens the side-config GUI (`RedstoneRelayScreen`).
+- **Per-side configuration** — each of the 6 faces has its own BT channel, plus a *bundled* toggle.
+  When bundled, channels 1–16 map to the 16 colors of bundled cable; when not bundled, the face
+  emits a plain analog signal driven from the assigned channel.
+- **Inputs** — re-reads world redstone on neighbor change or every 4 ticks; broadcasts
+  `redstone_changed:<d>:<u>:<n>:<s>:<w>:<e>` when any side changes.
+- **Inbound commands** — `rs_set:<side>:<power>` sets analog output;
+  `rs_bundled:<side>:<colorMask>` sets bundled output.
+- **Project Red** — bundled outputs interop with Project Red bundled cables when the mod is
+  installed (see `compat/`).
+- **Cleanup** — clears its slot in the redstone/bundled output cache when the block is broken.
+
+### Monitor
+
+A flat, multi-block screen that mirrors a linked computer or runs a test pattern.
+
+| Property            | Value |
+|---------------------|-------|
+| Block entity        | `MonitorBlockEntity` |
+| BT device type      | `MONITOR` (range 15) |
+| Block state         | `FACING` (horizontal only — wall mounted) |
+| Shape               | 4-pixel-thick slab flush with the wall behind it |
+
+- **Right-click** — if a computer is auto-linked, opens that computer's `ComputerScreen` (rebooting
+  if needed).
+- **Multi-block formation** — placing/breaking a Monitor flood-fills connected same-facing
+  Monitors, validates that they form a rectangle, and assigns one origin + per-monitor
+  `(offsetX, offsetY)` so the renderer can stitch them into a single screen up to 10×10.
+- **Auto-link** — every 40 ticks the origin checks all formation members' adjacent blocks for an
+  adjacent `ComputerBlockEntity` and links it.
+- **Bluetooth control** — accepts `display_mode:mirror`, `display_mode:test:<pattern>`, and
+  `link:x,y,z` messages from programs.
+
+### Drive
+
+A reel-to-reel tape drive for storing programs and data on physical disks.
+
+| Property            | Value |
+|---------------------|-------|
+| Block entity        | `DriveBlockEntity` |
+| BT device type      | `DRIVE` (range 15) |
+| Block state         | `FACING` (horizontal), `CONNECTED` |
+
+- **Right-click** — opens the inventory menu; insert a Disk item to mount it.
+- **Disk operations** — programs read/write files on the mounted disk; the GUI also lets you rename
+  the disk via the C2S `RenameDiskPayload` packet.
+- **Drop on break** — inventory contents (any inserted disk) drop on block removal.
+
+### Printer
+
+Prints program-generated text onto paper, books, or Create's clipboard.
+
+| Property            | Value |
+|---------------------|-------|
+| Block entity        | `PrinterBlockEntity` |
+| BT device type      | `PRINTER` (range 15) |
+| Block state         | `FACING` (horizontal), `CONNECTED` |
+| Slots               | 0 = input media, 1 = output (printed item) |
+
+- **Right-click** — opens the 2-slot printer menu.
+- **Valid media** — `minecraft:paper`, `minecraft:writable_book`, `create:clipboard`.
+- **Print queue** — programs call `printer.queuePrint(title, content)` (or send equivalent via
+  Bluetooth); each tick the printer pops one job, consumes one media item, and writes the printed
+  item to slot 1 (only if slot 1 is empty).
+
+### Scanner (LiDAR)
+
+Scans the surrounding world into a persistent block/entity cache that programs can query.
+
+| Property            | Value |
+|---------------------|-------|
+| Block entity        | `ScannerBlockEntity` |
+| BT device type      | `SCANNER` (range 15) |
+| Block state         | `CONNECTED` |
+| Default radius      | 48 blocks (configurable 1–128) |
+
+- **Right-click** — chat status: scan progress %, total blocks scanned, last entity count, radius.
+- **Incremental block scan** — 2 chunk sections per tick to avoid lag. Auto-rescans every 30s.
+- **Entity scan** — every 20 ticks (1s).
+- **Immediate scan** — Lua `scanner.scan(radius≤16)` does a synchronous full scan in one tick for
+  short range queries.
+- **Programs** — `WorldScanData` exposes block/entity snapshots; used by drone/robot pathfinding.
+
+### GPS
+
+Place 3+ GPS blocks at known coordinates so computers can triangulate their position.
+
+| Property            | Value |
+|---------------------|-------|
+| Block entity        | `GpsBlockEntity` |
+| BT device type      | `GPS` (unlimited range) |
+| Block state         | `CONNECTED` |
+
+- **Right-click** — chat shows the block's broadcast position.
+- **Triangulation** — programs use 3+ GPS responses to solve their own coordinates.
+
+### Charging Station
+
+Slab-height pad that charges Robots and Drones standing within 3 blocks.
+
+| Property            | Value |
+|---------------------|-------|
+| Block entity        | `ChargingStationBlockEntity` |
+| BT device type      | `CHARGING_STATION` (range 15) |
+| Block state         | `CONNECTED` |
+| Energy buffer       | 100 000 FE; in 1000 FE/t, out 200 FE/t per entity |
+| Range               | 3 blocks |
+
+- **Right-click** — chat shows current FE / max FE.
+- **Robots** — receive FE directly into their `EnergyStorage`.
+- **Drones** — `1 FE = 2 fuel ticks`, capped at 72000 fuel ticks.
+- **FE input** — accepts up to 1000 FE/t from adjacent FE pipes/cables.
+
+### Universal Peripheral
+
+Place adjacent to any block (chest, furnace, etc.) to expose that block's capabilities to nearby
+computers.
+
+| Property            | Value |
+|---------------------|-------|
+| Block entity        | `PeripheralBlockEntity` |
+| BT device type      | `PERIPHERAL` (range 15) |
+| Block state         | `CONNECTED` |
+
+- **Right-click** — chat reports the auto-detected peripheral type of the bound block.
+
+### ByteChest
+
+A 27-slot Bluetooth-enabled chest with a status LED.
+
+| Property            | Value |
+|---------------------|-------|
+| Block entity        | `ByteChestBlockEntity` |
+| BT device type      | `BYTE_CHEST` (range 15) |
+| Block state         | `FACING` (horizontal, latch faces player), `CONNECTED` |
+
+- **Right-click** — opens the 27-slot chest menu.
+- **Drop on break** — full inventory drops as items.
+- **LED** — turns blue (`CONNECTED = true`) when a computer is in range.
+
+### GPS Tool (item)
+
+Right-click and Shift+Scroll to program drones and robots with waypoints, routes, areas, or paths.
+
+| Mode      | What it stores                  | How to set                                         |
+|-----------|---------------------------------|----------------------------------------------------|
+| WAYPOINT  | Single point `A`                | Right-click a block.                               |
+| ROUTE     | Source `A` + destination `B`    | Right-click two chests/blocks in sequence.         |
+| AREA      | Two AABB corners `A` + `B`      | Right-click two opposite corners.                  |
+| PATH      | Ordered list of waypoints       | Right-click each block in sequence.                |
+
+- **Shift + Scroll** — cycles mode.
+- **Shift + Right-click drone/robot** — applies the stored data to that entity.
+- **Shift + Right-click air** — clears the current mode's stored data.
+
+### Smart Glasses (item)
+
+Head-slot wearable that renders server-pushed HUD widgets generated by the `glasses.*` Lua API.
+
+- **Default channel** — `1` (NBT key `BtChannel`, range 0–255).
+- **Shift + Right-click** — cycles channel `(current + 1) & 0xFF`.
+- **Equip** — head slot.
+- **HUD** — `GlassesHudOverlay` shows widgets when worn; falls back to a "no signal" placeholder
+  when no widgets are received. Computers push widgets via `glasses.flush()` which routes through
+  the C2S `GlassesPushRequestPayload` and broadcasts to all wearers in BT range on the matching
+  channel.
+
 ## Build
 
 Requires JDK 21.
