@@ -187,6 +187,7 @@ public class LuaRuntime {
         installScannerAPI();
         installPeripheralAPI();
         installGlassesAPI();
+        installCCExtensions();
     }
 
     private void installTermAPI() {
@@ -2146,6 +2147,10 @@ public class LuaRuntime {
     // CC uses power-of-2 bitmask colors, we use 0-15 indices
 
     private int ccColorToIndex(int ccColor) {
+        return staticCcColorToIndex(ccColor);
+    }
+
+    private static int staticCcColorToIndex(int ccColor) {
         if (ccColor <= 0) return 0;
         int bit = 0;
         int v = ccColor;
@@ -2291,5 +2296,994 @@ public class LuaRuntime {
             if (val.isnil()) return LuaValue.NIL;
             return LuaValue.varargsOf(LuaValue.valueOf(idx), val);
         }
+    }
+
+    // =========================================================================
+    //  CC:Tweaked Extension APIs
+    //  parallel, vector, keys, paintutils, window, settings, turtle (alias),
+    //  http, pastebin, wget, help, plus textutils extensions and read() global.
+    // =========================================================================
+
+    private void installCCExtensions() {
+        extendTextUtils();
+        installParallelAPI();
+        installVectorAPI();
+        installKeysAPI();
+        installPaintutilsAPI();
+        installWindowAPI();
+        installSettingsAPI();
+        installTurtleAlias();
+        installHttpAPI();
+        installPastebinAPI();
+        installWgetGlobal();
+        installReadGlobal();
+        installHelpAPI();
+        installMultishellStub();
+    }
+
+    // ---------- textutils extensions ----------
+    private void extendTextUtils() {
+        LuaValue tuv = globals.get("textutils");
+        if (!tuv.istable()) return;
+        LuaTable tu = tuv.checktable();
+
+        tu.set("unserialize", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue s) {
+                try {
+                    String src = "return " + s.tojstring();
+                    LuaValue chunk = globals.load(src, "=unserialize", globals);
+                    return chunk.call();
+                } catch (LuaError e) { return LuaValue.NIL; }
+            }
+        });
+        tu.set("unserialise", tu.get("unserialize"));
+
+        tu.set("serializeJSON", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue v) { return LuaValue.valueOf(luaToJson(v)); }
+        });
+        tu.set("serialiseJSON", tu.get("serializeJSON"));
+
+        tu.set("unserializeJSON", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue s) {
+                try { return jsonToLua(s.tojstring()); }
+                catch (RuntimeException e) { return LuaValue.NIL; }
+            }
+        });
+        tu.set("unserialiseJSON", tu.get("unserializeJSON"));
+
+        tu.set("slowWrite", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                String text = a.arg1().tojstring();
+                for (int i = 0; i < text.length(); i++) pushOutput(String.valueOf(text.charAt(i)));
+                return NONE;
+            }
+        });
+        tu.set("slowPrint", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                pushOutput(a.arg1().tojstring() + "\n");
+                return NONE;
+            }
+        });
+
+        tu.set("pagedPrint", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                pushOutput(a.arg1().tojstring() + "\n");
+                return LuaValue.valueOf(1);
+            }
+        });
+
+        tu.set("tabulate", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                for (int i = 1; i <= a.narg(); i++) {
+                    LuaValue row = a.arg(i);
+                    if (row.istable()) {
+                        StringBuilder sb = new StringBuilder();
+                        LuaTable t = row.checktable();
+                        for (int j = 1; j <= t.length(); j++) {
+                            if (j > 1) sb.append("  ");
+                            sb.append(t.get(j).tojstring());
+                        }
+                        pushOutput(sb.append('\n').toString());
+                    }
+                }
+                return NONE;
+            }
+        });
+        tu.set("pagedTabulate", tu.get("tabulate"));
+
+        tu.set("formatTime", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                double t = a.optdouble(1, 0.0);
+                boolean twentyFour = a.optboolean(2, false);
+                int hours = (int) Math.floor(t) % 24;
+                int mins = (int) Math.floor((t - Math.floor(t)) * 60) % 60;
+                if (twentyFour) return LuaValue.valueOf(String.format("%02d:%02d", hours, mins));
+                String ampm = hours < 12 ? "AM" : "PM";
+                int h12 = hours % 12; if (h12 == 0) h12 = 12;
+                return LuaValue.valueOf(String.format("%d:%02d %s", h12, mins, ampm));
+            }
+        });
+
+        tu.set("urlEncode", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue v) {
+                try { return LuaValue.valueOf(java.net.URLEncoder.encode(v.tojstring(), java.nio.charset.StandardCharsets.UTF_8)); }
+                catch (Exception e) { return v; }
+            }
+        });
+
+        tu.set("complete", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) { return new LuaTable(); }
+        });
+    }
+
+    // ---------- parallel ----------
+    private void installParallelAPI() {
+        LuaTable p = new LuaTable();
+        // CC semantics rely on coroutines + event loop, which the current runtime
+        // does not suspend. We invoke each function sequentially and return on
+        // the first that returns (waitForAny) or after all complete (waitForAll).
+        p.set("waitForAny", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                for (int i = 1; i <= a.narg(); i++) {
+                    LuaValue f = a.arg(i);
+                    if (f.isfunction()) {
+                        try { f.call(); return LuaValue.valueOf(i); } catch (LuaError ignored) {}
+                    }
+                }
+                return LuaValue.valueOf(0);
+            }
+        });
+        p.set("waitForAll", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                for (int i = 1; i <= a.narg(); i++) {
+                    LuaValue f = a.arg(i);
+                    if (f.isfunction()) {
+                        try { f.call(); } catch (LuaError ignored) {}
+                    }
+                }
+                return NONE;
+            }
+        });
+        globals.set("parallel", p);
+    }
+
+    // ---------- vector ----------
+    private void installVectorAPI() {
+        LuaTable vector = new LuaTable();
+        final LuaTable mt = new LuaTable();
+
+        LuaValue vnew = new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                LuaTable t = new LuaTable();
+                t.set("x", LuaValue.valueOf(a.optdouble(1, 0.0)));
+                t.set("y", LuaValue.valueOf(a.optdouble(2, 0.0)));
+                t.set("z", LuaValue.valueOf(a.optdouble(3, 0.0)));
+                t.setmetatable(mt);
+                return t;
+            }
+        };
+        vector.set("new", vnew);
+
+        // methods
+        LuaTable idx = new LuaTable();
+        idx.set("add", new TwoArgFunction() {
+            @Override public LuaValue call(LuaValue a, LuaValue b) {
+                return ((VarArgFunction) vnew).invoke(LuaValue.varargsOf(
+                    LuaValue.valueOf(a.get("x").todouble() + b.get("x").todouble()),
+                    LuaValue.valueOf(a.get("y").todouble() + b.get("y").todouble()),
+                    LuaValue.valueOf(a.get("z").todouble() + b.get("z").todouble())
+                )).arg1();
+            }
+        });
+        idx.set("sub", new TwoArgFunction() {
+            @Override public LuaValue call(LuaValue a, LuaValue b) {
+                return ((VarArgFunction) vnew).invoke(LuaValue.varargsOf(
+                    LuaValue.valueOf(a.get("x").todouble() - b.get("x").todouble()),
+                    LuaValue.valueOf(a.get("y").todouble() - b.get("y").todouble()),
+                    LuaValue.valueOf(a.get("z").todouble() - b.get("z").todouble())
+                )).arg1();
+            }
+        });
+        idx.set("mul", new TwoArgFunction() {
+            @Override public LuaValue call(LuaValue a, LuaValue s) {
+                double k = s.todouble();
+                return ((VarArgFunction) vnew).invoke(LuaValue.varargsOf(
+                    LuaValue.valueOf(a.get("x").todouble() * k),
+                    LuaValue.valueOf(a.get("y").todouble() * k),
+                    LuaValue.valueOf(a.get("z").todouble() * k)
+                )).arg1();
+            }
+        });
+        idx.set("dot", new TwoArgFunction() {
+            @Override public LuaValue call(LuaValue a, LuaValue b) {
+                return LuaValue.valueOf(
+                    a.get("x").todouble() * b.get("x").todouble()
+                  + a.get("y").todouble() * b.get("y").todouble()
+                  + a.get("z").todouble() * b.get("z").todouble());
+            }
+        });
+        idx.set("cross", new TwoArgFunction() {
+            @Override public LuaValue call(LuaValue a, LuaValue b) {
+                double ax=a.get("x").todouble(), ay=a.get("y").todouble(), az=a.get("z").todouble();
+                double bx=b.get("x").todouble(), by=b.get("y").todouble(), bz=b.get("z").todouble();
+                return ((VarArgFunction) vnew).invoke(LuaValue.varargsOf(
+                    LuaValue.valueOf(ay*bz - az*by),
+                    LuaValue.valueOf(az*bx - ax*bz),
+                    LuaValue.valueOf(ax*by - ay*bx)
+                )).arg1();
+            }
+        });
+        idx.set("length", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue a) {
+                double x=a.get("x").todouble(), y=a.get("y").todouble(), z=a.get("z").todouble();
+                return LuaValue.valueOf(Math.sqrt(x*x + y*y + z*z));
+            }
+        });
+        idx.set("normalize", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue a) {
+                double x=a.get("x").todouble(), y=a.get("y").todouble(), z=a.get("z").todouble();
+                double len = Math.sqrt(x*x + y*y + z*z);
+                if (len < 1e-9) len = 1;
+                return ((VarArgFunction) vnew).invoke(LuaValue.varargsOf(
+                    LuaValue.valueOf(x/len), LuaValue.valueOf(y/len), LuaValue.valueOf(z/len))).arg1();
+            }
+        });
+        idx.set("round", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue a) {
+                return ((VarArgFunction) vnew).invoke(LuaValue.varargsOf(
+                    LuaValue.valueOf(Math.round(a.get("x").todouble())),
+                    LuaValue.valueOf(Math.round(a.get("y").todouble())),
+                    LuaValue.valueOf(Math.round(a.get("z").todouble()))
+                )).arg1();
+            }
+        });
+        idx.set("tostring", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue a) {
+                return LuaValue.valueOf(a.get("x").tojstring() + "," + a.get("y").tojstring() + "," + a.get("z").tojstring());
+            }
+        });
+        mt.set("__index", idx);
+
+        globals.set("vector", vector);
+    }
+
+    // ---------- keys ----------
+    private void installKeysAPI() {
+        LuaTable keys = new LuaTable();
+        // Letters
+        for (char c = 'a'; c <= 'z'; c++) keys.set(String.valueOf(c), LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_A + (c - 'a')));
+        // Digits
+        for (int i = 0; i <= 9; i++) keys.set(String.valueOf((char)('0' + i)), LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_0 + i));
+        // Common named
+        int[][] named = {
+            {org.lwjgl.glfw.GLFW.GLFW_KEY_SPACE, 'S'}, // sentinel ignored
+        };
+        keys.set("space",    LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_SPACE));
+        keys.set("enter",    LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER));
+        keys.set("tab",      LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_TAB));
+        keys.set("backspace",LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_BACKSPACE));
+        keys.set("escape",   LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE));
+        keys.set("left",     LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_LEFT));
+        keys.set("right",    LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_RIGHT));
+        keys.set("up",       LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_UP));
+        keys.set("down",     LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_DOWN));
+        keys.set("leftShift",LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_LEFT_SHIFT));
+        keys.set("rightShift",LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_RIGHT_SHIFT));
+        keys.set("leftCtrl", LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_LEFT_CONTROL));
+        keys.set("rightCtrl",LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_RIGHT_CONTROL));
+        keys.set("leftAlt",  LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_LEFT_ALT));
+        keys.set("rightAlt", LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_RIGHT_ALT));
+        for (int i = 1; i <= 12; i++) keys.set("f" + i, LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_F1 + (i - 1)));
+        keys.set("home", LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_HOME));
+        keys.set("end",  LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_END));
+        keys.set("pageUp",   LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_PAGE_UP));
+        keys.set("pageDown", LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_PAGE_DOWN));
+        keys.set("insert",   LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_INSERT));
+        keys.set("delete",   LuaValue.valueOf(org.lwjgl.glfw.GLFW.GLFW_KEY_DELETE));
+        keys.set("getName", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue v) {
+                int code = v.checkint();
+                String name = org.lwjgl.glfw.GLFW.glfwGetKeyName(code, 0);
+                return name != null ? LuaValue.valueOf(name) : LuaValue.valueOf("key#" + code);
+            }
+        });
+        globals.set("keys", keys);
+    }
+
+    // ---------- paintutils ----------
+    private void installPaintutilsAPI() {
+        TerminalBuffer tb = os.getTerminal();
+        LuaTable p = new LuaTable();
+
+        p.set("drawPixel", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                int x = a.checkint(1) - 1;
+                int y = a.checkint(2) - 1;
+                if (!a.isnil(3)) tb.setBackgroundColor(ccColorToIndex(a.checkint(3)));
+                if (x >= 0 && y >= 0 && x < TerminalBuffer.WIDTH && y < TerminalBuffer.HEIGHT) {
+                    tb.setCursorPos(x, y);
+                    pushOutput(" ");
+                }
+                return NONE;
+            }
+        });
+        p.set("drawLine", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                int x0 = a.checkint(1) - 1, y0 = a.checkint(2) - 1;
+                int x1 = a.checkint(3) - 1, y1 = a.checkint(4) - 1;
+                if (!a.isnil(5)) tb.setBackgroundColor(ccColorToIndex(a.checkint(5)));
+                int dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+                int dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+                int err = dx + dy;
+                while (true) {
+                    if (x0 >= 0 && y0 >= 0 && x0 < TerminalBuffer.WIDTH && y0 < TerminalBuffer.HEIGHT) {
+                        tb.setCursorPos(x0, y0);
+                        pushOutput(" ");
+                    }
+                    if (x0 == x1 && y0 == y1) break;
+                    int e2 = 2 * err;
+                    if (e2 >= dy) { err += dy; x0 += sx; }
+                    if (e2 <= dx) { err += dx; y0 += sy; }
+                }
+                return NONE;
+            }
+        });
+        p.set("drawBox", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                int x1 = a.checkint(1), y1 = a.checkint(2), x2 = a.checkint(3), y2 = a.checkint(4);
+                LuaValue col = a.arg(5);
+                drawRect(tb, x1, y1, x2, y2, col, false);
+                return NONE;
+            }
+        });
+        p.set("drawFilledBox", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                int x1 = a.checkint(1), y1 = a.checkint(2), x2 = a.checkint(3), y2 = a.checkint(4);
+                LuaValue col = a.arg(5);
+                drawRect(tb, x1, y1, x2, y2, col, true);
+                return NONE;
+            }
+        });
+        p.set("loadImage", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue path) {
+                String content = os.getFileSystem().readFile(path.checkjstring());
+                LuaTable img = new LuaTable();
+                if (content == null) return img;
+                int row = 1;
+                for (String line : content.split("\n")) {
+                    LuaTable r = new LuaTable();
+                    for (int i = 0; i < line.length(); i++) {
+                        int v;
+                        try { v = Integer.parseInt(String.valueOf(line.charAt(i)), 16); }
+                        catch (NumberFormatException e) { v = 0; }
+                        r.set(i + 1, LuaValue.valueOf(1 << v));
+                    }
+                    img.set(row++, r);
+                }
+                return img;
+            }
+        });
+        p.set("drawImage", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                LuaValue img = a.arg(1);
+                int ox = a.checkint(2) - 1, oy = a.checkint(3) - 1;
+                if (!img.istable()) return NONE;
+                LuaTable t = img.checktable();
+                for (int r = 1; r <= t.length(); r++) {
+                    LuaValue row = t.get(r);
+                    if (!row.istable()) continue;
+                    LuaTable rr = row.checktable();
+                    for (int c = 1; c <= rr.length(); c++) {
+                        int col = rr.get(c).optint(0);
+                        if (col == 0) continue;
+                        tb.setBackgroundColor(ccColorToIndex(col));
+                        int x = ox + c - 1, y = oy + r - 1;
+                        if (x >= 0 && y >= 0 && x < TerminalBuffer.WIDTH && y < TerminalBuffer.HEIGHT) {
+                            tb.setCursorPos(x, y);
+                            pushOutput(" ");
+                        }
+                    }
+                }
+                return NONE;
+            }
+        });
+        globals.set("paintutils", p);
+    }
+
+    private static void drawRect(TerminalBuffer tb, int x1, int y1, int x2, int y2, LuaValue col, boolean filled) {
+        if (!col.isnil()) tb.setBackgroundColor(staticCcColorToIndex(col.checkint()));
+        int ax = Math.min(x1, x2) - 1, bx = Math.max(x1, x2) - 1;
+        int ay = Math.min(y1, y2) - 1, by = Math.max(y1, y2) - 1;
+        for (int y = ay; y <= by; y++) {
+            for (int x = ax; x <= bx; x++) {
+                if (!filled && x != ax && x != bx && y != ay && y != by) continue;
+                if (x >= 0 && y >= 0 && x < TerminalBuffer.WIDTH && y < TerminalBuffer.HEIGHT) {
+                    tb.setCursorPos(x, y);
+                    tb.hLine(x, x, y, ' ');
+                }
+            }
+        }
+    }
+
+    // ---------- window (simplified subregion redirect) ----------
+    private void installWindowAPI() {
+        LuaTable window = new LuaTable();
+        final TerminalBuffer tb = os.getTerminal();
+
+        window.set("create", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                // parent ignored; we always target the root term
+                final int ox = a.checkint(2) - 1;
+                final int oy = a.checkint(3) - 1;
+                final int w  = a.checkint(4);
+                final int h  = a.checkint(5);
+                LuaTable win = new LuaTable();
+                final int[] cx = {0}, cy = {0};
+                win.set("write", new OneArgFunction() {
+                    @Override public LuaValue call(LuaValue v) {
+                        int ax = ox + cx[0], ay = oy + cy[0];
+                        if (ax >= 0 && ay >= 0 && ax < TerminalBuffer.WIDTH && ay < TerminalBuffer.HEIGHT) {
+                            tb.setCursorPos(ax, ay);
+                            String s = v.tojstring();
+                            int maxLen = Math.min(s.length(), w - cx[0]);
+                            if (maxLen > 0) {
+                                pushOutput(s.substring(0, maxLen));
+                                cx[0] += maxLen;
+                            }
+                        }
+                        return NONE;
+                    }
+                });
+                win.set("setCursorPos", new TwoArgFunction() {
+                    @Override public LuaValue call(LuaValue x, LuaValue y) {
+                        cx[0] = x.checkint() - 1; cy[0] = y.checkint() - 1; return NONE;
+                    }
+                });
+                win.set("getCursorPos", new VarArgFunction() {
+                    @Override public Varargs invoke(Varargs args) {
+                        return LuaValue.varargsOf(LuaValue.valueOf(cx[0]+1), LuaValue.valueOf(cy[0]+1));
+                    }
+                });
+                win.set("getSize", new VarArgFunction() {
+                    @Override public Varargs invoke(Varargs args) {
+                        return LuaValue.varargsOf(LuaValue.valueOf(w), LuaValue.valueOf(h));
+                    }
+                });
+                win.set("clear", new ZeroArgFunction() {
+                    @Override public LuaValue call() {
+                        for (int y = 0; y < h; y++) tb.hLine(ox, ox + w - 1, oy + y, ' ');
+                        cx[0] = 0; cy[0] = 0;
+                        return NONE;
+                    }
+                });
+                win.set("setVisible", new OneArgFunction() {
+                    @Override public LuaValue call(LuaValue v) { return NONE; }
+                });
+                win.set("redraw", new ZeroArgFunction() { @Override public LuaValue call() { return NONE; } });
+                win.set("setTextColor", new OneArgFunction() {
+                    @Override public LuaValue call(LuaValue v) { tb.setTextColor(ccColorToIndex(v.checkint())); return NONE; }
+                });
+                win.set("setBackgroundColor", new OneArgFunction() {
+                    @Override public LuaValue call(LuaValue v) { tb.setBackgroundColor(ccColorToIndex(v.checkint())); return NONE; }
+                });
+                win.set("setTextColour", win.get("setTextColor"));
+                win.set("setBackgroundColour", win.get("setBackgroundColor"));
+                win.set("isColor", new ZeroArgFunction() { @Override public LuaValue call() { return LuaValue.TRUE; } });
+                win.set("reposition", new VarArgFunction() {
+                    @Override public Varargs invoke(Varargs args) { return NONE; }
+                });
+                return win;
+            }
+        });
+
+        globals.set("window", window);
+    }
+
+    // ---------- settings ----------
+    private void installSettingsAPI() {
+        LuaTable settings = new LuaTable();
+        final java.util.Map<String, LuaValue> store = new java.util.HashMap<>();
+        final String path = "/Users/User/.settings";
+
+        // Load existing
+        String raw = os.getFileSystem().readFile(path);
+        if (raw != null) {
+            try {
+                LuaValue t = jsonToLua(raw);
+                if (t.istable()) {
+                    LuaTable tt = t.checktable();
+                    LuaValue k = LuaValue.NIL;
+                    while (true) {
+                        Varargs n = tt.next(k);
+                        k = n.arg1(); if (k.isnil()) break;
+                        store.put(k.tojstring(), n.arg(2));
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+
+        settings.set("define", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                String name = a.checkjstring(1);
+                if (!store.containsKey(name)) {
+                    LuaValue def = a.arg(2).istable() ? a.arg(2).get("default") : LuaValue.NIL;
+                    store.put(name, def.isnil() ? LuaValue.NIL : def);
+                }
+                return NONE;
+            }
+        });
+        settings.set("get", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                LuaValue v = store.get(a.checkjstring(1));
+                if (v == null || v.isnil()) return a.arg(2);
+                return v;
+            }
+        });
+        settings.set("set", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                store.put(a.checkjstring(1), a.arg(2));
+                return NONE;
+            }
+        });
+        settings.set("unset", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue k) { store.remove(k.tojstring()); return NONE; }
+        });
+        settings.set("clear", new ZeroArgFunction() {
+            @Override public LuaValue call() { store.clear(); return NONE; }
+        });
+        settings.set("getNames", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                LuaTable t = new LuaTable();
+                int i = 1;
+                for (String k : store.keySet()) t.set(i++, LuaValue.valueOf(k));
+                return t;
+            }
+        });
+        settings.set("load", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                String p = a.optjstring(1, path);
+                String s = os.getFileSystem().readFile(p);
+                if (s == null) return LuaValue.FALSE;
+                try {
+                    LuaValue t = jsonToLua(s);
+                    if (t.istable()) {
+                        LuaTable tt = t.checktable();
+                        LuaValue k = LuaValue.NIL;
+                        while (true) {
+                            Varargs n = tt.next(k);
+                            k = n.arg1(); if (k.isnil()) break;
+                            store.put(k.tojstring(), n.arg(2));
+                        }
+                    }
+                    return LuaValue.TRUE;
+                } catch (Exception e) { return LuaValue.FALSE; }
+            }
+        });
+        settings.set("save", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                String p = a.optjstring(1, path);
+                LuaTable t = new LuaTable();
+                for (java.util.Map.Entry<String, LuaValue> e : store.entrySet()) t.set(e.getKey(), e.getValue());
+                os.getFileSystem().writeFile(p, luaToJson(t));
+                return LuaValue.TRUE;
+            }
+        });
+
+        globals.set("settings", settings);
+    }
+
+    // ---------- turtle alias to robot ----------
+    private void installTurtleAlias() {
+        LuaValue robot = globals.get("robot");
+        if (robot.istable()) {
+            // Simple alias — turtle and robot share the same methods.
+            globals.set("turtle", robot);
+        }
+    }
+
+    // ---------- http ----------
+    private void installHttpAPI() {
+        LuaTable http = new LuaTable();
+        // Enabled by default per user request.
+        http.set("checkURL", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue u) {
+                try { java.net.URI.create(u.checkjstring()).toURL(); return LuaValue.TRUE; }
+                catch (Exception e) { return LuaValue.varargsOf(LuaValue.FALSE, LuaValue.valueOf(e.getMessage())).arg1(); }
+            }
+        });
+        http.set("get", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                String url = a.checkjstring(1);
+                try {
+                    java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+                    java.net.http.HttpRequest.Builder rb = java.net.http.HttpRequest.newBuilder(java.net.URI.create(url));
+                    if (a.istable(2)) {
+                        LuaTable hdrs = a.checktable(2);
+                        LuaValue k = LuaValue.NIL;
+                        while (true) {
+                            Varargs n = hdrs.next(k);
+                            k = n.arg1(); if (k.isnil()) break;
+                            rb.header(k.tojstring(), n.arg(2).tojstring());
+                        }
+                    }
+                    java.net.http.HttpResponse<String> resp = client.send(rb.GET().build(),
+                        java.net.http.HttpResponse.BodyHandlers.ofString());
+                    return httpResponseTable(resp);
+                } catch (Exception e) {
+                    return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf(e.getMessage()));
+                }
+            }
+        });
+        http.set("post", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                String url = a.checkjstring(1);
+                String body = a.optjstring(2, "");
+                try {
+                    java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+                    java.net.http.HttpRequest.Builder rb = java.net.http.HttpRequest.newBuilder(java.net.URI.create(url))
+                        .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body));
+                    if (a.istable(3)) {
+                        LuaTable hdrs = a.checktable(3);
+                        LuaValue k = LuaValue.NIL;
+                        while (true) {
+                            Varargs n = hdrs.next(k);
+                            k = n.arg1(); if (k.isnil()) break;
+                            rb.header(k.tojstring(), n.arg(2).tojstring());
+                        }
+                    }
+                    java.net.http.HttpResponse<String> resp = client.send(rb.build(),
+                        java.net.http.HttpResponse.BodyHandlers.ofString());
+                    return httpResponseTable(resp);
+                } catch (Exception e) {
+                    return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf(e.getMessage()));
+                }
+            }
+        });
+        http.set("request", http.get("get"));
+        http.set("websocket", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf("websocket not implemented"));
+            }
+        });
+        globals.set("http", http);
+    }
+
+    private static Varargs httpResponseTable(java.net.http.HttpResponse<String> resp) {
+        LuaTable t = new LuaTable();
+        final String body = resp.body();
+        t.set("readAll", new ZeroArgFunction() { @Override public LuaValue call() { return LuaValue.valueOf(body); } });
+        t.set("getResponseCode", new ZeroArgFunction() { @Override public LuaValue call() { return LuaValue.valueOf(resp.statusCode()); } });
+        LuaTable headers = new LuaTable();
+        resp.headers().map().forEach((k, v) -> { if (!v.isEmpty()) headers.set(k, LuaValue.valueOf(v.get(0))); });
+        t.set("getResponseHeaders", new ZeroArgFunction() { @Override public LuaValue call() { return headers; } });
+        t.set("close", new ZeroArgFunction() { @Override public LuaValue call() { return NONE; } });
+        return t;
+    }
+
+    // ---------- pastebin ----------
+    private void installPastebinAPI() {
+        LuaTable pb = new LuaTable();
+        pb.set("get", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                String id = a.checkjstring(1);
+                try {
+                    java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+                    java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder(
+                        java.net.URI.create("https://pastebin.com/raw/" + id)).GET().build();
+                    java.net.http.HttpResponse<String> resp = client.send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
+                    if (resp.statusCode() != 200) return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf("HTTP " + resp.statusCode()));
+                    return LuaValue.valueOf(resp.body());
+                } catch (Exception e) { return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf(e.getMessage())); }
+            }
+        });
+        // pastebin.download(id, path) — fetch and save to VFS
+        pb.set("download", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                Varargs got = ((VarArgFunction) pb.get("get")).invoke(LuaValue.varargsOf(new LuaValue[]{a.arg(1)}));
+                if (got.arg1().isnil()) return got;
+                os.getFileSystem().writeFile(a.checkjstring(2), got.arg1().tojstring());
+                return LuaValue.TRUE;
+            }
+        });
+        pb.set("run", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                Varargs got = ((VarArgFunction) pb.get("get")).invoke(LuaValue.varargsOf(new LuaValue[]{a.arg(1)}));
+                if (got.arg1().isnil()) return got;
+                try {
+                    LuaValue chunk = globals.load(got.arg1().tojstring(), "=pastebin", globals);
+                    return chunk.invoke(a.subargs(2));
+                } catch (LuaError e) { return LuaValue.varargsOf(LuaValue.FALSE, LuaValue.valueOf(e.getMessage())); }
+            }
+        });
+        // pastebin.put requires a dev/user key from settings: "pastebin.dev_key" + "pastebin.user_key" optional
+        pb.set("put", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                return LuaValue.varargsOf(LuaValue.NIL,
+                    LuaValue.valueOf("pastebin.put needs API keys — set 'pastebin.dev_key' via settings.set"));
+            }
+        });
+        globals.set("pastebin", pb);
+    }
+
+    // ---------- wget global ----------
+    private void installWgetGlobal() {
+        // CC: wget <url> [filename], also wget run <url> [args...]
+        globals.set("wget", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                if (a.narg() == 0) {
+                    pushOutput("Usage: wget <url> [filename]\n       wget run <url> [args...]\n");
+                    return NONE;
+                }
+                String first = a.arg(1).tojstring();
+                boolean runMode = first.equals("run");
+                String url = runMode ? a.checkjstring(2) : first;
+                try {
+                    java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+                    java.net.http.HttpResponse<String> resp = client.send(
+                        java.net.http.HttpRequest.newBuilder(java.net.URI.create(url)).GET().build(),
+                        java.net.http.HttpResponse.BodyHandlers.ofString());
+                    if (resp.statusCode() != 200) {
+                        pushOutput("wget: HTTP " + resp.statusCode() + "\n");
+                        return LuaValue.FALSE;
+                    }
+                    if (runMode) {
+                        try {
+                            LuaValue chunk = globals.load(resp.body(), "=wget", globals);
+                            return chunk.invoke(a.subargs(3));
+                        } catch (LuaError e) {
+                            pushOutput("wget run: " + e.getMessage() + "\n");
+                            return LuaValue.FALSE;
+                        }
+                    }
+                    String name = a.optjstring(2, url.substring(url.lastIndexOf('/') + 1));
+                    if (name.isEmpty()) name = "download";
+                    String path = name.startsWith("/") ? name : "/Users/User/" + name;
+                    os.getFileSystem().writeFile(path, resp.body());
+                    pushOutput("Downloaded " + resp.body().length() + " bytes to " + path + "\n");
+                    return LuaValue.TRUE;
+                } catch (Exception e) {
+                    pushOutput("wget: " + e.getMessage() + "\n");
+                    return LuaValue.FALSE;
+                }
+            }
+        });
+    }
+
+    // ---------- read() ----------
+    private void installReadGlobal() {
+        // Non-interactive stub: returns empty string. Interactive line editing is
+        // handled by the shell/LuaShellProgram; Lua scripts that need blocking
+        // input should use os.queueEvent / os.pullEvent once implemented.
+        globals.set("read", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                // TODO: hook into LuaShellProgram's line editor via event queue.
+                return LuaValue.valueOf("");
+            }
+        });
+        globals.set("printError", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                pushOutput(a.arg(1).tojstring() + "\n");
+                return NONE;
+            }
+        });
+    }
+
+    // ---------- help ----------
+    private void installHelpAPI() {
+        LuaTable help = new LuaTable();
+        final String[] topics = {
+            "term","fs","os","colors","shell","textutils","gps","bluetooth","rednet","redstone","relay",
+            "buttons","robot","drone","scanner","peripheral","glasses","parallel","vector","keys",
+            "paintutils","window","settings","turtle","http","pastebin","wget"
+        };
+        help.set("topics", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                LuaTable t = new LuaTable();
+                for (int i = 0; i < topics.length; i++) t.set(i + 1, LuaValue.valueOf(topics[i]));
+                return t;
+            }
+        });
+        help.set("lookup", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue v) {
+                String q = v.tojstring();
+                for (String t : topics) if (t.equals(q)) return LuaValue.valueOf(t);
+                return LuaValue.NIL;
+            }
+        });
+        help.set("path", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf("/rom/help"); }
+        });
+        help.set("setPath", new OneArgFunction() { @Override public LuaValue call(LuaValue v) { return NONE; } });
+        globals.set("help", help);
+    }
+
+    // ---------- multishell stub ----------
+    private void installMultishellStub() {
+        LuaTable ms = new LuaTable();
+        ms.set("getCount", new ZeroArgFunction() { @Override public LuaValue call() { return LuaValue.valueOf(1); } });
+        ms.set("getCurrent", new ZeroArgFunction() { @Override public LuaValue call() { return LuaValue.valueOf(1); } });
+        ms.set("getFocus", new ZeroArgFunction() { @Override public LuaValue call() { return LuaValue.valueOf(1); } });
+        ms.set("setFocus", new OneArgFunction() { @Override public LuaValue call(LuaValue v) { return LuaValue.valueOf(v.optint(1) == 1); } });
+        ms.set("getTitle", new VarArgFunction() { @Override public Varargs invoke(Varargs a) { return LuaValue.valueOf("shell"); } });
+        ms.set("setTitle", new VarArgFunction() { @Override public Varargs invoke(Varargs a) { return NONE; } });
+        ms.set("launch", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf("multishell.launch is not supported yet"));
+            }
+        });
+        globals.set("multishell", ms);
+    }
+
+    // =========================================================================
+    //  JSON helpers (used by textutils, settings, pastebin)
+    // =========================================================================
+
+    private static String luaToJson(LuaValue v) {
+        StringBuilder sb = new StringBuilder();
+        writeJson(v, sb);
+        return sb.toString();
+    }
+
+    private static void writeJson(LuaValue v, StringBuilder sb) {
+        if (v.isnil())           { sb.append("null"); return; }
+        if (v.isboolean())       { sb.append(v.toboolean() ? "true" : "false"); return; }
+        if (v.isnumber())        { sb.append(v.tojstring()); return; }
+        if (v.isstring())        { jsonEscape(v.tojstring(), sb); return; }
+        if (v.istable()) {
+            LuaTable t = v.checktable();
+            int len = t.length();
+            boolean asArray = len > 0;
+            // Determine if keys are all 1..len
+            if (asArray) {
+                for (int i = 1; i <= len; i++) {
+                    if (t.get(i).isnil()) { asArray = false; break; }
+                }
+            }
+            if (asArray) {
+                sb.append('[');
+                for (int i = 1; i <= len; i++) {
+                    if (i > 1) sb.append(',');
+                    writeJson(t.get(i), sb);
+                }
+                sb.append(']');
+            } else {
+                sb.append('{');
+                boolean first = true;
+                LuaValue k = LuaValue.NIL;
+                while (true) {
+                    Varargs n = t.next(k);
+                    k = n.arg1(); if (k.isnil()) break;
+                    if (!first) sb.append(',');
+                    first = false;
+                    jsonEscape(k.tojstring(), sb);
+                    sb.append(':');
+                    writeJson(n.arg(2), sb);
+                }
+                sb.append('}');
+            }
+            return;
+        }
+        sb.append("null");
+    }
+
+    private static void jsonEscape(String s, StringBuilder sb) {
+        sb.append('"');
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"':  sb.append("\\\""); break;
+                case '\\': sb.append("\\\\"); break;
+                case '\n': sb.append("\\n");  break;
+                case '\r': sb.append("\\r");  break;
+                case '\t': sb.append("\\t");  break;
+                default:
+                    if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
+                    else sb.append(c);
+            }
+        }
+        sb.append('"');
+    }
+
+    private static LuaValue jsonToLua(String s) {
+        int[] idx = {0};
+        skipWs(s, idx);
+        LuaValue v = parseJson(s, idx);
+        return v;
+    }
+
+    private static LuaValue parseJson(String s, int[] idx) {
+        skipWs(s, idx);
+        if (idx[0] >= s.length()) return LuaValue.NIL;
+        char c = s.charAt(idx[0]);
+        if (c == '{') return parseJsonObject(s, idx);
+        if (c == '[') return parseJsonArray(s, idx);
+        if (c == '"') return LuaValue.valueOf(parseJsonString(s, idx));
+        if (c == 't' || c == 'f') return parseJsonBool(s, idx);
+        if (c == 'n') { idx[0] += 4; return LuaValue.NIL; }
+        return parseJsonNumber(s, idx);
+    }
+
+    private static LuaValue parseJsonObject(String s, int[] idx) {
+        LuaTable t = new LuaTable();
+        idx[0]++; skipWs(s, idx);
+        if (idx[0] < s.length() && s.charAt(idx[0]) == '}') { idx[0]++; return t; }
+        while (idx[0] < s.length()) {
+            skipWs(s, idx);
+            String k = parseJsonString(s, idx);
+            skipWs(s, idx);
+            if (idx[0] < s.length() && s.charAt(idx[0]) == ':') idx[0]++;
+            LuaValue v = parseJson(s, idx);
+            t.set(k, v);
+            skipWs(s, idx);
+            if (idx[0] < s.length() && s.charAt(idx[0]) == ',') { idx[0]++; continue; }
+            if (idx[0] < s.length() && s.charAt(idx[0]) == '}') { idx[0]++; break; }
+            break;
+        }
+        return t;
+    }
+
+    private static LuaValue parseJsonArray(String s, int[] idx) {
+        LuaTable t = new LuaTable();
+        idx[0]++; int i = 1;
+        skipWs(s, idx);
+        if (idx[0] < s.length() && s.charAt(idx[0]) == ']') { idx[0]++; return t; }
+        while (idx[0] < s.length()) {
+            LuaValue v = parseJson(s, idx);
+            t.set(i++, v);
+            skipWs(s, idx);
+            if (idx[0] < s.length() && s.charAt(idx[0]) == ',') { idx[0]++; continue; }
+            if (idx[0] < s.length() && s.charAt(idx[0]) == ']') { idx[0]++; break; }
+            break;
+        }
+        return t;
+    }
+
+    private static String parseJsonString(String s, int[] idx) {
+        StringBuilder sb = new StringBuilder();
+        if (idx[0] < s.length() && s.charAt(idx[0]) == '"') idx[0]++;
+        while (idx[0] < s.length()) {
+            char c = s.charAt(idx[0]++);
+            if (c == '"') break;
+            if (c == '\\' && idx[0] < s.length()) {
+                char esc = s.charAt(idx[0]++);
+                switch (esc) {
+                    case 'n': sb.append('\n'); break;
+                    case 'r': sb.append('\r'); break;
+                    case 't': sb.append('\t'); break;
+                    case '"': sb.append('"');  break;
+                    case '\\': sb.append('\\'); break;
+                    case '/': sb.append('/');  break;
+                    case 'u':
+                        if (idx[0] + 4 <= s.length()) {
+                            sb.append((char) Integer.parseInt(s.substring(idx[0], idx[0] + 4), 16));
+                            idx[0] += 4;
+                        }
+                        break;
+                    default: sb.append(esc);
+                }
+            } else sb.append(c);
+        }
+        return sb.toString();
+    }
+
+    private static LuaValue parseJsonBool(String s, int[] idx) {
+        if (s.startsWith("true", idx[0]))  { idx[0] += 4; return LuaValue.TRUE; }
+        if (s.startsWith("false", idx[0])) { idx[0] += 5; return LuaValue.FALSE; }
+        return LuaValue.FALSE;
+    }
+
+    private static LuaValue parseJsonNumber(String s, int[] idx) {
+        int start = idx[0];
+        while (idx[0] < s.length()) {
+            char c = s.charAt(idx[0]);
+            if (c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E' || Character.isDigit(c)) idx[0]++;
+            else break;
+        }
+        try { return LuaValue.valueOf(Double.parseDouble(s.substring(start, idx[0]))); }
+        catch (NumberFormatException e) { return LuaValue.valueOf(0); }
+    }
+
+    private static void skipWs(String s, int[] idx) {
+        while (idx[0] < s.length() && Character.isWhitespace(s.charAt(idx[0]))) idx[0]++;
     }
 }
