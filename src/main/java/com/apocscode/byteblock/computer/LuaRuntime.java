@@ -3161,9 +3161,129 @@ public class LuaRuntime {
             }
         });
         http.set("request", http.get("get"));
+        // http.websocket(url [, headers]) — opens a WebSocket. Returns a handle with:
+        //   send(msg [, binary])  — send text or binary frame
+        //   receive([timeout])    — yields until a message arrives; returns msg, isBinary
+        //   close()               — closes the socket
+        // Incoming messages also fire "websocket_message" events (url, msg, isBinary)
+        // and "websocket_closed" (url, reason, code) on close.
         http.set("websocket", new VarArgFunction() {
             @Override public Varargs invoke(Varargs a) {
-                return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf("websocket not implemented"));
+                final String url = a.checkjstring(1);
+                try {
+                    java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+                    java.net.http.WebSocket.Builder wb = client.newWebSocketBuilder();
+                    if (a.istable(2)) {
+                        LuaTable hdrs = a.checktable(2);
+                        LuaValue k = LuaValue.NIL;
+                        while (true) {
+                            Varargs n = hdrs.next(k);
+                            k = n.arg1(); if (k.isnil()) break;
+                            wb.header(k.tojstring(), n.arg(2).tojstring());
+                        }
+                    }
+                    final java.util.concurrent.ConcurrentLinkedQueue<Object[]> inbox =
+                        new java.util.concurrent.ConcurrentLinkedQueue<>();
+                    final java.net.http.WebSocket.Listener listener = new java.net.http.WebSocket.Listener() {
+                        private final StringBuilder textBuf = new StringBuilder();
+                        @Override public java.util.concurrent.CompletionStage<?> onText(
+                                java.net.http.WebSocket ws, CharSequence data, boolean last) {
+                            textBuf.append(data);
+                            if (last) {
+                                String msg = textBuf.toString();
+                                textBuf.setLength(0);
+                                inbox.offer(new Object[]{msg, Boolean.FALSE});
+                                queueEvent("websocket_message", url, msg, Boolean.FALSE);
+                            }
+                            ws.request(1);
+                            return null;
+                        }
+                        @Override public java.util.concurrent.CompletionStage<?> onBinary(
+                                java.net.http.WebSocket ws, java.nio.ByteBuffer data, boolean last) {
+                            byte[] b = new byte[data.remaining()];
+                            data.get(b);
+                            String s = new String(b, java.nio.charset.StandardCharsets.ISO_8859_1);
+                            inbox.offer(new Object[]{s, Boolean.TRUE});
+                            queueEvent("websocket_message", url, s, Boolean.TRUE);
+                            ws.request(1);
+                            return null;
+                        }
+                        @Override public java.util.concurrent.CompletionStage<?> onClose(
+                                java.net.http.WebSocket ws, int code, String reason) {
+                            inbox.offer(new Object[]{null, null, code, reason});
+                            queueEvent("websocket_closed", url, reason == null ? "" : reason, code);
+                            return null;
+                        }
+                        @Override public void onError(java.net.http.WebSocket ws, Throwable error) {
+                            queueEvent("websocket_closed", url, error.getMessage() == null ? "error" : error.getMessage(), -1);
+                        }
+                    };
+                    final java.net.http.WebSocket socket = wb.buildAsync(java.net.URI.create(url), listener)
+                        .get(10, java.util.concurrent.TimeUnit.SECONDS);
+
+                    LuaTable t = new LuaTable();
+                    t.set("send", new VarArgFunction() {
+                        @Override public Varargs invoke(Varargs args) {
+                            String msg = args.checkjstring(1);
+                            boolean binary = args.optboolean(2, false);
+                            try {
+                                if (binary) {
+                                    socket.sendBinary(java.nio.ByteBuffer.wrap(
+                                        msg.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1)), true).join();
+                                } else {
+                                    socket.sendText(msg, true).join();
+                                }
+                                return LuaValue.TRUE;
+                            } catch (Exception e) {
+                                return LuaValue.varargsOf(LuaValue.FALSE, LuaValue.valueOf(e.getMessage()));
+                            }
+                        }
+                    });
+                    t.set("receive", new VarArgFunction() {
+                        @Override public Varargs invoke(Varargs args) {
+                            // If a message is already buffered, return it immediately.
+                            Object[] msg = inbox.poll();
+                            if (msg != null) {
+                                if (msg[0] == null) return LuaValue.NIL; // closed
+                                return LuaValue.varargsOf(
+                                    LuaValue.valueOf((String) msg[0]),
+                                    LuaValue.valueOf((Boolean) msg[1]));
+                            }
+                            // Otherwise yield until one arrives.
+                            double timeout = args.optdouble(1, 0.0);
+                            int timerId = timeout > 0 ? os.startTimer(timeout) : -1;
+                            while (true) {
+                                Varargs evt = globals.running.state.lua_yield(LuaValue.NONE);
+                                String n = evt.arg1().isstring() ? evt.arg1().tojstring() : "";
+                                if ("terminate".equals(n)) throw new LuaError("Terminated");
+                                if ("websocket_message".equals(n) && evt.arg(2).tojstring().equals(url)) {
+                                    Object[] m = inbox.poll();
+                                    if (m != null && m[0] != null) {
+                                        return LuaValue.varargsOf(
+                                            LuaValue.valueOf((String) m[0]),
+                                            LuaValue.valueOf((Boolean) m[1]));
+                                    }
+                                }
+                                if ("websocket_closed".equals(n) && evt.arg(2).tojstring().equals(url)) {
+                                    return LuaValue.NIL;
+                                }
+                                if ("timer".equals(n) && timerId != -1 && evt.arg(2).toint() == timerId) {
+                                    return LuaValue.NIL;
+                                }
+                            }
+                        }
+                    });
+                    t.set("close", new ZeroArgFunction() {
+                        @Override public LuaValue call() {
+                            try { socket.sendClose(java.net.http.WebSocket.NORMAL_CLOSURE, "bye").join(); }
+                            catch (Exception ignored) {}
+                            return NONE;
+                        }
+                    });
+                    return t;
+                } catch (Exception e) {
+                    return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf(e.getMessage()));
+                }
             }
         });
         globals.set("http", http);
@@ -3216,14 +3336,62 @@ public class LuaRuntime {
                 } catch (LuaError e) { return LuaValue.varargsOf(LuaValue.FALSE, LuaValue.valueOf(e.getMessage())); }
             }
         });
-        // pastebin.put requires a dev/user key from settings: "pastebin.dev_key" + "pastebin.user_key" optional
+        // pastebin.put(path [, name]) — uploads file content using dev key from settings.
+        // Set dev key: settings.set("pastebin.dev_key", "YOUR_KEY"); settings.save()
         pb.set("put", new VarArgFunction() {
             @Override public Varargs invoke(Varargs a) {
-                return LuaValue.varargsOf(LuaValue.NIL,
-                    LuaValue.valueOf("pastebin.put needs API keys — set 'pastebin.dev_key' via settings.set"));
+                String file = a.checkjstring(1);
+                String name = a.optjstring(2, file);
+                String code = os.getFileSystem().readFile(file);
+                if (code == null) {
+                    return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf("File not found: " + file));
+                }
+                LuaValue settings = globals.get("settings");
+                if (settings.isnil()) {
+                    return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf("settings API unavailable"));
+                }
+                LuaValue keyV = settings.get("get").call(LuaValue.valueOf("pastebin.dev_key"));
+                if (keyV.isnil() || keyV.tojstring().isEmpty()) {
+                    return LuaValue.varargsOf(LuaValue.NIL,
+                        LuaValue.valueOf("No pastebin.dev_key set. Use: settings.set('pastebin.dev_key', '<key>'); settings.save()"));
+                }
+                LuaValue userV = settings.get("get").call(LuaValue.valueOf("pastebin.user_key"));
+                try {
+                    StringBuilder form = new StringBuilder();
+                    form.append("api_dev_key=").append(urlEnc(keyV.tojstring()));
+                    form.append("&api_option=paste");
+                    form.append("&api_paste_code=").append(urlEnc(code));
+                    form.append("&api_paste_name=").append(urlEnc(name));
+                    form.append("&api_paste_format=lua");
+                    form.append("&api_paste_private=0"); // public
+                    if (!userV.isnil() && !userV.tojstring().isEmpty()) {
+                        form.append("&api_user_key=").append(urlEnc(userV.tojstring()));
+                    }
+                    java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+                    java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder(
+                            java.net.URI.create("https://pastebin.com/api/api_post.php"))
+                        .header("Content-Type", "application/x-www-form-urlencoded")
+                        .POST(java.net.http.HttpRequest.BodyPublishers.ofString(form.toString()))
+                        .build();
+                    java.net.http.HttpResponse<String> resp = client.send(req,
+                        java.net.http.HttpResponse.BodyHandlers.ofString());
+                    String body = resp.body();
+                    if (resp.statusCode() != 200 || body.startsWith("Bad API request")) {
+                        return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf(body));
+                    }
+                    // Pastebin returns a full URL; return just the ID.
+                    String id = body.contains("/") ? body.substring(body.lastIndexOf('/') + 1).trim() : body.trim();
+                    return LuaValue.valueOf(id);
+                } catch (Exception e) {
+                    return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf(e.getMessage()));
+                }
             }
         });
         globals.set("pastebin", pb);
+    }
+
+    private static String urlEnc(String s) {
+        return java.net.URLEncoder.encode(s, java.nio.charset.StandardCharsets.UTF_8);
     }
 
     // ---------- wget global ----------
