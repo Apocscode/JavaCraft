@@ -207,6 +207,10 @@ public class ComputerScreen extends Screen {
             os.pushEvent(new OSEvent(OSEvent.Type.TERMINATE));
             return true;
         }
+        if (keyCode == 81 && (modifiers & 2) != 0) { // Ctrl+Q — close window, leave OS/programs running
+            this.onClose();
+            return true;
+        }
         if (keyCode == 82 && (modifiers & 2) != 0) { // Ctrl+R
             os.pushEvent(new OSEvent(OSEvent.Type.REBOOT));
             return true;
