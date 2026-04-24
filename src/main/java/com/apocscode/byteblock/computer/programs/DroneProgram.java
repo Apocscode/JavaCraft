@@ -52,20 +52,20 @@ public class DroneProgram extends OSProgram {
     // Toolbar y.
     private static final int TOOLBAR_Y = MAP_Y + MAP_SIZE + 8;
 
-    // Colors (ARGB).
-    private static final int COL_BG = 0xFF101418;
-    private static final int COL_PANEL = 0xFF1b232b;
-    private static final int COL_BORDER = 0xFF2d3944;
-    private static final int COL_TEXT = 0xFFe0e6ed;
-    private static final int COL_DIM = 0xFF7a8896;
-    private static final int COL_DRONE_IDLE = 0xFF39d06c;
-    private static final int COL_DRONE_MOVING = 0xFFf0c040;
-    private static final int COL_DRONE_LOW = 0xFFe0493a;
-    private static final int COL_DRONE_DEF = 0xFF6aa6ff;
+    // Colors (ARGB) — brightened palette.
+    private static final int COL_BG = 0xFF1c2430;
+    private static final int COL_PANEL = 0xFF2c3a4a;
+    private static final int COL_BORDER = 0xFF5a7088;
+    private static final int COL_TEXT = 0xFFf4f8fc;
+    private static final int COL_DIM = 0xFFa8b8c8;
+    private static final int COL_DRONE_IDLE = 0xFF30ff60;   // bright green
+    private static final int COL_DRONE_MOVING = 0xFFffd040;
+    private static final int COL_DRONE_LOW = 0xFFff5040;
+    private static final int COL_DRONE_DEF = 0xFF60b8ff;
     private static final int COL_DRONE_SEL = 0xFFffffff;
-    private static final int COL_ME = 0xFF50ffff;
-    private static final int COL_BTN = 0xFF2c3a47;
-    private static final int COL_BTN_HOT = 0xFF48627a;
+    private static final int COL_ME = 0xFF60ffff;
+    private static final int COL_BTN = 0xFF44607c;
+    private static final int COL_BTN_HOT = 0xFF6088b4;
 
     // Terrain cache: sampled block colors, regenerated lazily.
     private int[][] mapTiles = new int[MAP_TILES][MAP_TILES];
@@ -102,10 +102,25 @@ public class DroneProgram extends OSProgram {
     public void handleEvent(OSEvent event) {
         switch (event.getType()) {
             case MOUSE_CLICK_PX -> handlePixelClick(event.getInt(0), event.getInt(1), event.getInt(2));
+            case MOUSE_SCROLL -> handleScroll(event.getInt(0));
             case KEY -> {
                 if (event.getInt(0) == 256) running = false; // ESC
             }
             default -> {}
+        }
+    }
+
+    /** Scroll up = zoom in (smaller scale), scroll down = zoom out. */
+    private void handleScroll(int dir) {
+        int old = mapBlockScale;
+        if (dir > 0) {
+            if (mapBlockScale > 1) mapBlockScale /= 2;
+        } else if (dir < 0) {
+            if (mapBlockScale < 16) mapBlockScale *= 2;
+        }
+        if (mapBlockScale != old) {
+            lastSampleOrigin = null; // force terrain rescan at new scale
+            tileRefreshCursor = 0;
         }
     }
 
@@ -363,16 +378,22 @@ public class DroneProgram extends OSProgram {
         pb.drawRect(cx - 3, cy - 3, 7, 7, COL_ME);
         pb.setPixel(cx, cy, COL_ME);
 
-        // Drone blips.
+        // Drone blips — bright green dot with black outline for readability.
         for (DroneBlip d : drones) {
             int[] t = worldToTile(d.pos);
             if (t[0] < 0 || t[0] >= MAP_TILES || t[1] < 0 || t[1] >= MAP_TILES) continue;
             int dx = MAP_X + t[0] * TILE_PX + TILE_PX / 2;
             int dy = MAP_Y + t[1] * TILE_PX + TILE_PX / 2;
             int col = droneColor(d);
-            pb.fillRect(dx - 2, dy - 2, 5, 5, col);
+            // Black outline (8px square) so the dot pops against any terrain.
+            pb.fillRect(dx - 4, dy - 4, 9, 9, 0xFF000000);
+            // Colored dot.
+            pb.fillRect(dx - 3, dy - 3, 7, 7, col);
+            // Bright inner pixel.
+            pb.fillRect(dx - 1, dy - 1, 3, 3, 0xFFffffff);
             if (d.id.equals(selectedDrone)) {
-                pb.drawRect(dx - 4, dy - 4, 9, 9, COL_DRONE_SEL);
+                pb.drawRect(dx - 6, dy - 6, 13, 13, COL_DRONE_SEL);
+                pb.drawRect(dx - 5, dy - 5, 11, 11, COL_DRONE_SEL);
             }
         }
 
@@ -412,14 +433,14 @@ public class DroneProgram extends OSProgram {
 
         // Footer help.
         pb.drawString(MAP_X, TOOLBAR_Y + 24,
-                "L-click map: waypoint  |  R-click: home  |  click dot: select  |  ESC: exit", 8);
+                "L-click: waypoint | R-click: home | click dot: select | scroll: zoom | ESC: exit", 15);
     }
 
     private int droneColor(DroneBlip d) {
-        if (d.fuel > 0 && d.fuel < 400) return COL_DRONE_LOW;
+        if (d.fuel > 0 && d.fuel < 120) return COL_DRONE_LOW; // only critical fuel = red (~6s)
         if (d.defender) return COL_DRONE_DEF;
         if (d.hasTarget) return COL_DRONE_MOVING;
-        return COL_DRONE_IDLE;
+        return COL_DRONE_IDLE; // bright green — default
     }
 
     private static class DroneBlip {
