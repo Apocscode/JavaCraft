@@ -84,13 +84,33 @@ public final class GlassesHudAPI {
 
         int rangeSq = BluetoothNetwork.BLOCK_RANGE * BluetoothNetwork.BLOCK_RANGE;
         int sent = 0;
+        int playerCount = 0, noGlasses = 0, wrongCh = 0, outOfRange = 0;
         for (ServerPlayer p : sl.players()) {
+            playerCount++;
             ItemStack head = p.getItemBySlot(EquipmentSlot.HEAD);
-            if (head.isEmpty() || head.getItem() != ModItems.GLASSES.get()) continue;
-            if (GlassesItem.getChannel(head) != channel) continue;
-            if (p.blockPosition().distSqr(pos) > rangeSq) continue;
+            if (head.isEmpty() || head.getItem() != ModItems.GLASSES.get()) { noGlasses++; continue; }
+            int wearerCh = GlassesItem.getChannel(head);
+            if (wearerCh != channel) {
+                wrongCh++;
+                org.slf4j.LoggerFactory.getLogger("ByteBlock/Glasses").info(
+                    "push: player {} wearing glasses on ch {}, computer broadcasting on ch {}",
+                    p.getName().getString(), wearerCh, channel);
+                continue;
+            }
+            double d2 = p.blockPosition().distSqr(pos);
+            if (d2 > rangeSq) {
+                outOfRange++;
+                org.slf4j.LoggerFactory.getLogger("ByteBlock/Glasses").info(
+                    "push: player {} out of range (dist^2={}, max={})", p.getName().getString(), d2, rangeSq);
+                continue;
+            }
             PacketDistributor.sendToPlayer(p, new GlassesHudPayload(data));
             sent++;
+        }
+        if (sent == 0 && playerCount > 0) {
+            org.slf4j.LoggerFactory.getLogger("ByteBlock/Glasses").info(
+                "push: 0 wearers matched (players={}, noGlasses={}, wrongCh={}, outOfRange={}, ch={}, pos={})",
+                playerCount, noGlasses, wrongCh, outOfRange, channel, pos);
         }
         return sent;
     }

@@ -479,7 +479,10 @@ public class JavaOS {
               + "  end\n"
               + "\n"
               + "  -- push the whole list to the glasses\n"
-              + "  glasses.flush()\n"
+              + "  local sent = glasses.flush()\n"
+              + "  if tick % 8 == 1 then\n"
+              + "    print('flush -> '..tostring(sent)..' wearer(s) on ch '..tostring(glasses.getChannel and glasses.getChannel() or '?'))\n"
+              + "  end\n"
               + "\n"
               + "  sleep(0.25)\n"
               + "end\n");
