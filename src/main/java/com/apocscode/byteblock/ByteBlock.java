@@ -93,6 +93,11 @@ public class ByteBlock {
             com.apocscode.byteblock.network.GpsModeCyclePayload.STREAM_CODEC,
             com.apocscode.byteblock.network.GpsModeCyclePayload::handle
         );
+        registrar.playToServer(
+            com.apocscode.byteblock.network.GlassesPushRequestPayload.TYPE,
+            com.apocscode.byteblock.network.GlassesPushRequestPayload.STREAM_CODEC,
+            com.apocscode.byteblock.network.GlassesPushRequestPayload::handle
+        );
         registrar.playToClient(
             com.apocscode.byteblock.network.GlassesHudPayload.TYPE,
             com.apocscode.byteblock.network.GlassesHudPayload.STREAM_CODEC,

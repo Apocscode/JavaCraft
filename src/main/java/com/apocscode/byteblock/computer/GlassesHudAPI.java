@@ -79,6 +79,18 @@ public final class GlassesHudAPI {
 
     /** Push a list of widgets to all glasses-wearing players within BT range and on the matching channel. */
     public static int push(Level level, BlockPos pos, int channel, List<Widget> widgets) {
+        if (level != null && level.isClientSide()) {
+            // Client-side Lua runtime: forward request to server which owns the
+            // authoritative player list and BT registry, then it broadcasts.
+            CompoundTag data = new CompoundTag();
+            ListTag list = new ListTag();
+            if (widgets != null) for (Widget w : widgets) list.add(w.toNbt());
+            data.put("W", list);
+            net.neoforged.neoforge.network.PacketDistributor.sendToServer(
+                new com.apocscode.byteblock.network.GlassesPushRequestPayload(pos, channel, data));
+            lastDiag = "forwarded to server (client-side level)";
+            return 1; // optimistic — server is authoritative
+        }
         if (!(level instanceof ServerLevel sl) || pos == null) {
             lastDiag = "bad level/pos: level=" + (level == null ? "null" : level.getClass().getSimpleName()) + " pos=" + pos;
             return 0;
