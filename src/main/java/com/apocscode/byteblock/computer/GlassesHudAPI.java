@@ -1,0 +1,87 @@
+package com.apocscode.byteblock.computer;
+
+import com.apocscode.byteblock.network.BluetoothNetwork;
+import com.apocscode.byteblock.init.ModItems;
+import com.apocscode.byteblock.item.GlassesItem;
+import com.apocscode.byteblock.network.GlassesHudPayload;
+import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.DoubleTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
+import net.neoforged.neoforge.network.PacketDistributor;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Server-side dispatcher that pushes widget lists to Smart Glasses worn by
+ * players near a computer on a matching BT channel. Invoked from the
+ * glasses.* Lua API.
+ */
+public final class GlassesHudAPI {
+
+    public static final class Widget {
+        public String type = "text";
+        public String id = "";
+        public String label = "";
+        public String value = "";
+        public double num = 0.0;
+        public double min = 0.0;
+        public double max = 1.0;
+        public int color = 0xFFFFFF;
+        public double[] spark = null;
+
+        public Widget(String type, String id) { this.type = type; this.id = id; }
+
+        public CompoundTag toNbt() {
+            CompoundTag c = new CompoundTag();
+            c.putString("t", type);
+            if (!id.isEmpty())    c.putString("id", id);
+            if (!label.isEmpty()) c.putString("label", label);
+            if (!value.isEmpty()) c.putString("v", value);
+            c.putDouble("num", num);
+            c.putDouble("min", min);
+            c.putDouble("max", max);
+            c.putInt("color", color & 0xFFFFFF);
+            if (spark != null && spark.length > 0) {
+                ListTag sl = new ListTag();
+                for (double v : spark) sl.add(DoubleTag.valueOf(v));
+                c.put("spark", sl);
+            }
+            return c;
+        }
+    }
+
+    private GlassesHudAPI() {}
+
+    /** Push a list of widgets to all glasses-wearing players within BT range and on the matching channel. */
+    public static int push(Level level, BlockPos pos, int channel, List<Widget> widgets) {
+        if (!(level instanceof ServerLevel sl) || pos == null) return 0;
+        CompoundTag data = new CompoundTag();
+        ListTag list = new ListTag();
+        if (widgets != null) for (Widget w : widgets) list.add(w.toNbt());
+        data.put("W", list);
+
+        int rangeSq = BluetoothNetwork.BLOCK_RANGE * BluetoothNetwork.BLOCK_RANGE;
+        int sent = 0;
+        for (ServerPlayer p : sl.players()) {
+            ItemStack head = p.getItemBySlot(EquipmentSlot.HEAD);
+            if (head.isEmpty() || head.getItem() != ModItems.GLASSES.get()) continue;
+            if (GlassesItem.getChannel(head) != channel) continue;
+            if (p.blockPosition().distSqr(pos) > rangeSq) continue;
+            PacketDistributor.sendToPlayer(p, new GlassesHudPayload(data));
+            sent++;
+        }
+        return sent;
+    }
+
+    /** Convenience: clear all widgets on matching wearers. */
+    public static int clear(Level level, BlockPos pos, int channel) {
+        return push(level, pos, channel, new ArrayList<>());
+    }
+}

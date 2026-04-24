@@ -131,6 +131,7 @@ public class ShellProgram extends OSProgram {
             case "mkshortcut" -> cmdMkshortcut(args);
             case "puzzle" -> cmdPuzzle(args);
             case "ide" -> cmdIde(args);
+            case "basemon" -> cmdBasemon(args);
             case "exit" -> running = false;
             default -> appendOutput("Unknown command: " + cmd + "\nType 'help' for commands.\n");
         }
@@ -161,6 +162,7 @@ public class ShellProgram extends OSProgram {
         appendOutput(" mkshortcut    Create desktop shortcut\n");
         appendOutput(" puzzle [file] Open puzzle IDE\n");
         appendOutput(" ide [file]    Open text IDE\n");
+        appendOutput(" basemon [ch]  Demo: push HUD to Smart Glasses\n");
         appendOutput(" reboot        Reboot the computer\n");
         appendOutput(" shutdown      Shut down\n");
         appendOutput(" exit          Close shell\n");
@@ -498,6 +500,38 @@ public class ShellProgram extends OSProgram {
             os.launchProgram(new TextIDEProgram(path));
         }
     }
+
+    private void cmdBasemon(String args) {
+        // Demo: write a basemon.lua and run it. Pairs glasses on the same channel.
+        int ch = 1;
+        if (!args.isEmpty()) {
+            try { ch = Integer.parseInt(args.trim()); } catch (NumberFormatException ignored) {}
+        }
+        String script = ""
+            + "-- basemon.lua: Smart Glasses base-status HUD demo\n"
+            + "glasses.setChannel(" + ch + ")\n"
+            + "glasses.clear()\n"
+            + "glasses.addTitle('t','== BASE STATUS ==','cyan')\n"
+            + "glasses.addLight('link','Uplink','green','online')\n"
+            + "glasses.addBar  ('pwr','Power',0,100000,42000,'blue')\n"
+            + "glasses.addBar  ('cpu','CPU load',0,100,17,'green')\n"
+            + "glasses.addGauge('fuel','Fuel',0,100,73,'yellow')\n"
+            + "glasses.addText ('clk','Time',tostring(os.time()))\n"
+            + "glasses.addSpark('ld','Load',{1,2,3,2,4,5,3,6,4,7,5,6},'orange')\n"
+            + "local reached = glasses.flush()\n"
+            + "print('Pushed HUD to '..reached..' wearer(s) on ch "+ ch +"')\n"
+            + "while true do\n"
+            + "  glasses.set('clk', tostring(os.time()))\n"
+            + "  glasses.flush()\n"
+            + "  sleep(1)\n"
+            + "end\n";
+        String path = "/Users/User/basemon.lua";
+        os.getFileSystem().writeFile(path, script);
+        appendOutput("Wrote demo to " + path + "\n");
+        appendOutput("Launching... (press H to toggle HUD, Shift+RClick glasses to cycle channel)\n");
+        os.launchProgram(new LuaShellProgram(path));
+    }
+
     private void cmdMkshortcut(String args) {
         if (args.isEmpty()) {
             appendOutput("Usage: mkshortcut <name> <target> [icon] [color]\n");

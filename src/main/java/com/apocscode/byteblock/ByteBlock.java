@@ -93,6 +93,11 @@ public class ByteBlock {
             com.apocscode.byteblock.network.GpsModeCyclePayload.STREAM_CODEC,
             com.apocscode.byteblock.network.GpsModeCyclePayload::handle
         );
+        registrar.playToClient(
+            com.apocscode.byteblock.network.GlassesHudPayload.TYPE,
+            com.apocscode.byteblock.network.GlassesHudPayload.STREAM_CODEC,
+            com.apocscode.byteblock.network.GlassesHudPayload::handle
+        );
     }
     private void registerEntityAttributes(EntityAttributeCreationEvent event) {
         event.put(ModEntities.DRONE.get(), DroneEntity.createAttributes().build());

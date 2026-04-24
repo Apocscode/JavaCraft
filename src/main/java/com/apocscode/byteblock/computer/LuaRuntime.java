@@ -29,6 +29,10 @@ public class LuaRuntime {
     private final Globals globals;
     private final ArrayBlockingQueue<String> outputQueue = new ArrayBlockingQueue<>(512);
 
+    // Staging state for the glasses.* API (per-runtime widget list)
+    private final java.util.List<GlassesHudAPI.Widget> glassesWidgets = new java.util.ArrayList<>();
+    private int glassesChannel = 1;
+
     // Sandbox instruction limit per resume (~500K ops)
     private static final int INSTRUCTION_LIMIT = 500_000;
 
@@ -182,6 +186,7 @@ public class LuaRuntime {
         installDroneAPI();
         installScannerAPI();
         installPeripheralAPI();
+        installGlassesAPI();
     }
 
     private void installTermAPI() {
@@ -1933,6 +1938,175 @@ public class LuaRuntime {
         });
 
         globals.set("peripheral", peripheral);
+    }
+
+    /**
+     * glasses.* — push HUD widgets to Smart Glasses within BT range on a matching channel.
+     *
+     *   glasses.setChannel(n)
+     *   glasses.getChannel()
+     *   glasses.clear()                                    -- clears pending widget list (client also clears on flush)
+     *   glasses.addText (id, label, value)
+     *   glasses.addBar  (id, label, min, max, value, hexColor)
+     *   glasses.addGauge(id, label, min, max, value, hexColor)
+     *   glasses.addLight(id, label, hexColor, [value])
+     *   glasses.addAlert(id, text, hexColor)
+     *   glasses.addTitle(id, text, hexColor)
+     *   glasses.addSpark(id, label, {n,n,...}, hexColor)
+     *   glasses.set(id, value)                             -- update existing widget value
+     *   glasses.flush()                                    -- push list to paired wearers; returns count reached
+     *   glasses.wipe()                                     -- clears wearers' HUDs on matching channel
+     */
+    private void installGlassesAPI() {
+        LuaTable glasses = new LuaTable();
+
+        glasses.set("setChannel", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue v) {
+                int ch = v.checkint();
+                if (ch < 0) ch = 0; else if (ch > 255) ch = 255;
+                glassesChannel = ch;
+                return LuaValue.NIL;
+            }
+        });
+        glasses.set("getChannel", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(glassesChannel); }
+        });
+        glasses.set("clear", new ZeroArgFunction() {
+            @Override public LuaValue call() { glassesWidgets.clear(); return LuaValue.NIL; }
+        });
+
+        glasses.set("addText", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                GlassesHudAPI.Widget w = new GlassesHudAPI.Widget("text", a.checkjstring(1));
+                w.label = a.optjstring(2, "");
+                w.value = a.isnil(3) ? "" : a.arg(3).tojstring();
+                glassesWidgets.add(w);
+                return LuaValue.NIL;
+            }
+        });
+        glasses.set("addBar", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                GlassesHudAPI.Widget w = new GlassesHudAPI.Widget("bar", a.checkjstring(1));
+                w.label = a.optjstring(2, "");
+                w.min = a.optdouble(3, 0.0);
+                w.max = a.optdouble(4, 1.0);
+                w.num = a.optdouble(5, 0.0);
+                w.color = parseColor(a.arg(6), 0x2AA7FF);
+                glassesWidgets.add(w);
+                return LuaValue.NIL;
+            }
+        });
+        glasses.set("addGauge", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                GlassesHudAPI.Widget w = new GlassesHudAPI.Widget("gauge", a.checkjstring(1));
+                w.label = a.optjstring(2, "");
+                w.min = a.optdouble(3, 0.0);
+                w.max = a.optdouble(4, 1.0);
+                w.num = a.optdouble(5, 0.0);
+                w.color = parseColor(a.arg(6), 0x00FF88);
+                glassesWidgets.add(w);
+                return LuaValue.NIL;
+            }
+        });
+        glasses.set("addLight", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                GlassesHudAPI.Widget w = new GlassesHudAPI.Widget("light", a.checkjstring(1));
+                w.label = a.optjstring(2, "");
+                w.color = parseColor(a.arg(3), 0x00FF00);
+                w.value = a.isnil(4) ? "" : a.arg(4).tojstring();
+                glassesWidgets.add(w);
+                return LuaValue.NIL;
+            }
+        });
+        glasses.set("addAlert", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                GlassesHudAPI.Widget w = new GlassesHudAPI.Widget("alert", a.checkjstring(1));
+                w.label = a.optjstring(2, "");
+                w.color = parseColor(a.arg(3), 0xFF3030);
+                glassesWidgets.add(w);
+                return LuaValue.NIL;
+            }
+        });
+        glasses.set("addTitle", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                GlassesHudAPI.Widget w = new GlassesHudAPI.Widget("title", a.checkjstring(1));
+                w.label = a.optjstring(2, "");
+                w.color = parseColor(a.arg(3), 0xFFFFFF);
+                glassesWidgets.add(w);
+                return LuaValue.NIL;
+            }
+        });
+        glasses.set("addSpark", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                GlassesHudAPI.Widget w = new GlassesHudAPI.Widget("spark", a.checkjstring(1));
+                w.label = a.optjstring(2, "");
+                LuaValue t = a.arg(3);
+                if (t.istable()) {
+                    LuaTable tt = t.checktable();
+                    int n = tt.length();
+                    double[] arr = new double[n];
+                    for (int i = 0; i < n; i++) arr[i] = tt.get(i + 1).optdouble(0.0);
+                    w.spark = arr;
+                }
+                w.color = parseColor(a.arg(4), 0xFFDD00);
+                glassesWidgets.add(w);
+                return LuaValue.NIL;
+            }
+        });
+        glasses.set("set", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                String id = a.checkjstring(1);
+                LuaValue v = a.arg(2);
+                for (GlassesHudAPI.Widget w : glassesWidgets) {
+                    if (id.equals(w.id)) {
+                        if (v.isnumber()) w.num = v.todouble();
+                        w.value = v.tojstring();
+                        break;
+                    }
+                }
+                return LuaValue.NIL;
+            }
+        });
+        glasses.set("flush", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                int sent = GlassesHudAPI.push(os.getLevel(), os.getBlockPos(), glassesChannel, glassesWidgets);
+                return LuaValue.valueOf(sent);
+            }
+        });
+        glasses.set("wipe", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                int sent = GlassesHudAPI.clear(os.getLevel(), os.getBlockPos(), glassesChannel);
+                return LuaValue.valueOf(sent);
+            }
+        });
+
+        globals.set("glasses", glasses);
+    }
+
+    private static int parseColor(LuaValue v, int fallback) {
+        if (v == null || v.isnil()) return fallback;
+        if (v.isnumber()) return v.toint() & 0xFFFFFF;
+        String s = v.tojstring().trim();
+        if (s.isEmpty()) return fallback;
+        if (s.startsWith("#")) s = s.substring(1);
+        if (s.startsWith("0x") || s.startsWith("0X")) s = s.substring(2);
+        // named colors
+        switch (s.toLowerCase()) {
+            case "red":     return 0xFF3030;
+            case "green":   return 0x33DD44;
+            case "blue":    return 0x2AA7FF;
+            case "yellow":  return 0xFFDD00;
+            case "orange":  return 0xFF8800;
+            case "cyan":    return 0x00E5FF;
+            case "magenta": return 0xFF33AA;
+            case "white":   return 0xFFFFFF;
+            case "gray":
+            case "grey":    return 0x888888;
+            case "black":   return 0x101010;
+            case "purple":  return 0x9B30FF;
+        }
+        try { return Integer.parseInt(s, 16) & 0xFFFFFF; }
+        catch (NumberFormatException ex) { return fallback; }
     }
 
     /** Find nearest Scanner block entity via Bluetooth network. */
