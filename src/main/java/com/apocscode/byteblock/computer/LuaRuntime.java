@@ -38,6 +38,22 @@ public class LuaRuntime {
     private boolean programYielded = false;
     private final java.util.ArrayDeque<Varargs> programEventQueue = new java.util.ArrayDeque<>();
 
+    // --- Multishell task registry ---
+    static final class MsTask {
+        final int id;
+        String title;
+        LuaThread thread;
+        boolean yielded;
+        boolean alive = true;
+        final java.util.ArrayDeque<Varargs> queue = new java.util.ArrayDeque<>();
+        MsTask(int id, String title, LuaThread thread) {
+            this.id = id; this.title = title; this.thread = thread;
+        }
+    }
+    private final java.util.List<MsTask> msTasks = new java.util.ArrayList<>();
+    private int msNextId = 1;
+    private int msFocusId = 0;
+
 
     // Sandbox instruction limit per resume (~500K ops)
     private static final int INSTRUCTION_LIMIT = 500_000;
@@ -2128,6 +2144,94 @@ public class LuaRuntime {
                 return LuaValue.NIL;
             }
         });
+        // --- Tier 2 widgets ---
+        // glasses.addPie(id, label, pct, hexColor)  — 0..1 progress pie
+        glasses.set("addPie", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                GlassesHudAPI.Widget w = new GlassesHudAPI.Widget("pie", a.checkjstring(1));
+                w.label = a.optjstring(2, "");
+                w.num   = a.optdouble(3, 0.0);
+                w.min   = 0.0; w.max = 1.0;
+                w.color = parseColor(a.arg(4), 0x33DD44);
+                w.height = 24;
+                glassesWidgets.add(w);
+                return LuaValue.NIL;
+            }
+        });
+        // glasses.addCompass(id, headingDegrees, hexColor)  — 0..360, arrow pointing
+        glasses.set("addCompass", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                GlassesHudAPI.Widget w = new GlassesHudAPI.Widget("compass", a.checkjstring(1));
+                w.num = a.optdouble(2, 0.0);
+                w.color = parseColor(a.arg(3), 0xFF3030);
+                w.height = 24;
+                glassesWidgets.add(w);
+                return LuaValue.NIL;
+            }
+        });
+        // glasses.addTimer(id, label, remainingSeconds, hexColor)  — countdown
+        glasses.set("addTimer", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                GlassesHudAPI.Widget w = new GlassesHudAPI.Widget("timer", a.checkjstring(1));
+                w.label = a.optjstring(2, "");
+                w.num   = a.optdouble(3, 0.0);
+                w.color = parseColor(a.arg(4), 0xFFDD00);
+                glassesWidgets.add(w);
+                return LuaValue.NIL;
+            }
+        });
+        // glasses.addAlertT(id, text, hexColor, timeoutSeconds)  — alert with auto-expiry
+        glasses.set("addAlertT", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                GlassesHudAPI.Widget w = new GlassesHudAPI.Widget("alert", a.checkjstring(1));
+                w.label = a.optjstring(2, "");
+                w.color = parseColor(a.arg(3), 0xFF3030);
+                double t = a.optdouble(4, 0.0);
+                if (t > 0) w.expireMs = System.currentTimeMillis() + (long)(t * 1000.0);
+                glassesWidgets.add(w);
+                return LuaValue.NIL;
+            }
+        });
+        // glasses.addMinimap(id, cx, cz, scale, {pt1x,pt1z,pt1color, pt2x,pt2z,pt2color, ...}, hexColor)
+        glasses.set("addMinimap", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                GlassesHudAPI.Widget w = new GlassesHudAPI.Widget("minimap", a.checkjstring(1));
+                w.num  = a.optdouble(2, 0.0);   // center x
+                w.num2 = a.optdouble(3, 0.0);   // center z
+                w.max  = a.optdouble(4, 64.0);  // scale (blocks-radius)
+                LuaValue pts = a.arg(5);
+                if (pts.istable()) {
+                    LuaTable tt = pts.checktable();
+                    int n = tt.length();
+                    double[] arr = new double[n];
+                    for (int i = 0; i < n; i++) arr[i] = tt.get(i + 1).optdouble(0.0);
+                    w.points = arr;
+                }
+                w.color = parseColor(a.arg(6), 0x2AA7FF);
+                w.height = 56;
+                glassesWidgets.add(w);
+                return LuaValue.NIL;
+            }
+        });
+        // glasses.addGraph(id, label, {values}, hexColor) — larger line graph with min/max labels
+        glasses.set("addGraph", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                GlassesHudAPI.Widget w = new GlassesHudAPI.Widget("graph", a.checkjstring(1));
+                w.label = a.optjstring(2, "");
+                LuaValue t = a.arg(3);
+                if (t.istable()) {
+                    LuaTable tt = t.checktable();
+                    int n = tt.length();
+                    double[] arr = new double[n];
+                    for (int i = 0; i < n; i++) arr[i] = tt.get(i + 1).optdouble(0.0);
+                    w.spark = arr;
+                }
+                w.color = parseColor(a.arg(4), 0x00E5FF);
+                w.height = 32;
+                glassesWidgets.add(w);
+                return LuaValue.NIL;
+            }
+        });
         glasses.set("set", new VarArgFunction() {
             @Override public Varargs invoke(Varargs a) {
                 String id = a.checkjstring(1);
@@ -2289,27 +2393,87 @@ public class LuaRuntime {
 
     /** True while a coroutine-based program is running (possibly suspended). */
     public boolean isProgramRunning() {
-        return programThread != null;
+        return programThread != null || !msTasks.isEmpty();
     }
 
     /**
      * Push a CC-style event into the program's event queue and drive the pump.
      */
     public void queueEvent(String name, Object... args) {
-        if (programThread == null) return;
         LuaValue[] vals = new LuaValue[args.length + 1];
         vals[0] = LuaValue.valueOf(name);
         for (int i = 0; i < args.length; i++) {
             vals[i + 1] = toLua(args[i]);
         }
-        programEventQueue.offer(LuaValue.varargsOf(vals));
+        Varargs va = LuaValue.varargsOf(vals);
+        if (programThread != null) programEventQueue.offer(va);
+        for (MsTask t : msTasks) if (t.alive) t.queue.offer(va);
         pump();
     }
 
-    /** Drive the program coroutine with any queued events. */
+    /** Drive the program coroutine and all launched multishell tasks. */
     public void pump() {
-        while (programThread != null && programYielded && !programEventQueue.isEmpty()) {
-            resumeProgram(programEventQueue.poll());
+        boolean progress = true;
+        while (progress) {
+            progress = false;
+            // Primary shell task.
+            while (programThread != null && programYielded && !programEventQueue.isEmpty()) {
+                resumeProgram(programEventQueue.poll());
+                progress = true;
+            }
+            // Multishell launched tasks.
+            for (MsTask t : msTasks) {
+                if (!t.alive) continue;
+                while (t.yielded && !t.queue.isEmpty()) {
+                    resumeMsTask(t, t.queue.poll());
+                    progress = true;
+                    if (!t.alive) break;
+                }
+            }
+            msTasks.removeIf(t -> !t.alive);
+        }
+    }
+
+    private void resumeMsTask(MsTask t, Varargs args) {
+        try {
+            Varargs r = t.thread.resume(args);
+            if (!r.arg(1).toboolean()) {
+                String err = r.arg(2).isnil() ? "unknown error" : r.arg(2).tojstring();
+                pushOutput("[" + t.title + "] Lua Error: " + err + "\n");
+                t.alive = false;
+                return;
+            }
+            if (t.thread.state == null || t.thread.state.status == LuaThread.STATUS_DEAD) {
+                t.alive = false;
+            } else {
+                t.yielded = true;
+            }
+        } catch (Throwable th) {
+            pushOutput("[" + t.title + "] Runtime error: " + th.getMessage() + "\n");
+            t.alive = false;
+        }
+    }
+
+    /** Launch a new multishell task from Lua source code. Returns assigned id. */
+    int msLaunch(String code, String chunkName, String title, Varargs progArgs) {
+        try {
+            InputStream is = new ByteArrayInputStream(code.getBytes(StandardCharsets.UTF_8));
+            final LuaValue chunk = globals.load(is, chunkName, "bt", globals);
+            // Wrap chunk so its varargs are program args.
+            final Varargs pa = progArgs;
+            LuaValue wrapped = new VarArgFunction() {
+                @Override public Varargs invoke(Varargs a) { return chunk.invoke(pa); }
+            };
+            LuaThread th = new LuaThread(globals, wrapped);
+            MsTask task = new MsTask(msNextId++, title, th);
+            msTasks.add(task);
+            if (msFocusId == 0) msFocusId = task.id;
+            // Initial resume.
+            resumeMsTask(task, LuaValue.NONE);
+            return task.id;
+        } catch (Exception e) {
+            pushOutput("Launch failed: " + e.getMessage() + "\n");
+            return -1;
         }
     }
 
@@ -3558,15 +3722,68 @@ public class LuaRuntime {
     // ---------- multishell stub ----------
     private void installMultishellStub() {
         LuaTable ms = new LuaTable();
-        ms.set("getCount", new ZeroArgFunction() { @Override public LuaValue call() { return LuaValue.valueOf(1); } });
-        ms.set("getCurrent", new ZeroArgFunction() { @Override public LuaValue call() { return LuaValue.valueOf(1); } });
-        ms.set("getFocus", new ZeroArgFunction() { @Override public LuaValue call() { return LuaValue.valueOf(1); } });
-        ms.set("setFocus", new OneArgFunction() { @Override public LuaValue call(LuaValue v) { return LuaValue.valueOf(v.optint(1) == 1); } });
-        ms.set("getTitle", new VarArgFunction() { @Override public Varargs invoke(Varargs a) { return LuaValue.valueOf("shell"); } });
-        ms.set("setTitle", new VarArgFunction() { @Override public Varargs invoke(Varargs a) { return NONE; } });
+        ms.set("getCount", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                return LuaValue.valueOf(1 + msTasks.size());
+            }
+        });
+        ms.set("getCurrent", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                // There's no simple way to determine which task is calling;
+                // report focus to keep CC compat for most uses.
+                return LuaValue.valueOf(msFocusId == 0 ? 1 : msFocusId);
+            }
+        });
+        ms.set("getFocus", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                return LuaValue.valueOf(msFocusId == 0 ? 1 : msFocusId);
+            }
+        });
+        ms.set("setFocus", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue v) {
+                int id = v.checkint();
+                if (id == 1 || id == 0) { msFocusId = 0; return LuaValue.TRUE; }
+                for (MsTask t : msTasks) {
+                    if (t.id == id && t.alive) { msFocusId = id; return LuaValue.TRUE; }
+                }
+                return LuaValue.FALSE;
+            }
+        });
+        ms.set("getTitle", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                int id = a.checkint(1);
+                if (id == 1) return LuaValue.valueOf("shell");
+                for (MsTask t : msTasks) if (t.id == id) return LuaValue.valueOf(t.title);
+                return LuaValue.NIL;
+            }
+        });
+        ms.set("setTitle", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                int id = a.checkint(1);
+                String title = a.checkjstring(2);
+                for (MsTask t : msTasks) if (t.id == id) { t.title = title; return NONE; }
+                return NONE;
+            }
+        });
+        // multishell.launch(env, path, ...)
+        //   env is an optional table (ignored — we use shared globals).
+        //   path is the .lua file to execute.
+        //   Additional args forwarded to the chunk.
         ms.set("launch", new VarArgFunction() {
             @Override public Varargs invoke(Varargs a) {
-                return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf("multishell.launch is not supported yet"));
+                int pathArg = a.arg(1).istable() ? 2 : 1;
+                String path = a.checkjstring(pathArg);
+                String content = os.getFileSystem().readFile(path);
+                if (content == null) {
+                    return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf("File not found: " + path));
+                }
+                String title = path;
+                int slash = path.lastIndexOf('/');
+                if (slash >= 0) title = path.substring(slash + 1);
+                int dot = title.lastIndexOf('.');
+                if (dot > 0) title = title.substring(0, dot);
+                int id = msLaunch(content, path, title, a.subargs(pathArg + 1));
+                return LuaValue.valueOf(id);
             }
         });
         globals.set("multishell", ms);

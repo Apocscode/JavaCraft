@@ -23,6 +23,12 @@ public final class GlassesHudState {
         public double max = 1.0;
         public int color = 0xFFFFFF;
         public double[] spark = new double[0];
+        // Tier 2 fields
+        public int bgColor = 0;                 // optional background tint (0 = none)
+        public double num2 = 0.0;               // secondary value (e.g. compass needle angle)
+        public long expireMs = 0L;              // alerts with auto-timeout (0 = permanent)
+        public double[] points = new double[0]; // minimap points: triples [x, z, color_rgb]
+        public int height = 0;                  // optional explicit row height for big widgets
     }
 
     private static final List<Widget> widgets = new ArrayList<>();
@@ -68,6 +74,16 @@ public final class GlassesHudState {
                     double[] arr = new double[sl.size()];
                     for (int j = 0; j < sl.size(); j++) arr[j] = sl.getDouble(j);
                     w.spark = arr;
+                }
+                w.bgColor  = c.contains("bg")   ? c.getInt("bg")      : 0;
+                w.num2     = c.contains("num2") ? c.getDouble("num2") : 0.0;
+                w.expireMs = c.contains("exp")  ? c.getLong("exp")    : 0L;
+                w.height   = c.contains("h")    ? c.getInt("h")       : 0;
+                if (c.contains("pts", Tag.TAG_LIST)) {
+                    ListTag pl = c.getList("pts", Tag.TAG_DOUBLE);
+                    double[] arr = new double[pl.size()];
+                    for (int j = 0; j < pl.size(); j++) arr[j] = pl.getDouble(j);
+                    w.points = arr;
                 }
                 next.add(w);
             }

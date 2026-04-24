@@ -35,6 +35,12 @@ public final class GlassesHudAPI {
         public double max = 1.0;
         public int color = 0xFFFFFF;
         public double[] spark = null;
+        // Tier 2 optional fields
+        public int bgColor = 0;
+        public double num2 = 0.0;
+        public long expireMs = 0L;
+        public int height = 0;
+        public double[] points = null;
 
         public Widget(String type, String id) { this.type = type; this.id = id; }
 
@@ -52,6 +58,15 @@ public final class GlassesHudAPI {
                 ListTag sl = new ListTag();
                 for (double v : spark) sl.add(DoubleTag.valueOf(v));
                 c.put("spark", sl);
+            }
+            if (bgColor != 0)      c.putInt("bg", bgColor & 0xFFFFFF);
+            if (num2 != 0.0)       c.putDouble("num2", num2);
+            if (expireMs > 0)      c.putLong("exp", expireMs);
+            if (height > 0)        c.putInt("h", height);
+            if (points != null && points.length > 0) {
+                ListTag pl = new ListTag();
+                for (double v : points) pl.add(DoubleTag.valueOf(v));
+                c.put("pts", pl);
             }
             return c;
         }
