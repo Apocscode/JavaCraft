@@ -177,6 +177,7 @@ public class LuaRuntime {
         installRednetAPI();
         installRedstoneAPI();
         installRelayAPI();
+        installButtonsAPI();
         installScannerAPI();
         installPeripheralAPI();
     }
@@ -969,6 +970,112 @@ public class LuaRuntime {
         });
 
         globals.set("relay", relay);
+    }
+
+    // ── buttons API ───────────────────────────────────────────────────────────
+    // Wraps ButtonsLib to drive the local computer's built-in virtual 16-button
+    // panel. This is the same panel the on-screen Button App controls; toggling
+    // buttons here immediately emits redstone + bundled signals on all 6 sides
+    // of the computer block.
+    //
+    //   buttons.set(i, on)          — turn button i (0-15) on/off
+    //   buttons.get(i)              — returns boolean
+    //   buttons.setAll(mask)        — set all 16 buttons at once (16-bit mask)
+    //   buttons.getAll()            — read the full 16-bit mask
+    //   buttons.toggle(i)           — flip button i
+    //   buttons.setMode(i, mode)    — "toggle" | "momentary" | "timer" | "delay" | "inverted"
+    //   buttons.setDuration(i, t)   — ticks used by timer/delay modes (1..6000)
+    //   buttons.setLabel(i, text)   — per-button display label (max 16 chars)
+    //   buttons.setColor(i, rgb)    — 0xRRGGBB integer, or -1 for default
+    //   buttons.setPanelLabel(s)    — rename the whole virtual panel (max 24)
+    //   buttons.setChannel(n)       — Bluetooth channel (1..256)
+
+    private void installButtonsAPI() {
+        LuaTable buttons = new LuaTable();
+
+        buttons.set("set", new TwoArgFunction() {
+            @Override public LuaValue call(LuaValue i, LuaValue on) {
+                ButtonsLib.setButton(os, i.checkint(), on.toboolean());
+                return NONE;
+            }
+        });
+
+        buttons.set("get", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue i) {
+                return LuaValue.valueOf(ButtonsLib.getButton(os, i.checkint()));
+            }
+        });
+
+        buttons.set("setAll", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue mask) {
+                ButtonsLib.setAllButtons(os, mask.checkint());
+                return NONE;
+            }
+        });
+
+        buttons.set("getAll", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                return LuaValue.valueOf(ButtonsLib.getButtonStates(os));
+            }
+        });
+
+        buttons.set("toggle", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue iv) {
+                int i = iv.checkint();
+                ButtonsLib.setButton(os, i, !ButtonsLib.getButton(os, i));
+                return NONE;
+            }
+        });
+
+        buttons.set("setMode", new TwoArgFunction() {
+            @Override public LuaValue call(LuaValue iv, LuaValue modeVal) {
+                int i = iv.checkint();
+                String m = modeVal.checkjstring().toUpperCase();
+                try {
+                    ButtonsLib.setMode(os, i,
+                            com.apocscode.byteblock.block.entity.ButtonPanelBlockEntity.ButtonMode.valueOf(m));
+                } catch (IllegalArgumentException ignored) {}
+                return NONE;
+            }
+        });
+
+        buttons.set("setDuration", new TwoArgFunction() {
+            @Override public LuaValue call(LuaValue i, LuaValue ticks) {
+                ButtonsLib.setDuration(os, i.checkint(), ticks.checkint());
+                return NONE;
+            }
+        });
+
+        buttons.set("setLabel", new TwoArgFunction() {
+            @Override public LuaValue call(LuaValue i, LuaValue label) {
+                ButtonsLib.setButtonLabel(os, i.checkint(), label.checkjstring());
+                return NONE;
+            }
+        });
+
+        buttons.set("setColor", new TwoArgFunction() {
+            @Override public LuaValue call(LuaValue i, LuaValue rgb) {
+                ButtonsLib.setButtonColor(os, i.checkint(), rgb.checkint());
+                return NONE;
+            }
+        });
+        buttons.set("setColour", buttons.get("setColor"));
+
+        buttons.set("setPanelLabel", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue label) {
+                ButtonsLib.setLabel(os, label.checkjstring());
+                return NONE;
+            }
+        });
+
+        buttons.set("setChannel", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue ch) {
+                ButtonsLib.setChannel(os, ch.checkint());
+                return NONE;
+            }
+        });
+
+        globals.set("buttons", buttons);
     }
 
     private void installScannerAPI() {
