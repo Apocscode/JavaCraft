@@ -37,11 +37,16 @@ public class MonitorPeripheralAdapter implements IPeripheralAdapter {
 
     @Override
     public LuaTable buildTable(BlockEntity be) {
+        return buildTable(be, null);
+    }
+
+    @Override
+    public LuaTable buildTable(BlockEntity be, com.apocscode.byteblock.computer.JavaOS callingOs) {
         final MonitorBlockEntity raw = (MonitorBlockEntity) be;
         final MonitorBlockEntity origin = raw.getOriginEntity() != null ? raw.getOriginEntity() : raw;
 
-        // Switch to text mode automatically on first peripheral access
-        if (!"text".equals(origin.getDisplayMode())) {
+        // Switch to text mode automatically on first peripheral access (only if currently mirroring)
+        if ("mirror".equals(origin.getDisplayMode())) {
             origin.setDisplayMode("text");
         }
 
@@ -167,7 +172,7 @@ public class MonitorPeripheralAdapter implements IPeripheralAdapter {
             }
         });
 
-        // Convenience: setMode("mirror"|"text")  — return monitor to mirror mode
+        // Convenience: setMode("mirror"|"text"|"graphics")
         t.set("setMode", new OneArgFunction() {
             @Override public LuaValue call(LuaValue v) {
                 origin.setDisplayMode(v.tojstring());
@@ -175,7 +180,114 @@ public class MonitorPeripheralAdapter implements IPeripheralAdapter {
             }
         });
 
+        // ── Graphics-mode (160×100, 16-color palette) ────────────────────
+        t.set("getPixelSize", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                return LuaValue.varargsOf(new LuaValue[]{
+                    LuaValue.valueOf(MonitorBlockEntity.GFX_W),
+                    LuaValue.valueOf(MonitorBlockEntity.GFX_H)
+                });
+            }
+        });
+        t.set("setPixel", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                origin.gfxSetPixel(a.checkint(1) - 1, a.checkint(2) - 1, paletteFromLua(a.arg(3)));
+                return LuaValue.NIL;
+            }
+        });
+        t.set("getPixel", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                int idx = origin.gfxGetPixel(a.checkint(1) - 1, a.checkint(2) - 1);
+                return LuaValue.valueOf(1 << idx);
+            }
+        });
+        t.set("fillRect", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                origin.gfxFillRect(a.checkint(1) - 1, a.checkint(2) - 1,
+                                   a.checkint(3),     a.checkint(4),
+                                   paletteFromLua(a.arg(5)));
+                return LuaValue.NIL;
+            }
+        });
+        t.set("clearPixels", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                origin.gfxClear(a.narg() >= 1 ? paletteFromLua(a.arg(1))
+                                              : origin.termGetBackgroundColor());
+                return LuaValue.NIL;
+            }
+        });
+        t.set("redrawPixels", new ZeroArgFunction() {
+            @Override public LuaValue call() { origin.gfxFlush(); return LuaValue.NIL; }
+        });
+
+        // ── Computer label exposure ──────────────────────────────────────
+        t.set("getComputerLabel", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                String lbl = origin.getLastKnownComputerLabel();
+                return (lbl == null || lbl.isEmpty()) ? LuaValue.NIL : LuaValue.valueOf(lbl);
+            }
+        });
+
+        // ── savePNG(path) — render the current visible buffer to a PNG ───
+        if (callingOs != null) {
+            final com.apocscode.byteblock.computer.JavaOS fs = callingOs;
+            t.set("savePNG", new OneArgFunction() {
+                @Override public LuaValue call(LuaValue pathArg) {
+                    String path = pathArg.checkjstring();
+                    try {
+                        java.awt.image.BufferedImage img = renderMonitorToImage(origin);
+                        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                        javax.imageio.ImageIO.write(img, "png", baos);
+                        fs.getFileSystem().writeBytes(path, baos.toByteArray());
+                        return LuaValue.TRUE;
+                    } catch (Exception e) {
+                        return LuaValue.varargsOf(
+                            LuaValue.FALSE, LuaValue.valueOf(e.getMessage())).arg1();
+                    }
+                }
+            });
+        }
+
         return t;
+    }
+
+    /** Snapshot the monitor's current visible buffer (text or graphics) as a BufferedImage. */
+    private static java.awt.image.BufferedImage renderMonitorToImage(MonitorBlockEntity origin) {
+        int[] palette = com.apocscode.byteblock.computer.TerminalBuffer.PALETTE;
+        if ("graphics".equals(origin.getDisplayMode())) {
+            int w = MonitorBlockEntity.GFX_W, h = MonitorBlockEntity.GFX_H;
+            java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(
+                w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    int idx = origin.gfxGetPixel(x, y);
+                    int c = palette[idx & 0xF];
+                    img.setRGB(x, y, 0xFF000000 | (c & 0xFFFFFF));
+                }
+            }
+            return img;
+        }
+        // Text/mirror fallback: render text buffer at native font size 80*8 × 25*16 = 640×400
+        int cols = MonitorBlockEntity.TEXT_COLS, rows = MonitorBlockEntity.TEXT_ROWS;
+        int cellW = 8, cellH = 16;
+        int w = cols * cellW, h = rows * cellH;
+        java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(
+            w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        com.apocscode.byteblock.computer.PixelBuffer pb =
+            new com.apocscode.byteblock.computer.PixelBuffer(w, h);
+        char[] chars = origin.getTextChars();
+        byte[] fg = origin.getTextFg(), bg = origin.getTextBg();
+        for (int y = 0; y < rows; y++) {
+            for (int x = 0; x < cols; x++) {
+                int o = y * cols + x;
+                pb.fillRect(x * cellW, y * cellH, cellW, cellH, palette[bg[o] & 0xF]);
+                char c = chars[o];
+                if (c != ' ' && c != 0) pb.drawChar(x * cellW, y * cellH, c, palette[fg[o] & 0xF]);
+            }
+        }
+        int[] argb = pb.getPixels();
+        img.setRGB(0, 0, w, h, argb, 0, w);
+        return img;
     }
 
     /** Accept a CC-style bitmask color (1, 2, 4, ...) or a 0-15 palette index. */

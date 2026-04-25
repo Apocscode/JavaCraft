@@ -100,10 +100,12 @@ public class MonitorBlock extends Block implements EntityBlock {
                         BlockEntity compBe = level.getBlockEntity(linked);
                         if (compBe instanceof ComputerBlockEntity computer) {
                             com.apocscode.byteblock.computer.JavaOS os = computer.getOS();
+                            // Determine which side of the computer the monitor is on
+                            String side = computeMonitorSide(linked, origin);
                             // CC-style: monitor_touch event with side string + 1-based x,y
                             os.pushEvent(new com.apocscode.byteblock.computer.OSEvent(
-                                com.apocscode.byteblock.computer.OSEvent.Type.MOUSE_CLICK,
-                                0, cell[0] + 1, cell[1] + 1));
+                                com.apocscode.byteblock.computer.OSEvent.Type.MONITOR_TOUCH,
+                                side, cell[0] + 1, cell[1] + 1));
                         }
                     }
                 }
@@ -165,6 +167,27 @@ public class MonitorBlock extends Block implements EntityBlock {
         if (cx < 0) cx = 0; else if (cx >= effCols) cx = effCols - 1;
         if (cy < 0) cy = 0; else if (cy >= effRows) cy = effRows - 1;
         return new int[]{cx, cy};
+    }
+
+    /**
+     * Determine which side of the computer the monitor formation is on.
+     * Used as the {@code side} argument in the {@code monitor_touch} event.
+     */
+    private static String computeMonitorSide(BlockPos computerPos,
+                                             MonitorBlockEntity originMonitor) {
+        if (originMonitor.getLevel() == null) return "front";
+        // Walk all 6 sides of the computer; if any adjacent block belongs to this formation,
+        // that's our side.
+        for (Direction d : Direction.values()) {
+            BlockPos adj = computerPos.relative(d);
+            BlockEntity be = originMonitor.getLevel().getBlockEntity(adj);
+            if (be instanceof MonitorBlockEntity m
+                    && originMonitor.getOriginPos().equals(m.getOriginPos())) {
+                return com.apocscode.byteblock.computer.peripheral.PeripheralRegistry
+                        .directionToSide(d);
+            }
+        }
+        return "front";
     }
 
     @Override

@@ -2021,7 +2021,7 @@ public class LuaRuntime {
                 var result = com.apocscode.byteblock.computer.peripheral.PeripheralRegistry
                         .findBySide(lvl, pos, side.checkjstring());
                 if (result == null) return methods;
-                org.luaj.vm2.LuaTable tbl = result.buildTable();
+                org.luaj.vm2.LuaTable tbl = result.buildTable(os);
                 int i = 1;
                 for (org.luaj.vm2.LuaValue key = tbl.next(LuaValue.NIL).arg1();
                      !key.isnil();
@@ -2042,7 +2042,7 @@ public class LuaRuntime {
                 var result = com.apocscode.byteblock.computer.peripheral.PeripheralRegistry
                         .findBySide(lvl, pos, side.checkjstring());
                 if (result == null) return LuaValue.NIL;
-                return result.buildTable();
+                return result.buildTable(os);
             }
         });
 
@@ -2056,7 +2056,7 @@ public class LuaRuntime {
                 var result = com.apocscode.byteblock.computer.peripheral.PeripheralRegistry
                         .findBySide(lvl, pos, args.checkjstring(1));
                 if (result == null) return LuaValue.NIL;
-                org.luaj.vm2.LuaTable tbl = result.buildTable();
+                org.luaj.vm2.LuaTable tbl = result.buildTable(os);
                 LuaValue fn = tbl.get(args.checkjstring(2));
                 if (fn.isnil() || !fn.isfunction()) return LuaValue.NIL;
                 return fn.invoke(args.subargs(3));
@@ -2073,7 +2073,7 @@ public class LuaRuntime {
                 if (lvl == null || pos == null) return LuaValue.NIL;
                 var result = com.apocscode.byteblock.computer.peripheral.PeripheralRegistry
                         .findByType(lvl, pos, type.checkjstring());
-                return result != null ? result.buildTable() : LuaValue.NIL;
+                return result != null ? result.buildTable(os) : LuaValue.NIL;
             }
         });
 

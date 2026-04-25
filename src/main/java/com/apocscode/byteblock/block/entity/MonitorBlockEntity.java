@@ -59,6 +59,17 @@ public class MonitorBlockEntity extends BlockEntity {
         java.util.Arrays.fill(textBg, (byte) 15);  // black
     }
 
+    // ── Graphics-buffer state (used when displayMode == "graphics") ──
+    public static final int GFX_W = 160;
+    public static final int GFX_H = 100;
+    /** 4-bit packed palette indices, two pixels per byte (low nibble = even x, high = odd x). */
+    private final byte[] gfxPixels = new byte[GFX_W * GFX_H / 2];
+    private long gfxVersion = 1L;
+    private long lastSyncedGfxVersion = 0L;
+
+    // Last-known label of the linked computer; rendered on the "no signal" tombstone.
+    private String lastKnownComputerLabel = "";
+
     public MonitorBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.MONITOR.get(), pos, state);
         this.originPos = pos;
@@ -93,9 +104,17 @@ public class MonitorBlockEntity extends BlockEntity {
 
         // Verify linked computer still exists every 2 seconds
         if (linkedComputerPos != null && level.getGameTime() % 40 == 0) {
-            if (!(level.getBlockEntity(linkedComputerPos) instanceof ComputerBlockEntity)) {
+            BlockEntity compBe = level.getBlockEntity(linkedComputerPos);
+            if (!(compBe instanceof ComputerBlockEntity computer)) {
                 linkedComputerPos = null;
                 syncToClient();
+            } else {
+                String lbl = computer.getOS().getLabel();
+                if (lbl == null) lbl = "";
+                if (!lbl.equals(lastKnownComputerLabel)) {
+                    lastKnownComputerLabel = lbl;
+                    syncToClient();
+                }
             }
         }
     }
@@ -362,6 +381,71 @@ public class MonitorBlockEntity extends BlockEntity {
     public double getTextScale() { return textScale; }
     public int getLastTouchX() { return lastTouchX; }
     public int getLastTouchY() { return lastTouchY; }
+    public String getLastKnownComputerLabel() { return lastKnownComputerLabel; }
+    public long getGfxVersion() { return gfxVersion; }
+    public byte[] getGfxPixels() { return gfxPixels; }
+
+    /** Read a 4-bit palette index at (x,y). Returns 0 if OOB. */
+    public int gfxGetPixel(int x, int y) {
+        if (x < 0 || y < 0 || x >= GFX_W || y >= GFX_H) return 0;
+        int idx = y * GFX_W + x;
+        byte b = gfxPixels[idx >> 1];
+        return ((idx & 1) == 0) ? (b & 0xF) : ((b >> 4) & 0xF);
+    }
+
+    public void gfxSetPixel(int x, int y, int paletteIdx) {
+        if (x < 0 || y < 0 || x >= GFX_W || y >= GFX_H) return;
+        int idx = y * GFX_W + x;
+        int v = paletteIdx & 0xF;
+        int bi = idx >> 1;
+        byte b = gfxPixels[bi];
+        if ((idx & 1) == 0) gfxPixels[bi] = (byte)((b & 0xF0) | v);
+        else                gfxPixels[bi] = (byte)((b & 0x0F) | (v << 4));
+        gfxMarkDirty();
+    }
+
+    public void gfxFillRect(int x, int y, int w, int h, int paletteIdx) {
+        if (w <= 0 || h <= 0) return;
+        int x0 = Math.max(0, x), y0 = Math.max(0, y);
+        int x1 = Math.min(GFX_W, x + w), y1 = Math.min(GFX_H, y + h);
+        int v = paletteIdx & 0xF;
+        for (int yy = y0; yy < y1; yy++) {
+            for (int xx = x0; xx < x1; xx++) {
+                int idx = yy * GFX_W + xx;
+                int bi = idx >> 1;
+                byte b = gfxPixels[bi];
+                if ((idx & 1) == 0) gfxPixels[bi] = (byte)((b & 0xF0) | v);
+                else                gfxPixels[bi] = (byte)((b & 0x0F) | (v << 4));
+            }
+        }
+        gfxMarkDirty();
+    }
+
+    public void gfxClear(int paletteIdx) {
+        int v = paletteIdx & 0xF;
+        byte fill = (byte)((v << 4) | v);
+        java.util.Arrays.fill(gfxPixels, fill);
+        gfxMarkDirty();
+    }
+
+    private void gfxMarkDirty() {
+        gfxVersion++;
+        if (level != null && !level.isClientSide()
+                && gfxVersion - lastSyncedGfxVersion >= 1
+                && level.getGameTime() % 4 == 0) {
+            lastSyncedGfxVersion = gfxVersion;
+            syncToClient();
+        }
+    }
+
+    /** Force flush of any pending gfx writes. */
+    public void gfxFlush() {
+        if (level != null && !level.isClientSide() && gfxVersion != lastSyncedGfxVersion) {
+            lastSyncedGfxVersion = gfxVersion;
+            syncToClient();
+        }
+    }
+
 
     // ── Lua-side terminal API (called on the origin entity) ──
 
@@ -549,6 +633,11 @@ public class MonitorBlockEntity extends BlockEntity {
         tag.putInt("TermBgCol", termBg);
         tag.putDouble("TermScale", textScale);
         tag.putLong("TermVer", textVersion);
+        tag.putByteArray("GfxPx", gfxPixels);
+        tag.putLong("GfxVer", gfxVersion);
+        if (lastKnownComputerLabel != null && !lastKnownComputerLabel.isEmpty()) {
+            tag.putString("LastLabel", lastKnownComputerLabel);
+        }
     }
 
     @Override
@@ -585,5 +674,11 @@ public class MonitorBlockEntity extends BlockEntity {
         if (tag.contains("TermBgCol")) termBg = tag.getInt("TermBgCol");
         if (tag.contains("TermScale")) textScale = tag.getDouble("TermScale");
         if (tag.contains("TermVer")) textVersion = tag.getLong("TermVer");
+        if (tag.contains("GfxPx")) {
+            byte[] a = tag.getByteArray("GfxPx");
+            System.arraycopy(a, 0, gfxPixels, 0, Math.min(a.length, gfxPixels.length));
+        }
+        if (tag.contains("GfxVer")) gfxVersion = tag.getLong("GfxVer");
+        if (tag.contains("LastLabel")) lastKnownComputerLabel = tag.getString("LastLabel");
     }
 }

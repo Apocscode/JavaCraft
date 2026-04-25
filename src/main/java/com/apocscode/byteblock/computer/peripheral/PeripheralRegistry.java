@@ -55,6 +55,9 @@ public class PeripheralRegistry {
     public record AdapterResult(IPeripheralAdapter adapter, BlockEntity be) {
         public String getType()      { return adapter.getType(be); }
         public LuaTable buildTable() { return adapter.buildTable(be); }
+        public LuaTable buildTable(com.apocscode.byteblock.computer.JavaOS os) {
+            return adapter.buildTable(be, os);
+        }
     }
 
     /**

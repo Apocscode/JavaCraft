@@ -101,6 +101,7 @@ public class LuaShellProgram extends OSProgram {
             case KEY           -> lua.queueEvent("key", event.getInt(0), false);
             case KEY_UP        -> lua.queueEvent("key_up", event.getInt(0));
             case MOUSE_CLICK   -> lua.queueEvent("mouse_click", event.getInt(0), event.getInt(1), event.getInt(2));
+            case MONITOR_TOUCH -> lua.queueEvent("monitor_touch", event.getString(0), event.getInt(1), event.getInt(2));
             case MOUSE_UP      -> lua.queueEvent("mouse_up", event.getInt(0), event.getInt(1), event.getInt(2));
             case MOUSE_DRAG    -> lua.queueEvent("mouse_drag", event.getInt(0), event.getInt(1), event.getInt(2));
             case MOUSE_SCROLL  -> lua.queueEvent("mouse_scroll", event.getInt(0), event.getInt(1), event.getInt(2));

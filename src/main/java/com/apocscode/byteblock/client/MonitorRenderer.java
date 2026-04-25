@@ -85,6 +85,7 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         }
         boolean isMirror = displayMode == null || "mirror".equals(displayMode);
         boolean isText   = "text".equals(displayMode);
+        boolean isGfx    = "graphics".equals(displayMode);
         boolean isTest   = displayMode != null && displayMode.startsWith("test:");
 
         // Get/create texture
@@ -100,9 +101,11 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
             st.lastUploadTick = currentTick;
             if (isMirror) {
                 if (computer == null) {
-                    String sig = "tomb:" + (linkedPos == null ? "nolink" : linkedPos.asLong());
+                    String lbl = origin.getLastKnownComputerLabel();
+                    String sig = "tomb:" + (linkedPos == null ? "nolink" : linkedPos.asLong())
+                            + ":" + (lbl == null ? "" : lbl);
                     if (!sig.equals(st.lastUploadedSig)) {
-                        renderTombstone(st.stagingBuffer, linkedPos);
+                        renderTombstone(st.stagingBuffer, linkedPos, lbl);
                         uploadPixels(st, st.stagingBuffer);
                         st.lastUploadedSig = sig;
                         st.lastUploadedSourceVersion = -1;
@@ -122,6 +125,15 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
                 String sig = "text:" + ver;
                 if (!sig.equals(st.lastUploadedSig)) {
                     renderTextBuffer(st.stagingBuffer, origin);
+                    uploadPixels(st, st.stagingBuffer);
+                    st.lastUploadedSig = sig;
+                    st.lastUploadedSourceVersion = -1;
+                }
+            } else if (isGfx) {
+                long ver = origin.getGfxVersion();
+                String sig = "gfx:" + ver;
+                if (!sig.equals(st.lastUploadedSig)) {
+                    renderGfxBuffer(st.stagingBuffer, origin);
                     uploadPixels(st, st.stagingBuffer);
                     st.lastUploadedSig = sig;
                     st.lastUploadedSourceVersion = -1;
@@ -244,7 +256,7 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
     }
 
     /** "No signal" tombstone shown in mirror mode when the linked computer is missing. */
-    private static void renderTombstone(PixelBuffer pb, BlockPos linkedPos) {
+    private static void renderTombstone(PixelBuffer pb, BlockPos linkedPos, String label) {
         int w = pb.getWidth();
         int h = pb.getHeight();
         // Snow noise
@@ -257,15 +269,36 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
             }
         }
         // Banner
-        int bw = 380, bh = 80;
+        boolean hasLabel = label != null && !label.isEmpty();
+        int bw = 380, bh = hasLabel ? 100 : 80;
         pb.fillRoundRect((w - bw) / 2, (h - bh) / 2, bw, bh, 8, 0xCC000000);
         pb.drawRect((w - bw) / 2, (h - bh) / 2, bw, bh, 0xFFFF4444);
-        pb.drawStringCentered(0, w, h / 2 - 20, "NO SIGNAL", 0xFFFF4444);
+        int yLine = h / 2 - (hasLabel ? 30 : 20);
+        pb.drawStringCentered(0, w, yLine, "NO SIGNAL", 0xFFFF4444);
+        if (hasLabel) {
+            pb.drawStringCentered(0, w, yLine + 18, "\"" + label + "\"", 0xFFFFCC66);
+        }
         String detail = (linkedPos == null)
                 ? "No computer linked. Place one adjacent."
                 : ("Lost link to computer at "
                     + linkedPos.getX() + ", " + linkedPos.getY() + ", " + linkedPos.getZ());
-        pb.drawStringCentered(0, w, h / 2 + 4, detail, 0xFFCCCCCC);
+        pb.drawStringCentered(0, w, yLine + (hasLabel ? 36 : 24), detail, 0xFFCCCCCC);
+    }
+
+    /** Render the monitor's 160×100 4-bit graphics buffer scaled to the monitor surface. */
+    private static void renderGfxBuffer(PixelBuffer pb, MonitorBlockEntity origin) {
+        int srcW = MonitorBlockEntity.GFX_W;
+        int srcH = MonitorBlockEntity.GFX_H;
+        int dstW = pb.getWidth(), dstH = pb.getHeight();
+        int sx = Math.max(1, dstW / srcW);
+        int sy = Math.max(1, dstH / srcH);
+        for (int y = 0; y < srcH; y++) {
+            int py = y * sy;
+            for (int x = 0; x < srcW; x++) {
+                int idx = origin.gfxGetPixel(x, y);
+                pb.fillRect(x * sx, py, sx, sy, paletteColor(idx));
+            }
+        }
     }
 
     private static int paletteColor(int idx) {

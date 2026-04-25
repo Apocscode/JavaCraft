@@ -15,6 +15,7 @@ public class OSEvent {
         CHAR,           // typed character: data[0]=character
         MOUSE_CLICK,    // mouse click: data[0]=button, data[1]=cellX, data[2]=cellY
         MOUSE_CLICK_PX, // pixel mouse click: data[0]=button, data[1]=pixelX, data[2]=pixelY
+        MONITOR_TOUCH,  // monitor touch: data[0]=side string, data[1]=cellX (1-based), data[2]=cellY (1-based)
         MOUSE_UP,       // mouse release: data[0]=button, data[1]=x, data[2]=y
         MOUSE_DRAG,     // mouse drag: data[0]=button, data[1]=x, data[2]=y
         MOUSE_DRAG_PX,  // pixel mouse drag: data[0]=button, data[1]=pixelX, data[2]=pixelY

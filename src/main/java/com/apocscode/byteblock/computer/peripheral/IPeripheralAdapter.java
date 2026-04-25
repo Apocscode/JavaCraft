@@ -26,4 +26,14 @@ public interface IPeripheralAdapter {
      * Each key is a method name; each value is a callable LuaFunction.
      */
     LuaTable buildTable(BlockEntity be);
+
+    /**
+     * Optional overload that gives the adapter access to the calling computer's
+     * {@link com.apocscode.byteblock.computer.JavaOS} instance (e.g. for filesystem
+     * writes from peripheral methods like {@code monitor.savePNG}).
+     * Default delegates to {@link #buildTable(BlockEntity)}.
+     */
+    default LuaTable buildTable(BlockEntity be, com.apocscode.byteblock.computer.JavaOS callingOs) {
+        return buildTable(be);
+    }
 }
