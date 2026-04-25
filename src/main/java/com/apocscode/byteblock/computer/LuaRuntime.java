@@ -570,6 +570,54 @@ public class LuaRuntime {
             @Override public LuaValue call() { return LuaValue.valueOf("ByteBlock 1.0 (Lua 5.2)"); }
         });
 
+        // os.computerLabel() — CC alias for getComputerLabel().
+        osTable.set("computerLabel", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                String l = os.getLabel();
+                return l == null ? LuaValue.NIL : LuaValue.valueOf(l);
+            }
+        });
+
+        // os.loadAPI(path) — load a Lua file in its own env and expose the
+        // resulting global table under the file's basename. CC API loader.
+        osTable.set("loadAPI", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue v) {
+                String path = v.checkjstring();
+                String src = os.getFileSystem().readFile(path);
+                if (src == null) return LuaValue.FALSE;
+                // Derive API name from the file's basename, stripping extension.
+                int slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+                String base = slash >= 0 ? path.substring(slash + 1) : path;
+                int dot = base.lastIndexOf('.');
+                String apiName = dot > 0 ? base.substring(0, dot) : base;
+                // Run in an env that inherits globals; new globals defined go to
+                // a private table, which is exposed under apiName.
+                LuaTable apiEnv = new LuaTable();
+                LuaTable mt = new LuaTable();
+                mt.set("__index", globals);
+                apiEnv.setmetatable(mt);
+                try {
+                    LuaValue chunk = globals.load(src, "@" + path, apiEnv);
+                    chunk.call();
+                } catch (LuaError e) { return LuaValue.FALSE; }
+                // Strip the inherited metatable so the API table only contains
+                // its own definitions, and publish it on globals.
+                apiEnv.setmetatable(null);
+                globals.set(apiName, apiEnv);
+                return LuaValue.TRUE;
+            }
+        });
+
+        // os.unloadAPI(name) — remove a previously loaded API from globals.
+        osTable.set("unloadAPI", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue v) {
+                String name = v.checkjstring();
+                if ("os".equals(name)) return NONE;  // CC protects os
+                globals.set(name, LuaValue.NIL);
+                return NONE;
+            }
+        });
+
         globals.set("os", osTable);
     }
 
