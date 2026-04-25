@@ -111,24 +111,33 @@ configurable.
 
 ### Monitor
 
-A flat, multi-block screen that mirrors a linked computer or runs a test pattern.
+A flat, multi-block screen that mirrors a linked computer or runs a test pattern. Rendered by a
+custom `BlockEntityRenderer` that draws the slab geometry directly so per-monitor configuration
+is reflected in the visible block.
 
 | Property            | Value |
 |---------------------|-------|
 | Block entity        | `MonitorBlockEntity` |
 | BT device type      | `MONITOR` (range 15) |
 | Block state         | `FACING` (horizontal only — wall mounted) |
-| Shape               | 4-pixel-thick slab flush with the wall behind it |
+| Render shape        | `ENTITYBLOCK_ANIMATED` (full geometry from BER) |
+| Default slab        | 2-pixel-thick flush slab; configurable 1–6 px |
 
-- **Right-click** — if a computer is auto-linked, opens that computer's `ComputerScreen` (rebooting
-  if needed).
+- **Right-click** — if a computer is auto-linked, opens that computer's `ComputerScreen`. **Shift +
+  empty hand** opens `MonitorConfigScreen` to tune slab thickness, X-axis tilt (-45..+45°), and
+  Y-axis yaw (-45..+45°) per formation.
 - **Multi-block formation** — placing/breaking a Monitor flood-fills connected same-facing
   Monitors, validates that they form a rectangle, and assigns one origin + per-monitor
   `(offsetX, offsetY)` so the renderer can stitch them into a single screen up to 10×10.
+- **Seamless joints** — inner formation edges have no bezel and the screen quad extends to the
+  block edge; only the outer perimeter shows the black border, so a connected formation reads as
+  one continuous display.
 - **Auto-link** — every 40 ticks the origin checks all formation members' adjacent blocks for an
   adjacent `ComputerBlockEntity` and links it.
-- **Bluetooth control** — accepts `display_mode:mirror`, `display_mode:test:<pattern>`, and
-  `link:x,y,z` messages from programs.
+- **Touch input** — the front face is divided into a 2×2 cell grid per block (mirrored to match
+  the player's view); cell hits broadcast as Bluetooth touch events to the linked computer.
+- **Bluetooth control** — accepts `display_mode:mirror`, `display_mode:test:<pattern>`,
+  `link:x,y,z`, and `config:thickness=N,tilt=A,yaw=B` messages from programs.
 
 ### Drive
 
