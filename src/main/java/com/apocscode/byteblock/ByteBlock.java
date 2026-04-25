@@ -84,6 +84,11 @@ public class ByteBlock {
             com.apocscode.byteblock.network.ButtonConfigPayload::handle
         );
         registrar.playToServer(
+            com.apocscode.byteblock.network.MonitorConfigPayload.TYPE,
+            com.apocscode.byteblock.network.MonitorConfigPayload.STREAM_CODEC,
+            com.apocscode.byteblock.network.MonitorConfigPayload::handle
+        );
+        registrar.playToServer(
             com.apocscode.byteblock.network.RelayConfigPayload.TYPE,
             com.apocscode.byteblock.network.RelayConfigPayload.STREAM_CODEC,
             com.apocscode.byteblock.network.RelayConfigPayload::handle

@@ -48,12 +48,15 @@ public class ComputerScreen extends Screen {
     @Override
     protected void init() {
         super.init();
-        // Create GPU texture (once)
+        // Create GPU texture (once). Name is unique per screen instance so re-opening the
+        // same robot/computer terminal multiple times can't collide with a previously
+        // released texture name in the TextureManager.
         if (nativeImage == null) {
             nativeImage = new NativeImage(NativeImage.Format.RGBA, FB_W, FB_H, false);
             dynamicTexture = new DynamicTexture(nativeImage);
+            String name = "byteblock_screen_" + java.util.UUID.randomUUID().toString().replace("-", "");
             textureLoc = Minecraft.getInstance().getTextureManager()
-                    .register("byteblock_screen", dynamicTexture);
+                    .register(name, dynamicTexture);
         }
         recalcLayout();
     }

@@ -453,6 +453,10 @@ public class RobotEntity extends PathfinderMob {
     @Override
     protected InteractionResult mobInteract(Player player, InteractionHand hand) {
         if (level().isClientSide()) {
+            // Reopening after a previous SHUTDOWN (e.g. ESC out of the desktop) needs a reboot,
+            // otherwise ComputerScreen.render() immediately calls onClose() because the OS is
+            // still in SHUTDOWN state — making the terminal appear to "only open once".
+            if (os.isShutdown()) os.reboot();
             // Open the robot's terminal screen (client-side only)
             net.minecraft.client.Minecraft.getInstance().setScreen(
                     new com.apocscode.byteblock.client.ComputerScreen(os));

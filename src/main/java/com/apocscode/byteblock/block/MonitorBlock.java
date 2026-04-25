@@ -100,9 +100,18 @@ public class MonitorBlock extends Block implements EntityBlock {
         MonitorBlockEntity origin = monitor.getOriginEntity();
         if (origin == null) return InteractionResult.PASS;
 
+        // Sneak + empty hand → open the geometry config screen (thickness/tilt/yaw).
+        if (player.isShiftKeyDown()) {
+            if (level.isClientSide()) {
+                net.minecraft.client.Minecraft.getInstance().setScreen(
+                        com.apocscode.byteblock.client.MonitorConfigScreen.forMonitor(origin));
+            }
+            return InteractionResult.sidedSuccess(level.isClientSide());
+        }
+
         // Touch mode: if the monitor is showing its own text buffer, forward the click as a
         // monitor_touch event to the linked computer instead of opening the GUI.
-        if ("text".equals(origin.getDisplayMode()) && !player.isShiftKeyDown()) {
+        if ("text".equals(origin.getDisplayMode())) {
             int[] cell = computeTouchCell(state, hitResult, origin);
             if (cell != null) {
                 if (!level.isClientSide()) {
