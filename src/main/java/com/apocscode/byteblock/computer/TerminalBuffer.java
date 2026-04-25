@@ -170,6 +170,37 @@ public class TerminalBuffer {
         }
     }
 
+    /**
+     * CC-style blit: write {@code text} starting at the cursor, taking the foreground
+     * color of each character from {@code fgHex} and background from {@code bgHex}.
+     * Each color string is the same length as {@code text}; characters are hex digits
+     * 0-9 / a-f indicating palette indices. Advances the cursor.
+     */
+    public void blit(String text, String fgHex, String bgHex) {
+        if (text == null) return;
+        int n = text.length();
+        if (fgHex == null) fgHex = "";
+        if (bgHex == null) bgHex = "";
+        for (int i = 0; i < n; i++) {
+            if (cursorX >= WIDTH) break;
+            char fgC = i < fgHex.length() ? fgHex.charAt(i) : '0';
+            char bgC = i < bgHex.length() ? bgHex.charAt(i) : 'f';
+            int fgIdx = hexNibble(fgC, currentFg);
+            int bgIdx = hexNibble(bgC, currentBg);
+            chars[cursorY][cursorX] = text.charAt(i);
+            fg[cursorY][cursorX] = fgIdx;
+            bg[cursorY][cursorX] = bgIdx;
+            cursorX++;
+        }
+    }
+
+    private static int hexNibble(char c, int fallback) {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return fallback;
+    }
+
     // Getters for renderer
     public char getChar(int x, int y) { return chars[y][x]; }
     public int getFg(int x, int y) { return fg[y][x]; }

@@ -323,6 +323,14 @@ public class LuaRuntime {
         });
         term.set("isColour", term.get("isColor"));
 
+        // term.blit(text, fgHex, bgHex) — write text with per-char fg/bg colors.
+        term.set("blit", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                tb.blit(a.checkjstring(1), a.checkjstring(2), a.checkjstring(3));
+                return NONE;
+            }
+        });
+
         globals.set("term", term);
     }
 
@@ -4189,20 +4197,96 @@ public class LuaRuntime {
                 final int oy = a.checkint(3) - 1;
                 final int w  = a.checkint(4);
                 final int h  = a.checkint(5);
+                final boolean[] visibleStart = { a.optboolean(6, true) };
                 LuaTable win = new LuaTable();
+                // Window's own backing buffer (so setVisible(false) can defer flushes).
+                final char[][] wChars = new char[h][w];
+                final int[][]  wFg    = new int[h][w];
+                final int[][]  wBg    = new int[h][w];
+                for (int yy = 0; yy < h; yy++) {
+                    java.util.Arrays.fill(wChars[yy], ' ');
+                    java.util.Arrays.fill(wFg[yy], 0);   // white
+                    java.util.Arrays.fill(wBg[yy], 15);  // black
+                }
                 final int[] cx = {0}, cy = {0};
+                final int[] curFg = {0}, curBg = {15};
+                final int[] origin = { ox, oy };
+                final boolean[] visible = { visibleStart[0] };
+
+                final Runnable flushAll = () -> {
+                    if (!visible[0]) return;
+                    int prevFg = tb.getCurrentFg();
+                    int prevBg = tb.getCurrentBg();
+                    int prevCx = tb.getCursorX();
+                    int prevCy = tb.getCursorY();
+                    for (int yy = 0; yy < h; yy++) {
+                        int ay = origin[1] + yy;
+                        if (ay < 0 || ay >= TerminalBuffer.HEIGHT) continue;
+                        for (int xx = 0; xx < w; xx++) {
+                            int ax = origin[0] + xx;
+                            if (ax < 0 || ax >= TerminalBuffer.WIDTH) continue;
+                            tb.setTextColor(wFg[yy][xx]);
+                            tb.setBackgroundColor(wBg[yy][xx]);
+                            tb.setCursorPos(ax, ay);
+                            tb.write(String.valueOf(wChars[yy][xx]));
+                        }
+                    }
+                    tb.setTextColor(prevFg);
+                    tb.setBackgroundColor(prevBg);
+                    tb.setCursorPos(prevCx, prevCy);
+                };
+
+                final java.util.function.IntConsumer flushRow = yy -> {
+                    if (!visible[0]) return;
+                    int ay = origin[1] + yy;
+                    if (ay < 0 || ay >= TerminalBuffer.HEIGHT) return;
+                    int prevFg = tb.getCurrentFg();
+                    int prevBg = tb.getCurrentBg();
+                    int prevCx = tb.getCursorX();
+                    int prevCy = tb.getCursorY();
+                    for (int xx = 0; xx < w; xx++) {
+                        int ax = origin[0] + xx;
+                        if (ax < 0 || ax >= TerminalBuffer.WIDTH) continue;
+                        tb.setTextColor(wFg[yy][xx]);
+                        tb.setBackgroundColor(wBg[yy][xx]);
+                        tb.setCursorPos(ax, ay);
+                        tb.write(String.valueOf(wChars[yy][xx]));
+                    }
+                    tb.setTextColor(prevFg);
+                    tb.setBackgroundColor(prevBg);
+                    tb.setCursorPos(prevCx, prevCy);
+                };
+
                 win.set("write", new OneArgFunction() {
                     @Override public LuaValue call(LuaValue v) {
-                        int ax = ox + cx[0], ay = oy + cy[0];
-                        if (ax >= 0 && ay >= 0 && ax < TerminalBuffer.WIDTH && ay < TerminalBuffer.HEIGHT) {
-                            tb.setCursorPos(ax, ay);
-                            String s = v.tojstring();
-                            int maxLen = Math.min(s.length(), w - cx[0]);
-                            if (maxLen > 0) {
-                                pushOutput(s.substring(0, maxLen));
-                                cx[0] += maxLen;
+                        String s = v.tojstring();
+                        int written = 0;
+                        if (cy[0] >= 0 && cy[0] < h) {
+                            for (int i = 0; i < s.length() && cx[0] < w; i++, cx[0]++) {
+                                if (cx[0] < 0) continue;
+                                wChars[cy[0]][cx[0]] = s.charAt(i);
+                                wFg[cy[0]][cx[0]] = curFg[0];
+                                wBg[cy[0]][cx[0]] = curBg[0];
+                                written++;
                             }
+                            if (written > 0) flushRow.accept(cy[0]);
                         }
+                        return NONE;
+                    }
+                });
+                win.set("blit", new VarArgFunction() {
+                    @Override public Varargs invoke(Varargs args) {
+                        String s  = args.checkjstring(1);
+                        String fg = args.checkjstring(2);
+                        String bg = args.checkjstring(3);
+                        if (cy[0] < 0 || cy[0] >= h) return NONE;
+                        for (int i = 0; i < s.length() && cx[0] < w; i++, cx[0]++) {
+                            if (cx[0] < 0) continue;
+                            wChars[cy[0]][cx[0]] = s.charAt(i);
+                            wFg[cy[0]][cx[0]] = parseHex(i < fg.length() ? fg.charAt(i) : '0', curFg[0]);
+                            wBg[cy[0]][cx[0]] = parseHex(i < bg.length() ? bg.charAt(i) : 'f', curBg[0]);
+                        }
+                        flushRow.accept(cy[0]);
                         return NONE;
                     }
                 });
@@ -4223,32 +4307,132 @@ public class LuaRuntime {
                 });
                 win.set("clear", new ZeroArgFunction() {
                     @Override public LuaValue call() {
-                        for (int y = 0; y < h; y++) tb.hLine(ox, ox + w - 1, oy + y, ' ');
+                        for (int yy = 0; yy < h; yy++) {
+                            for (int xx = 0; xx < w; xx++) {
+                                wChars[yy][xx] = ' ';
+                                wFg[yy][xx] = curFg[0];
+                                wBg[yy][xx] = curBg[0];
+                            }
+                        }
                         cx[0] = 0; cy[0] = 0;
+                        flushAll.run();
+                        return NONE;
+                    }
+                });
+                win.set("clearLine", new ZeroArgFunction() {
+                    @Override public LuaValue call() {
+                        if (cy[0] < 0 || cy[0] >= h) return NONE;
+                        for (int xx = 0; xx < w; xx++) {
+                            wChars[cy[0]][xx] = ' ';
+                            wFg[cy[0]][xx] = curFg[0];
+                            wBg[cy[0]][xx] = curBg[0];
+                        }
+                        flushRow.accept(cy[0]);
                         return NONE;
                     }
                 });
                 win.set("setVisible", new OneArgFunction() {
-                    @Override public LuaValue call(LuaValue v) { return NONE; }
+                    @Override public LuaValue call(LuaValue v) {
+                        boolean newVis = v.toboolean();
+                        if (newVis && !visible[0]) {
+                            visible[0] = true;
+                            flushAll.run();
+                        } else {
+                            visible[0] = newVis;
+                        }
+                        return NONE;
+                    }
                 });
-                win.set("redraw", new ZeroArgFunction() { @Override public LuaValue call() { return NONE; } });
+                win.set("isVisible", new ZeroArgFunction() {
+                    @Override public LuaValue call() { return LuaValue.valueOf(visible[0]); }
+                });
+                win.set("redraw", new ZeroArgFunction() {
+                    @Override public LuaValue call() { flushAll.run(); return NONE; }
+                });
                 win.set("setTextColor", new OneArgFunction() {
-                    @Override public LuaValue call(LuaValue v) { tb.setTextColor(ccColorToIndex(v.checkint())); return NONE; }
+                    @Override public LuaValue call(LuaValue v) { curFg[0] = ccColorToIndex(v.checkint()); return NONE; }
                 });
                 win.set("setBackgroundColor", new OneArgFunction() {
-                    @Override public LuaValue call(LuaValue v) { tb.setBackgroundColor(ccColorToIndex(v.checkint())); return NONE; }
+                    @Override public LuaValue call(LuaValue v) { curBg[0] = ccColorToIndex(v.checkint()); return NONE; }
+                });
+                win.set("getTextColor", new ZeroArgFunction() {
+                    @Override public LuaValue call() { return LuaValue.valueOf(indexToCcColor(curFg[0])); }
+                });
+                win.set("getBackgroundColor", new ZeroArgFunction() {
+                    @Override public LuaValue call() { return LuaValue.valueOf(indexToCcColor(curBg[0])); }
                 });
                 win.set("setTextColour", win.get("setTextColor"));
                 win.set("setBackgroundColour", win.get("setBackgroundColor"));
+                win.set("getTextColour", win.get("getTextColor"));
+                win.set("getBackgroundColour", win.get("getBackgroundColor"));
                 win.set("isColor", new ZeroArgFunction() { @Override public LuaValue call() { return LuaValue.TRUE; } });
-                win.set("reposition", new VarArgFunction() {
-                    @Override public Varargs invoke(Varargs args) { return NONE; }
+                win.set("isColour", win.get("isColor"));
+                win.set("scroll", new OneArgFunction() {
+                    @Override public LuaValue call(LuaValue v) {
+                        int n = v.checkint();
+                        if (n == 0) return NONE;
+                        if (n > 0) {
+                            for (int yy = 0; yy < h - n; yy++) {
+                                System.arraycopy(wChars[yy + n], 0, wChars[yy], 0, w);
+                                System.arraycopy(wFg[yy + n], 0, wFg[yy], 0, w);
+                                System.arraycopy(wBg[yy + n], 0, wBg[yy], 0, w);
+                            }
+                            for (int yy = Math.max(0, h - n); yy < h; yy++) {
+                                java.util.Arrays.fill(wChars[yy], ' ');
+                                java.util.Arrays.fill(wFg[yy], curFg[0]);
+                                java.util.Arrays.fill(wBg[yy], curBg[0]);
+                            }
+                        } else {
+                            int m = -n;
+                            for (int yy = h - 1; yy >= m; yy--) {
+                                System.arraycopy(wChars[yy - m], 0, wChars[yy], 0, w);
+                                System.arraycopy(wFg[yy - m], 0, wFg[yy], 0, w);
+                                System.arraycopy(wBg[yy - m], 0, wBg[yy], 0, w);
+                            }
+                            for (int yy = 0; yy < Math.min(h, m); yy++) {
+                                java.util.Arrays.fill(wChars[yy], ' ');
+                                java.util.Arrays.fill(wFg[yy], curFg[0]);
+                                java.util.Arrays.fill(wBg[yy], curBg[0]);
+                            }
+                        }
+                        flushAll.run();
+                        return NONE;
+                    }
                 });
+                win.set("reposition", new VarArgFunction() {
+                    @Override public Varargs invoke(Varargs args) {
+                        origin[0] = args.checkint(1) - 1;
+                        origin[1] = args.checkint(2) - 1;
+                        flushAll.run();
+                        return NONE;
+                    }
+                });
+                win.set("getPosition", new VarArgFunction() {
+                    @Override public Varargs invoke(Varargs args) {
+                        return LuaValue.varargsOf(
+                            LuaValue.valueOf(origin[0] + 1),
+                            LuaValue.valueOf(origin[1] + 1));
+                    }
+                });
+                win.set("setCursorBlink", new OneArgFunction() {
+                    @Override public LuaValue call(LuaValue v) {
+                        tb.setCursorBlink(v.toboolean()); return NONE;
+                    }
+                });
+                // Initial visible flush: paint blank window
+                if (visible[0]) flushAll.run();
                 return win;
             }
         });
 
         globals.set("window", window);
+    }
+
+    private static int parseHex(char c, int fallback) {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return fallback;
     }
 
     // ---------- settings ----------
@@ -4973,6 +5157,52 @@ public class LuaRuntime {
             @Override public LuaValue call() { return LuaValue.valueOf("/rom/help"); }
         });
         help.set("setPath", new OneArgFunction() { @Override public LuaValue call(LuaValue v) { return NONE; } });
+
+        // help.peripherals() — list connected peripherals as { side = type, ... }
+        help.set("peripherals", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                LuaTable out = new LuaTable();
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                net.minecraft.core.BlockPos pos = os.getBlockPos();
+                if (lvl == null || pos == null) return out;
+                for (net.minecraft.core.Direction dir : net.minecraft.core.Direction.values()) {
+                    var r = com.apocscode.byteblock.computer.peripheral.PeripheralRegistry
+                        .find(lvl, pos, dir);
+                    if (r != null) {
+                        out.set(com.apocscode.byteblock.computer.peripheral.PeripheralRegistry
+                                  .directionToSide(dir),
+                                LuaValue.valueOf(r.getType()));
+                    }
+                }
+                return out;
+            }
+        });
+
+        // help.peripheralMethods(side) — list method names on the peripheral on that side.
+        help.set("peripheralMethods", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue side) {
+                LuaTable out = new LuaTable();
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                net.minecraft.core.BlockPos pos = os.getBlockPos();
+                if (lvl == null || pos == null) return out;
+                var r = com.apocscode.byteblock.computer.peripheral.PeripheralRegistry
+                    .findBySide(lvl, pos, side.checkjstring());
+                if (r == null) return out;
+                org.luaj.vm2.LuaTable tbl = r.buildTable(os);
+                java.util.List<String> names = new java.util.ArrayList<>();
+                for (LuaValue k = tbl.next(LuaValue.NIL).arg1();
+                     !k.isnil();
+                     k = tbl.next(k).arg1()) {
+                    if (k.isstring()) names.add(k.tojstring());
+                }
+                java.util.Collections.sort(names);
+                for (int i = 0; i < names.size(); i++) {
+                    out.set(i + 1, LuaValue.valueOf(names.get(i)));
+                }
+                return out;
+            }
+        });
+
         globals.set("help", help);
     }
 

@@ -527,6 +527,36 @@ public class MonitorBlockEntity extends BlockEntity {
         termMarkDirty();
     }
 
+    /** CC blit: per-char palette indices encoded as hex digits (0-9, a-f). */
+    public void termBlit(String text, String fgHex, String bgHex) {
+        if (text == null || text.isEmpty()) return;
+        if (fgHex == null) fgHex = "";
+        if (bgHex == null) bgHex = "";
+        int n = text.length();
+        for (int i = 0; i < n; i++) {
+            if (termCursorX < 0 || termCursorX >= TEXT_COLS
+                    || termCursorY < 0 || termCursorY >= TEXT_ROWS) {
+                termCursorX++;
+                continue;
+            }
+            int fgIdx = hexDigit(i < fgHex.length() ? fgHex.charAt(i) : '0', termFg);
+            int bgIdx = hexDigit(i < bgHex.length() ? bgHex.charAt(i) : 'f', termBg);
+            int off = termCursorY * TEXT_COLS + termCursorX;
+            textChars[off] = text.charAt(i);
+            textFg[off] = (byte) (fgIdx & 0xF);
+            textBg[off] = (byte) (bgIdx & 0xF);
+            termCursorX++;
+        }
+        termMarkDirty();
+    }
+
+    private static int hexDigit(char c, int fallback) {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return fallback;
+    }
+
     /** Scroll the buffer vertically by n rows (positive = up). */
     public void termScroll(int n) {
         if (n == 0 || n >= TEXT_ROWS || -n >= TEXT_ROWS) {

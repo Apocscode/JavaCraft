@@ -161,6 +161,15 @@ public class MonitorPeripheralAdapter implements IPeripheralAdapter {
             }
         });
 
+        // monitor.blit(text, fgHex, bgHex) — CC-style colored write at the cursor.
+        t.set("blit", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                origin.termBlit(a.checkjstring(1), a.checkjstring(2), a.checkjstring(3));
+                origin.termFlush();
+                return LuaValue.NIL;
+            }
+        });
+
         // getTouchPos() -> x, y  (or nil if no touch yet)
         t.set("getTouchPos", new VarArgFunction() {
             @Override public Varargs invoke(Varargs a) {
