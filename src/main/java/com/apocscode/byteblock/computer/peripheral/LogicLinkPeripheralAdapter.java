@@ -42,6 +42,7 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
     private static Class<?> clsMotorBE;     // CreativeLogicMotorBlockEntity
     private static Class<?> clsDriveBE;     // LogicDriveBlockEntity
     private static Class<?> clsRedstoneBE;  // RedstoneControllerBlockEntity
+    private static Class<?> clsTrainCtrlBE; // TrainControllerBlockEntity
 
     // Hub BE — direct methods
     private static Method mIsLinked;
@@ -137,6 +138,19 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
     private static Method mRedstoneSetAllOutputs;
     private static Method mRedstoneClearChannels;
 
+    // Train Controller — reflective peripheral proxy
+    private static Constructor<?> ctorTrainCtrl;
+    private static Method mTcGetTrains;
+    private static Method mTcGetTrain;
+    private static Method mTcGetStations;
+    private static Method mTcGetSignals;
+    private static Method mTcGetObservers;
+    private static Method mTcGetNetworkOverview;
+    private static Method mTcGetTrainCount;
+    private static Method mTcGetRefreshInterval;
+    private static Method mTcSetRefreshInterval;
+    private static Method mTcRefresh;
+
     // ══════════════════════════════════════════════════════════════════════
     // IPeripheralAdapter implementation
     // ══════════════════════════════════════════════════════════════════════
@@ -151,7 +165,8 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
             || (clsSensorBE   != null && clsSensorBE.isInstance(be))
             || (clsMotorBE    != null && clsMotorBE.isInstance(be))
             || (clsDriveBE    != null && clsDriveBE.isInstance(be))
-            || (clsRedstoneBE != null && clsRedstoneBE.isInstance(be));
+            || (clsRedstoneBE != null && clsRedstoneBE.isInstance(be))
+            || (clsTrainCtrlBE != null && clsTrainCtrlBE.isInstance(be));
     }
 
     @Override
@@ -162,6 +177,7 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
         if (clsMotorBE    != null && clsMotorBE.isInstance(be))     return "creative_logic_motor";
         if (clsDriveBE    != null && clsDriveBE.isInstance(be))     return "logic_drive";
         if (clsRedstoneBE != null && clsRedstoneBE.isInstance(be)) return "redstone_controller";
+        if (clsTrainCtrlBE != null && clsTrainCtrlBE.isInstance(be)) return "train_controller";
         return "unknown";
     }
 
@@ -173,6 +189,7 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
         if (clsMotorBE    != null && clsMotorBE.isInstance(be))     return buildMotorTable(be);
         if (clsDriveBE    != null && clsDriveBE.isInstance(be))     return buildDriveTable(be);
         if (clsRedstoneBE != null && clsRedstoneBE.isInstance(be)) return buildRedstoneTable(be);
+        if (clsTrainCtrlBE != null && clsTrainCtrlBE.isInstance(be)) return buildTrainCtrlTable(be);
         return new LuaTable();
     }
 
@@ -971,6 +988,74 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
     }
 
     // ══════════════════════════════════════════════════════════════════════
+    // Train Controller (reflective proxy of TrainControllerPeripheral)
+    // ══════════════════════════════════════════════════════════════════════
+
+    private LuaTable buildTrainCtrlTable(BlockEntity be) {
+        LuaTable t = new LuaTable();
+        Object peri = null;
+        if (ctorTrainCtrl != null) {
+            try { peri = ctorTrainCtrl.newInstance(be); } catch (Exception ignored) {}
+        }
+        final Object peripheral = peri;
+
+        addResult0(t, "getTrains",          peripheral, mTcGetTrains);
+        addResult0(t, "getStations",        peripheral, mTcGetStations);
+        addResult0(t, "getSignals",         peripheral, mTcGetSignals);
+        addResult0(t, "getObservers",       peripheral, mTcGetObservers);
+        addResult0(t, "getNetworkOverview", peripheral, mTcGetNetworkOverview);
+        addResult1S(t, "getTrain",          peripheral, mTcGetTrain);
+
+        t.set("getTrainCount", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                if (peripheral == null || mTcGetTrainCount == null) return LuaValue.valueOf(0);
+                try { return LuaValue.valueOf((int) mTcGetTrainCount.invoke(peripheral)); }
+                catch (Exception e) { return LuaValue.valueOf(0); }
+            }
+        });
+
+        t.set("getRefreshInterval", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                if (peripheral == null || mTcGetRefreshInterval == null) return LuaValue.valueOf(20);
+                try { return LuaValue.valueOf((int) mTcGetRefreshInterval.invoke(peripheral)); }
+                catch (Exception e) { return LuaValue.valueOf(20); }
+            }
+        });
+
+        t.set("setRefreshInterval", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue n) {
+                if (peripheral != null && mTcSetRefreshInterval != null) {
+                    try { mTcSetRefreshInterval.invoke(peripheral, n.checkint()); } catch (Exception ignored) {}
+                }
+                return LuaValue.NONE;
+            }
+        });
+
+        t.set("refresh", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                if (peripheral != null && mTcRefresh != null) {
+                    try { mTcRefresh.invoke(peripheral); } catch (Exception ignored) {}
+                }
+                return LuaValue.NONE;
+            }
+        });
+
+        // getPosition() — convenience
+        t.set("getPosition", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                BlockPos pos = be.getBlockPos();
+                LuaTable tbl = new LuaTable();
+                tbl.set("x", LuaValue.valueOf(pos.getX()));
+                tbl.set("y", LuaValue.valueOf(pos.getY()));
+                tbl.set("z", LuaValue.valueOf(pos.getZ()));
+                return tbl;
+            }
+        });
+
+        return t;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
     // Redstone Controller
     // ══════════════════════════════════════════════════════════════════════
 
@@ -1071,6 +1156,7 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
             clsMotorBE    = safeClass("com.apocscode.logiclink.block.CreativeLogicMotorBlockEntity");
             clsDriveBE    = safeClass("com.apocscode.logiclink.block.LogicDriveBlockEntity");
             clsRedstoneBE = safeClass("com.apocscode.logiclink.block.RedstoneControllerBlockEntity");
+            clsTrainCtrlBE = safeClass("com.apocscode.logiclink.block.TrainControllerBlockEntity");
 
             // ── Hub BE (direct) ────────────────────────────────────────────
             mIsLinked            = clsHubBE.getMethod("isLinked");
@@ -1189,6 +1275,24 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
                 mRedstoneGetOutput      = safeMethod(clsRedstoneBE, "getOutput",     String.class, String.class);
                 mRedstoneRemoveChannel  = safeMethod(clsRedstoneBE, "removeChannel", String.class, String.class);
                 mRedstoneClearChannels  = safeMethod(clsRedstoneBE, "clearChannels");
+            }
+
+            // ── Train Controller (reflective peripheral proxy) ────────────
+            if (clsTrainCtrlBE != null) {
+                Class<?> clsTcPeri = safeClass("com.apocscode.logiclink.peripheral.TrainControllerPeripheral");
+                if (clsTcPeri != null) {
+                    try { ctorTrainCtrl = clsTcPeri.getConstructor(clsTrainCtrlBE); } catch (Exception ignored) {}
+                    mTcGetTrains          = safeMethod(clsTcPeri, "getTrains");
+                    mTcGetTrain           = safeMethod(clsTcPeri, "getTrain", String.class);
+                    mTcGetStations        = safeMethod(clsTcPeri, "getStations");
+                    mTcGetSignals         = safeMethod(clsTcPeri, "getSignals");
+                    mTcGetObservers       = safeMethod(clsTcPeri, "getObservers");
+                    mTcGetNetworkOverview = safeMethod(clsTcPeri, "getNetworkOverview");
+                    mTcGetTrainCount      = safeMethod(clsTcPeri, "getTrainCount");
+                    mTcGetRefreshInterval = safeMethod(clsTcPeri, "getRefreshInterval");
+                    mTcSetRefreshInterval = safeMethod(clsTcPeri, "setRefreshInterval", int.class);
+                    mTcRefresh            = safeMethod(clsTcPeri, "refresh");
+                }
             }
 
             return true;

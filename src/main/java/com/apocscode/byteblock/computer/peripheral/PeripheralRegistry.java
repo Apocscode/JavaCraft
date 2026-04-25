@@ -47,6 +47,9 @@ public class PeripheralRegistry {
         if (ModList.get().isLoaded("create")) {
             register(new CreatePeripheralAdapter());
         }
+        if (ModList.get().isLoaded("fxntstorage")) {
+            register(new CreateStoragePeripheralAdapter());
+        }
     }
 
     /**
