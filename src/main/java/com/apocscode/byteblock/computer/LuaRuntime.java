@@ -592,6 +592,69 @@ public class LuaRuntime {
         colors.set("red",       LuaValue.valueOf(16384));
         colors.set("black",     LuaValue.valueOf(32768));
 
+        // colors.combine(c1, c2, ...) — bitwise OR of color bitmasks.
+        colors.set("combine", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                int out = 0;
+                for (int i = 1; i <= a.narg(); i++) out |= a.checkint(i);
+                return LuaValue.valueOf(out);
+            }
+        });
+        // colors.subtract(set, c1, c2, ...) — clears the listed bits from set.
+        colors.set("subtract", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                int set = a.checkint(1);
+                for (int i = 2; i <= a.narg(); i++) set &= ~a.checkint(i);
+                return LuaValue.valueOf(set);
+            }
+        });
+        // colors.test(set, color) — true iff every bit in `color` is set in `set`.
+        colors.set("test", new TwoArgFunction() {
+            @Override public LuaValue call(LuaValue set, LuaValue color) {
+                int s = set.checkint(); int c = color.checkint();
+                return LuaValue.valueOf((s & c) == c);
+            }
+        });
+        // colors.packRGB(r, g, b)  — 0..1 floats → 24-bit int.
+        VarArgFunction packRGB = new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                int r = (int) Math.round(Math.max(0.0, Math.min(1.0, a.checkdouble(1))) * 255.0);
+                int g = (int) Math.round(Math.max(0.0, Math.min(1.0, a.checkdouble(2))) * 255.0);
+                int b = (int) Math.round(Math.max(0.0, Math.min(1.0, a.checkdouble(3))) * 255.0);
+                return LuaValue.valueOf((r << 16) | (g << 8) | b);
+            }
+        };
+        colors.set("packRGB", packRGB);
+        colors.set("rgb8", packRGB);
+        // colors.unpackRGB(rgb) — 24-bit int → 3 floats (0..1).
+        colors.set("unpackRGB", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue v) {
+                int rgb = v.checkint();
+                return LuaValue.varargsOf(new LuaValue[] {
+                    LuaValue.valueOf(((rgb >> 16) & 0xFF) / 255.0),
+                    LuaValue.valueOf(((rgb >>  8) & 0xFF) / 255.0),
+                    LuaValue.valueOf(( rgb        & 0xFF) / 255.0)
+                }).arg1();
+            }
+        });
+        // colors.toBlit(color) — palette bitmask → single hex char ('0'..'f').
+        colors.set("toBlit", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue v) {
+                int idx = Integer.numberOfTrailingZeros(Math.max(1, v.checkint())) & 0xF;
+                return LuaValue.valueOf(Integer.toHexString(idx));
+            }
+        });
+        // colors.fromBlit(ch) — single hex char → palette bitmask.
+        colors.set("fromBlit", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue v) {
+                String s = v.checkjstring();
+                if (s.isEmpty()) return LuaValue.NIL;
+                int idx = Character.digit(s.charAt(0), 16);
+                if (idx < 0) return LuaValue.NIL;
+                return LuaValue.valueOf(1 << idx);
+            }
+        });
+
         globals.set("colors", colors);
         globals.set("colours", colors);
     }
@@ -1085,6 +1148,41 @@ public class LuaRuntime {
         });
 
         globals.set("rednet", rednet);
+
+        // rednet.receive([protocolFilter [, timeout]]) — yields until a matching
+        // rednet_message arrives; returns sender, message, protocol. nil on timeout.
+        // Implemented in Lua so it can call os.pullEvent (a coroutine yield).
+        execute(
+            "function rednet.receive(protocolFilter, timeout)\n" +
+            "  local timer\n" +
+            "  if type(protocolFilter) == 'number' and timeout == nil then\n" +
+            "    timeout = protocolFilter; protocolFilter = nil\n" +
+            "  end\n" +
+            "  if timeout then timer = os.startTimer(timeout) end\n" +
+            "  while true do\n" +
+            "    local ev, sender, payload, _ch = os.pullEvent()\n" +
+            "    if ev == 'rednet_message' then\n" +
+            "      local proto, msg\n" +
+            "      if type(payload) == 'string' then\n" +
+            "        local i = string.find(payload, ':', 1, true)\n" +
+            "        if i then proto = string.sub(payload, 1, i-1); msg = string.sub(payload, i+1)\n" +
+            "        else proto = nil; msg = payload end\n" +
+            "      else msg = payload end\n" +
+            "      if not protocolFilter or protocolFilter == proto then\n" +
+            "        if timer then os.cancelTimer(timer) end\n" +
+            "        return sender, msg, proto\n" +
+            "      end\n" +
+            "    elseif ev == 'timer' and sender == timer then\n" +
+            "      return nil\n" +
+            "    elseif ev == 'terminate' then\n" +
+            "      error('Terminated', 0)\n" +
+            "    end\n" +
+            "  end\n" +
+            "end\n" +
+            "function rednet.unhost(protocol)\n" +
+            "  -- placeholder: ByteBlock host map is append-only on disk.\n" +
+            "end\n",
+            "=rednet.receive");
     }
 
     private void installRedstoneAPI() {
@@ -4130,6 +4228,16 @@ public class LuaRuntime {
                     tb.setCursorPos(x, y);
                     pushOutput(" ");
                 }
+                return NONE;
+            }
+        });
+        // paintutils.writeText(text [, fg [, bg]]) — writes text at cursor; optional colors.
+        p.set("writeText", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                String s = a.checkjstring(1);
+                if (!a.isnil(2)) tb.setTextColor(ccColorToIndex(a.checkint(2)));
+                if (!a.isnil(3)) tb.setBackgroundColor(ccColorToIndex(a.checkint(3)));
+                pushOutput(s);
                 return NONE;
             }
         });
