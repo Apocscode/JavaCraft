@@ -311,6 +311,34 @@ These have no CC counterpart and expose ByteBlock's hardware:
 | `glasses`   | Build a HUD widget list (`text`, `box`, `progress`, `image`, `pie`, `compass`, `minimap`, `graph`) **plus** `glasses.canvas()` for true-color free-form 2D rendering at absolute screen coords (`pixel`, `line`, `rect`, `circle`, `triangle`, `poly`, `text`, `gradient`, `bezier`, `image`). |
 | `disk`      | CC-compatible API surface backed by adjacent **Drive** blocks (mount path, label, eject). |
 
+### Java REPL (BeanShell)
+
+In addition to Lua, ByteBlock terminals can run **Java syntax** through a sandboxed BeanShell 2.0 interpreter:
+
+```
+> java
+java> for (int i = 0; i < 5; i++) println("hello " + i);
+java> term.setTextColor(4); term.write("yellow!");
+java> lua("robot.forward(); robot.dig()");
+java> lua("glasses.canvas():circle(50,50,20,0xFF0000):add(); glasses.flush()");
+java> exit
+```
+
+Shell commands:
+
+| Command | What it does |
+|---------|--------------|
+| `java`            | Open interactive Java REPL |
+| `java <file.bsh>` | Open REPL pre-running a script file |
+| `javarun <file.bsh>` | Same as `run <file.bsh>` — execute a Java/BeanShell script |
+| `run <file.bsh>`  | Auto-detected by extension (`.lua` → Lua, `.bsh`/`.java` → Java) |
+
+In-script helpers: `print(x)`, `println(x)`, `sleep(seconds)`, `term.*`, `os`, plus `lua("…")` which delegates to a shared `LuaRuntime` so you can drive every ByteBlock API (`robot`, `drone`, `glasses`, `bluetooth`, `redstone`, …) from Java.
+
+**Sandbox blocks:** `java.io.File*`, `java.lang.Runtime`, `ProcessBuilder`, `java.lang.reflect.*`, `java.lang.invoke.*`, `ClassLoader`, `SecurityManager`, `Thread`/`ThreadGroup`, `java.net.*`, `java.nio.file.*`, `java.security.*`, `javax.script.*`, `javax.tools.*`, `sun.*`, `jdk.internal.*`, `com.sun.*`, plus Minecraft/NeoForge internals.
+
+**Watchdog:** scripts are interrupted after 5000 ms by default (configurable per OS instance via `JavaRuntime.scriptTimeoutMs`).
+
 ### Bundled Lua libraries
 
 These ship inside the mod jar and are auto-registered with `package.preload`, so they Just Work via `require`:

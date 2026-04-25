@@ -70,6 +70,9 @@ dependencies {
     // LuaJ — pure-Java Lua 5.2 interpreter (shadow-relocated to avoid conflicts)
     implementation "org.luaj:luaj-jse:3.0.1"
     shadow "org.luaj:luaj-jse:3.0.1"
+    // BeanShell — pure-Java Java-syntax interpreter for the in-game `java` REPL
+    implementation "org.apache-extras.beanshell:bsh:2.0b6"
+    shadow "org.apache-extras.beanshell:bsh:2.0b6"
 
     // Testing
     testImplementation 'org.junit.jupiter:junit-jupiter:5.11.0'
@@ -125,24 +128,30 @@ tasks.register('copyLuaJForDev', Copy) {
     include 'org/**/*.class', 'lua/**'
     exclude 'luajc*'
 }
-tasks.named('classes').configure { finalizedBy 'copyLuaJForDev' }
+tasks.register('copyBeanShellForDev', Copy) {
+    from(zipTree(configurations.shadow.files.find { it.name.startsWith('bsh') }))
+    into(sourceSets.main.output.classesDirs.singleFile)
+    include 'bsh/**/*.class'
+}
+tasks.named('classes').configure { finalizedBy 'copyLuaJForDev', 'copyBeanShellForDev' }
 
 // Ensure all tasks that use build/classes/java/main declare the dependency
 afterEvaluate {
     ['compileTestJava', 'shadowJar'].each { taskName ->
-        tasks.findByName(taskName)?.dependsOn('copyLuaJForDev')
+        tasks.findByName(taskName)?.dependsOn('copyLuaJForDev', 'copyBeanShellForDev')
     }
     tasks.matching { it.name.startsWith('run') || it.name.startsWith('writeMinecraft') }.configureEach {
-        dependsOn 'copyLuaJForDev'
+        dependsOn 'copyLuaJForDev', 'copyBeanShellForDev'
     }
 }
 
-// Shadow: relocate LuaJ to avoid conflicts with other mods (e.g. TACZ/Figura)
+// Shadow: relocate LuaJ + BeanShell to avoid conflicts with other mods
 shadowJar {
-    dependsOn 'copyLuaJForDev'
+    dependsOn 'copyLuaJForDev', 'copyBeanShellForDev'
     archiveClassifier.set('')
     configurations = [project.configurations.shadow]
     relocate 'org.luaj', 'com.apocscode.byteblock.shadow.luaj'
+    relocate 'bsh', 'com.apocscode.byteblock.shadow.bsh'
     exclude 'luajc*'
     exclude 'META-INF/services/javax.script.ScriptEngineFactory'
 }

@@ -128,6 +128,8 @@ public class ShellProgram extends OSProgram {
             case "rs", "redstone" -> cmdRedstone(args);
             case "run" -> cmdRun(args);
             case "lua" -> cmdLua(args);
+            case "java" -> cmdJava(args);
+            case "javarun" -> cmdJavaRun(args);
             case "mkshortcut" -> cmdMkshortcut(args);
             case "puzzle" -> cmdPuzzle(args);
             case "ide" -> cmdIde(args);
@@ -466,8 +468,10 @@ public class ShellProgram extends OSProgram {
             appendOutput("File not found: " + path + "\n");
         } else if (path.endsWith(".lua")) {
             os.launchProgram(new LuaShellProgram(path));
+        } else if (path.endsWith(".bsh") || path.endsWith(".java")) {
+            os.launchProgram(new JavaShellProgram(path));
         } else {
-            appendOutput("(Script execution not yet available \u2014 Groovy engine pending)\n");
+            appendOutput("(Unknown script type \u2014 use .lua or .bsh)\n");
             appendOutput("File contents (" + content.length() + " bytes):\n");
             appendOutput(content);
             if (!content.endsWith("\n")) appendOutput("\n");
@@ -481,6 +485,25 @@ public class ShellProgram extends OSProgram {
             String path = resolvePath(args);
             os.launchProgram(new LuaShellProgram(path));
         }
+    }
+
+    private void cmdJava(String args) {
+        if (args.isEmpty()) {
+            os.launchProgram(new JavaShellProgram());
+        } else {
+            String path = resolvePath(args);
+            os.launchProgram(new JavaShellProgram(path));
+        }
+    }
+
+    private void cmdJavaRun(String args) {
+        if (args.isEmpty()) { appendOutput("Usage: javarun <file.bsh>\n"); return; }
+        String path = resolvePath(args);
+        if (os.getFileSystem().readFile(path) == null) {
+            appendOutput("File not found: " + path + "\n");
+            return;
+        }
+        os.launchProgram(new JavaShellProgram(path));
     }
 
     private void cmdPuzzle(String args) {
