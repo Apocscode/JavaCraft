@@ -1125,6 +1125,34 @@ public class LuaRuntime {
             }
         });
 
+        // rednet.unhost(protocol) — remove all host entries this computer
+        // registered for the given protocol. CC semantics: only affects entries
+        // owned by the local computer (matching id), so other peers' entries on
+        // the shared host file are preserved.
+        rednet.set("unhost", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue protocol) {
+                String key = "/Windows/System32/rednet_hosts";
+                String content = os.getFileSystem().readFile(key);
+                if (content == null) return NONE;
+                String myId = os.getComputerId().toString();
+                String wanted = protocol.checkjstring();
+                StringBuilder kept = new StringBuilder();
+                boolean first = true;
+                for (String line : content.split("\n")) {
+                    if (line.isEmpty()) continue;
+                    String[] parts = line.split("=", 3);
+                    // Drop lines that match (this computer, this protocol).
+                    if (parts.length >= 3 && parts[0].equals(wanted) && parts[2].equals(myId)) continue;
+                    if (!first) kept.append('\n');
+                    kept.append(line);
+                    first = false;
+                }
+                os.getFileSystem().writeFile(key, kept.toString());
+                return NONE;
+            }
+        });
+
         // rednet.lookup(protocol) — find hosts
         rednet.set("lookup", new OneArgFunction() {
             @Override
@@ -1178,9 +1206,6 @@ public class LuaRuntime {
             "      error('Terminated', 0)\n" +
             "    end\n" +
             "  end\n" +
-            "end\n" +
-            "function rednet.unhost(protocol)\n" +
-            "  -- placeholder: ByteBlock host map is append-only on disk.\n" +
             "end\n",
             "=rednet.receive");
     }
