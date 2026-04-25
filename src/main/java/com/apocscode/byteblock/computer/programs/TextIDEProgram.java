@@ -74,12 +74,28 @@ public class TextIDEProgram extends OSProgram {
         void undo() {
             if (undoPointer <= 0) return;
             undoPointer--;
-            List<String> snapshot = undoStack.get(undoPointer);
+            applySnapshot(undoStack.get(undoPointer));
+        }
+
+        void redo() {
+            if (undoPointer >= undoStack.size() - 1) return;
+            undoPointer++;
+            applySnapshot(undoStack.get(undoPointer));
+        }
+
+        private void applySnapshot(List<String> snapshot) {
             lines.clear();
             for (String s : snapshot) lines.add(new StringBuilder(s));
             cursorRow = Math.min(cursorRow, lines.size() - 1);
             cursorCol = Math.min(cursorCol, lines.get(cursorRow).length());
             modified = true;
+        }
+
+        String commentPrefix() {
+            String lang = getLang();
+            if ("Lua".equals(lang)) return "-- ";
+            if ("Java".equals(lang)) return "// ";
+            return "# ";
         }
 
         String tabLabel() {
@@ -93,7 +109,7 @@ public class TextIDEProgram extends OSProgram {
 
     // ── Mode ────────────────────────────────────────────────
 
-    enum Mode { EDITING, FIND, GOTO_LINE, NEW_FILE }
+    enum Mode { EDITING, FIND, GOTO_LINE, NEW_FILE, REPLACE_FIND, REPLACE_WITH }
 
     // ── State ───────────────────────────────────────────────
 
@@ -107,6 +123,7 @@ public class TextIDEProgram extends OSProgram {
 
     // Find state
     private String findQuery = "";
+    private String replaceFindBuf = ""; // captured between REPLACE_FIND and REPLACE_WITH
 
     // Selection (anchor stays fixed, cursor moves)
     private boolean selActive;
@@ -389,10 +406,23 @@ public class TextIDEProgram extends OSProgram {
                 case 65 -> selectAll();                   // Ctrl+A
                 case 69 -> toggleSidebar();               // Ctrl+E
                 case 70 -> enterMode(Mode.FIND);          // Ctrl+F
-                case 90 -> tab().undo();                  // Ctrl+Z
+                case 72 -> enterMode(Mode.REPLACE_FIND);  // Ctrl+H find/replace
+                case 90 -> { if (shift) tab().redo(); else tab().undo(); } // Ctrl+Z / Ctrl+Shift+Z
+                case 89 -> tab().redo();                  // Ctrl+Y redo
                 case 79 -> enterMode(Mode.NEW_FILE);      // Ctrl+O
+                case 68 -> duplicateLine();               // Ctrl+D
+                case 71 -> gistPush();                    // Ctrl+G push to gist
+                case 47 -> toggleComment();               // Ctrl+/ comment toggle
             }
             return;
+        }
+
+        boolean alt = (mods & 4) != 0;
+        if (alt) {
+            switch (key) {
+                case 265 -> { moveLineUp(); return; }    // Alt+Up
+                case 264 -> { moveLineDown(); return; }  // Alt+Down
+            }
         }
 
         ctxMenuOpen = false;
@@ -498,6 +528,15 @@ public class TextIDEProgram extends OSProgram {
                     case FIND      -> doFind(input);
                     case GOTO_LINE -> doGotoLine(input);
                     case NEW_FILE  -> doNewFile(input);
+                    case REPLACE_FIND -> {
+                        replaceFindBuf = input;
+                        modeInput.setLength(0);
+                        mode = Mode.REPLACE_WITH;
+                    }
+                    case REPLACE_WITH -> {
+                        doReplaceAll(replaceFindBuf, input);
+                        mode = Mode.EDITING;
+                    }
                     default -> {}
                 }
             }
@@ -915,9 +954,202 @@ public class TextIDEProgram extends OSProgram {
         if (t.filePath.endsWith(".lua")) {
             os.launchProgram(new LuaShellProgram(t.filePath));
             setStatus("Running: " + t.filePath);
+        } else if (t.filePath.endsWith(".bsh") || t.filePath.endsWith(".java")) {
+            os.launchProgram(new JavaShellProgram(t.filePath));
+            setStatus("Running: " + t.filePath);
         } else {
-            setStatus("Only .lua files can be run (F5)");
+            setStatus("Only .lua / .bsh / .java can be run (F5)");
         }
+    }
+
+    // ── Editing helpers ─────────────────────────────────────
+
+    private void duplicateLine() {
+        Tab t = tab();
+        t.pushUndo();
+        if (hasSelection()) {
+            // Duplicate selection range whole-line: simpler — duplicate cursor row
+        }
+        String src = t.lines.get(t.cursorRow).toString();
+        t.lines.add(t.cursorRow + 1, new StringBuilder(src));
+        t.cursorRow++;
+        t.modified = true;
+        setStatus("Line duplicated");
+    }
+
+    private void moveLineUp() {
+        Tab t = tab();
+        if (t.cursorRow <= 0) return;
+        t.pushUndo();
+        StringBuilder cur = t.lines.remove(t.cursorRow);
+        t.lines.add(t.cursorRow - 1, cur);
+        t.cursorRow--;
+        t.modified = true;
+        ensureCursorVisible();
+    }
+
+    private void moveLineDown() {
+        Tab t = tab();
+        if (t.cursorRow >= t.lines.size() - 1) return;
+        t.pushUndo();
+        StringBuilder cur = t.lines.remove(t.cursorRow);
+        t.lines.add(t.cursorRow + 1, cur);
+        t.cursorRow++;
+        t.modified = true;
+        ensureCursorVisible();
+    }
+
+    private void toggleComment() {
+        Tab t = tab();
+        String prefix = t.commentPrefix();
+        String trimmed = prefix.trim();
+        int r0, r1;
+        if (hasSelection()) {
+            r0 = Math.min(selAnchorRow, t.cursorRow);
+            r1 = Math.max(selAnchorRow, t.cursorRow);
+        } else { r0 = r1 = t.cursorRow; }
+        // Decide: if every non-blank line in range starts with prefix → uncomment, else comment.
+        boolean allCommented = true;
+        boolean anyContent = false;
+        for (int r = r0; r <= r1; r++) {
+            String s = t.lines.get(r).toString();
+            String ls = s.stripLeading();
+            if (ls.isEmpty()) continue;
+            anyContent = true;
+            if (!ls.startsWith(trimmed)) { allCommented = false; break; }
+        }
+        t.pushUndo();
+        for (int r = r0; r <= r1; r++) {
+            StringBuilder sb = t.lines.get(r);
+            String s = sb.toString();
+            if (s.stripLeading().isEmpty()) continue;
+            if (allCommented && anyContent) {
+                int idx = s.indexOf(trimmed);
+                if (idx >= 0) {
+                    int rm = trimmed.length();
+                    if (idx + rm < s.length() && s.charAt(idx + rm) == ' ') rm++;
+                    sb.delete(idx, idx + rm);
+                }
+            } else {
+                int indent = 0;
+                while (indent < s.length() && s.charAt(indent) == ' ') indent++;
+                sb.insert(indent, prefix);
+            }
+        }
+        t.modified = true;
+        clampCol();
+        setStatus((allCommented && anyContent) ? "Uncommented" : "Commented");
+    }
+
+    private void doReplaceAll(String findStr, String replaceStr) {
+        if (findStr.isEmpty()) { setStatus("Empty find string"); return; }
+        Tab t = tab();
+        t.pushUndo();
+        int count = 0;
+        for (int r = 0; r < t.lines.size(); r++) {
+            StringBuilder sb = t.lines.get(r);
+            String s = sb.toString();
+            int idx = 0;
+            StringBuilder out = new StringBuilder();
+            while (true) {
+                int hit = s.indexOf(findStr, idx);
+                if (hit < 0) { out.append(s, idx, s.length()); break; }
+                out.append(s, idx, hit).append(replaceStr);
+                idx = hit + findStr.length();
+                count++;
+            }
+            if (count > 0) sb.replace(0, sb.length(), out.toString());
+        }
+        if (count > 0) t.modified = true;
+        clampCol();
+        setStatus("Replaced " + count + " occurrence" + (count == 1 ? "" : "s"));
+    }
+
+    private void gistPush() {
+        save();
+        Tab t = tab();
+        String content = String.join("\n", t.lines.stream().map(StringBuilder::toString).toList());
+        String name = t.filePath;
+        int slash = name.lastIndexOf('/');
+        if (slash >= 0) name = name.substring(slash + 1);
+        String token = readSettingString("gist.token");
+        if (token == null || token.isEmpty()) {
+            setStatus("Set settings.gist.token first (try: settings set gist.token <PAT>)");
+            return;
+        }
+        setStatus("Pushing to gist...");
+        final String fName = name;
+        final String fContent = content;
+        new Thread(() -> {
+            try {
+                String body = "{\"public\":false,\"files\":{\"" + jsonEsc(fName) + "\":{\"content\":\"" + jsonEsc(fContent) + "\"}}}";
+                java.net.http.HttpClient cli = java.net.http.HttpClient.newHttpClient();
+                java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("https://api.github.com/gists"))
+                    .header("Accept", "application/vnd.github+json")
+                    .header("Authorization", "Bearer " + token)
+                    .header("Content-Type", "application/json")
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+                java.net.http.HttpResponse<String> resp = cli.send(req, java.net.http.HttpResponse.BodyHandlers.ofString());
+                if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
+                    String b = resp.body();
+                    int i = b.indexOf("\"html_url\"");
+                    String url = "";
+                    if (i >= 0) {
+                        int q1 = b.indexOf('"', i + 11);
+                        int q2 = b.indexOf('"', q1 + 1);
+                        if (q1 > 0 && q2 > q1) url = b.substring(q1 + 1, q2);
+                    }
+                    setStatus("Gist: " + (url.isEmpty() ? "OK" : url));
+                } else {
+                    setStatus("Gist push failed: HTTP " + resp.statusCode());
+                }
+            } catch (Exception e) {
+                setStatus("Gist error: " + e.getMessage());
+            }
+        }, "ide-gist-push").start();
+    }
+
+    private String readSettingString(String key) {
+        String raw = os.getFileSystem().readFile("/Users/User/.settings");
+        if (raw == null) return null;
+        // Lightweight extraction: "key":"value"
+        String needle = "\"" + key + "\"";
+        int i = raw.indexOf(needle);
+        if (i < 0) return null;
+        int colon = raw.indexOf(':', i + needle.length());
+        if (colon < 0) return null;
+        int q1 = raw.indexOf('"', colon + 1);
+        if (q1 < 0) return null;
+        StringBuilder out = new StringBuilder();
+        boolean esc = false;
+        for (int p = q1 + 1; p < raw.length(); p++) {
+            char c = raw.charAt(p);
+            if (esc) { out.append(c); esc = false; continue; }
+            if (c == '\\') { esc = true; continue; }
+            if (c == '"') break;
+            out.append(c);
+        }
+        return out.toString();
+    }
+
+    private static String jsonEsc(String s) {
+        StringBuilder sb = new StringBuilder(s.length() + 8);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '\\' -> sb.append("\\\\");
+                case '"'  -> sb.append("\\\"");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                case '\b' -> sb.append("\\b");
+                case '\f' -> sb.append("\\f");
+                default -> { if (c < 0x20) sb.append(String.format("\\u%04x", (int) c)); else sb.append(c); }
+            }
+        }
+        return sb.toString();
     }
 
     private void createShortcut() {
@@ -1215,6 +1447,12 @@ public class TextIDEProgram extends OSProgram {
         } else if (mode == Mode.NEW_FILE) {
             buf.writeAt(0, TerminalBuffer.HEIGHT - 1,
                 clip(" Open file: " + modeInput + "_  Esc:Cancel", TerminalBuffer.WIDTH));
+        } else if (mode == Mode.REPLACE_FIND) {
+            buf.writeAt(0, TerminalBuffer.HEIGHT - 1,
+                clip(" Replace find: " + modeInput + "_  Enter:Next Esc:Cancel", TerminalBuffer.WIDTH));
+        } else if (mode == Mode.REPLACE_WITH) {
+            buf.writeAt(0, TerminalBuffer.HEIGHT - 1,
+                clip(" Replace \"" + replaceFindBuf + "\" with: " + modeInput + "_  Enter:All Esc:X", TerminalBuffer.WIDTH));
         } else if (errorLine >= 0 && errorMsg != null && !errorMsg.isEmpty()) {
             buf.setTextColor(14);
             buf.writeAt(0, TerminalBuffer.HEIGHT - 1,
