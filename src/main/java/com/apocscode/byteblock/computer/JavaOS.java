@@ -61,6 +61,12 @@ public class JavaOS {
     private int nextTimerId;
     private long tickCount;
 
+    // Alarm system — fires when in-game day-time hour passes target.
+    // alarmId -> target hour (0..24, may include wrap to next day).
+    private final Map<Integer, Double> alarms = new java.util.LinkedHashMap<>();
+    private int nextAlarmId = 1;
+    private double prevWorldHour = -1;
+
     // Boot animation
     private int bootTick;
     private static final int BOOT_DURATION = 40; // 2 seconds
@@ -537,6 +543,30 @@ public class JavaOS {
             }
         }
 
+        // Fire alarms — compare current world hour against target. Fires when
+        // the hour line is crossed since the last tick, handling midnight wrap.
+        if (level != null && !alarms.isEmpty()) {
+            double curHour = (level.getDayTime() % 24000L) / 1000.0;
+            if (prevWorldHour < 0) prevWorldHour = curHour;
+            Iterator<Map.Entry<Integer, Double>> ait = alarms.entrySet().iterator();
+            while (ait.hasNext()) {
+                Map.Entry<Integer, Double> entry = ait.next();
+                double target = entry.getValue();
+                boolean fired;
+                if (prevWorldHour <= curHour) {
+                    fired = (target > prevWorldHour && target <= curHour);
+                } else {
+                    // Wrapped past midnight this tick.
+                    fired = (target > prevWorldHour || target <= curHour);
+                }
+                if (fired) {
+                    pushEvent(new OSEvent(OSEvent.Type.ALARM, entry.getKey()));
+                    ait.remove();
+                }
+            }
+            prevWorldHour = curHour;
+        }
+
         // Poll Bluetooth inbox
         BluetoothNetwork.Message msg = BluetoothNetwork.receive(computerId);
         while (msg != null) {
@@ -665,6 +695,23 @@ public class JavaOS {
         timers.remove(timerId);
     }
 
+    /**
+     * Schedule an alarm to fire when the world's day-time hour reaches the
+     * given target (0..24). Mirrors CC:Tweaked's os.setAlarm. Fires an ALARM
+     * event with the alarm id; one-shot (auto-removed on fire).
+     */
+    public int setAlarm(double targetHour) {
+        // Normalize to 0..24, wrapping negatives.
+        double hr = ((targetHour % 24.0) + 24.0) % 24.0;
+        int id = nextAlarmId++;
+        alarms.put(id, hr);
+        return id;
+    }
+
+    public void cancelAlarm(int alarmId) {
+        alarms.remove(alarmId);
+    }
+
     // --- OS Commands ---
 
     public void shutdown() {
@@ -689,7 +736,10 @@ public class JavaOS {
         foregroundProgram = null;
         eventQueue.clear();
         timers.clear();
+        alarms.clear();
         nextTimerId = 1;
+        nextAlarmId = 1;
+        prevWorldHour = -1;
         tickCount = 0;
         bootTick = 0;
         state = State.BOOT;

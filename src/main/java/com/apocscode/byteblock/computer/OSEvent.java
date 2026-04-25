@@ -21,6 +21,7 @@ public class OSEvent {
         MOUSE_DRAG_PX,  // pixel mouse drag: data[0]=button, data[1]=pixelX, data[2]=pixelY
         MOUSE_SCROLL,   // mouse scroll: data[0]=direction, data[1]=x, data[2]=y
         TIMER,          // timer fired: data[0]=timerId
+        ALARM,          // in-game alarm fired: data[0]=alarmId
         BLUETOOTH,      // BT message: data[0]=channel, data[1]=message, data[2]=senderDistance
         REDSTONE,       // redstone change
         TERMINATE,      // Ctrl+T

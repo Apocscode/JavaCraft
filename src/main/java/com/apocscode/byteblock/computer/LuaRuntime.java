@@ -479,6 +479,36 @@ public class LuaRuntime {
             }
         });
 
+        // os.setAlarm(time) — fire 'alarm' event when in-game day-time hour
+        // reaches `time` (0..24). One-shot. CC:Tweaked compatible.
+        osTable.set("setAlarm", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue arg) {
+                double t = arg.checkdouble();
+                if (t < 0 || t >= 24)
+                    throw new LuaError("Number out of range");
+                return LuaValue.valueOf(os.setAlarm(t));
+            }
+        });
+
+        // os.cancelAlarm(id) — remove a pending alarm.
+        osTable.set("cancelAlarm", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue arg) {
+                os.cancelAlarm(arg.checkint());
+                return NONE;
+            }
+        });
+
+        // os.cancelTimer(id) — already exists in CC parity gaps; provide here
+        // for symmetry. Safe to call repeatedly; no-op if id absent.
+        if (osTable.get("cancelTimer").isnil()) {
+            osTable.set("cancelTimer", new OneArgFunction() {
+                @Override public LuaValue call(LuaValue arg) {
+                    os.cancelTimer(arg.checkint());
+                    return NONE;
+                }
+            });
+        }
+
         osTable.set("getComputerID", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.valueOf(os.getComputerId().hashCode() & 0x7FFFFFFF); }
         });

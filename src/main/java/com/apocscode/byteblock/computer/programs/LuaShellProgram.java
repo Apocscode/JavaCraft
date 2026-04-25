@@ -106,6 +106,7 @@ public class LuaShellProgram extends OSProgram {
             case MOUSE_DRAG    -> lua.queueEvent("mouse_drag", event.getInt(0), event.getInt(1), event.getInt(2));
             case MOUSE_SCROLL  -> lua.queueEvent("mouse_scroll", event.getInt(0), event.getInt(1), event.getInt(2));
             case TIMER         -> lua.queueEvent("timer", event.getInt(0));
+            case ALARM         -> lua.queueEvent("alarm", event.getInt(0));
             case BLUETOOTH     -> lua.queueEvent("rednet_message", event.getInt(0), event.getData(1), event.getInt(2));
             case REDSTONE      -> lua.queueEvent("redstone");
             case PASTE         -> lua.queueEvent("paste", event.getString(0));
