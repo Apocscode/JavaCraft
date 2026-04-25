@@ -2446,17 +2446,35 @@ public class LuaRuntime {
             }
         });
 
-        // peripheral.find(type) → method table | nil
-        // Scans all 6 sides, returns the first peripheral of the requested type.
-        peripheral.set("find", new OneArgFunction() {
+        // peripheral.find(type [, filter]) — returns wrap tables for every
+        // attached peripheral matching the type, as multiple return values.
+        // Optional filter(name, wrapped) -> bool further narrows the set.
+        // CC semantics: returns nothing when no matches (so `local p = ...` is nil).
+        peripheral.set("find", new VarArgFunction() {
             @Override
-            public LuaValue call(LuaValue type) {
+            public Varargs invoke(Varargs args) {
+                String wantedType = args.checkjstring(1);
+                LuaValue filter = args.arg(2);
                 net.minecraft.world.level.Level lvl = os.getLevel();
                 net.minecraft.core.BlockPos pos = os.getBlockPos();
-                if (lvl == null || pos == null) return LuaValue.NIL;
-                var result = com.apocscode.byteblock.computer.peripheral.PeripheralRegistry
-                        .findByType(lvl, pos, type.checkjstring());
-                return result != null ? result.buildTable(os) : LuaValue.NIL;
+                if (lvl == null || pos == null) return NONE;
+                java.util.List<LuaValue> matches = new java.util.ArrayList<>();
+                for (net.minecraft.core.Direction dir : net.minecraft.core.Direction.values()) {
+                    var result = com.apocscode.byteblock.computer.peripheral.PeripheralRegistry
+                            .find(lvl, pos, dir);
+                    if (result == null) continue;
+                    if (!wantedType.equals(result.getType())) continue;
+                    LuaTable tbl = result.buildTable(os);
+                    if (filter.isfunction()) {
+                        String name = com.apocscode.byteblock.computer.peripheral.PeripheralRegistry
+                                .directionToSide(dir);
+                        LuaValue keep = filter.call(LuaValue.valueOf(name), tbl);
+                        if (!keep.toboolean()) continue;
+                    }
+                    matches.add(tbl);
+                }
+                if (matches.isEmpty()) return NONE;
+                return LuaValue.varargsOf(matches.toArray(new LuaValue[0]));
             }
         });
 
