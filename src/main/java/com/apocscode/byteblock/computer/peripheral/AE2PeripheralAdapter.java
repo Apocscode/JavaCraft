@@ -361,6 +361,76 @@ public class AE2PeripheralAdapter implements IPeripheralAdapter {
             }
         });
 
+        // ── listCraftableFluids() → [{name, displayName}] ─────────────────
+        t.set("listCraftableFluids", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                LuaTable result = new LuaTable();
+                if (mGetCraftables == null || allKeyFilter == null) return result;
+                try {
+                    Object grid     = getGrid(be);
+                    if (grid == null) return result;
+                    Object craftSvc = safeGetService(grid, mGetCraftingService);
+                    if (craftSvc == null) return result;
+                    Set<?> craftables = (Set<?>) mGetCraftables.invoke(craftSvc, allKeyFilter);
+                    int i = 1;
+                    for (Object key : craftables) {
+                        if (!clsAEFluidKey.isInstance(key)) continue;
+                        net.minecraft.world.level.material.Fluid f =
+                            (net.minecraft.world.level.material.Fluid) mAEFluidGetFluid.invoke(key);
+                        if (f == null) continue;
+                        LuaTable entry = new LuaTable();
+                        entry.set("name", LuaValue.valueOf(
+                                BuiltInRegistries.FLUID.getKey(f).toString()));
+                        result.set(i++, entry);
+                    }
+                } catch (Exception ignored) {}
+                return result;
+            }
+        });
+
+        // ── getCpus() → [{name, isBusy, storage, coProcessors}] ───────────
+        t.set("getCpus", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                LuaTable result = new LuaTable();
+                if (mGetCpus == null) return result;
+                try {
+                    Object grid = getGrid(be);
+                    if (grid == null) return result;
+                    Object craftSvc = safeGetService(grid, mGetCraftingService);
+                    if (craftSvc == null) return result;
+                    Object cpus = mGetCpus.invoke(craftSvc);
+                    if (!(cpus instanceof Iterable<?> it)) return result;
+                    int i = 1;
+                    for (Object cpu : it) {
+                        LuaTable entry = new LuaTable();
+                        if (mCpuGetName != null) {
+                            try {
+                                Object n = mCpuGetName.invoke(cpu);
+                                entry.set("name", LuaValue.valueOf(n != null ? n.toString() : ""));
+                            } catch (Exception ignored) {}
+                        }
+                        if (mCpuIsBusy != null) {
+                            try { entry.set("isBusy",
+                                    LuaValue.valueOf((boolean) mCpuIsBusy.invoke(cpu))); }
+                            catch (Exception ignored) {}
+                        }
+                        if (mCpuGetAvailableStorage != null) {
+                            try { entry.set("storage", LuaValue.valueOf(
+                                    ((Number) mCpuGetAvailableStorage.invoke(cpu)).longValue())); }
+                            catch (Exception ignored) {}
+                        }
+                        if (mCpuGetCoProcessors != null) {
+                            try { entry.set("coProcessors", LuaValue.valueOf(
+                                    ((Number) mCpuGetCoProcessors.invoke(cpu)).intValue())); }
+                            catch (Exception ignored) {}
+                        }
+                        result.set(i++, entry);
+                    }
+                } catch (Exception ignored) {}
+                return result;
+            }
+        });
+
         // ── requestCraft(name, amount) → string ───────────────────────────
         // Returns "ok", "not_craftable", "missing_items", or "error:<msg>"
         t.set("requestCraft", new VarArgFunction() {

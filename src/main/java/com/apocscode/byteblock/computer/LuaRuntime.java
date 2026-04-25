@@ -218,6 +218,7 @@ public class LuaRuntime {
         installDroneAPI();
         installScannerAPI();
         installPeripheralAPI();
+        installSpeakerAPI();
         installGlassesAPI();
         installCCExtensions();
     }
@@ -645,6 +646,94 @@ public class LuaRuntime {
                 if ("os".equals(name)) return NONE;  // CC protects os
                 globals.set(name, LuaValue.NIL);
                 return NONE;
+            }
+        });
+
+        // os.day([locale]) — locale = "ingame"|"utc"|"local". Days since
+        // world start (ingame) or unix epoch (utc/local). CC parity.
+        osTable.set("day", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                String locale = args.optjstring(1, "ingame");
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                if ("utc".equals(locale)) {
+                    return LuaValue.valueOf(System.currentTimeMillis() / 86_400_000L);
+                } else if ("local".equals(locale)) {
+                    long off = java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis());
+                    return LuaValue.valueOf((System.currentTimeMillis() + off) / 86_400_000L);
+                } else {
+                    long t = lvl != null ? lvl.getDayTime() : 0L;
+                    return LuaValue.valueOf(t / 24000L);
+                }
+            }
+        });
+
+        // os.epoch([locale]) — milliseconds. CC parity.
+        osTable.set("epoch", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                String locale = args.optjstring(1, "ingame");
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                if ("utc".equals(locale)) {
+                    return LuaValue.valueOf(System.currentTimeMillis());
+                } else if ("local".equals(locale)) {
+                    long off = java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis());
+                    return LuaValue.valueOf(System.currentTimeMillis() + off);
+                } else {
+                    // ingame: ms-since-world-start, computed from getDayTime
+                    long t = lvl != null ? lvl.getDayTime() : 0L;
+                    // 1 ingame day = 24000 ticks = 86,400,000 ingame ms (1 ingame ms = 1 RL ms / 72)
+                    return LuaValue.valueOf((t * 86_400_000L) / 24000L);
+                }
+            }
+        });
+
+        // os.date([format [, time]]) — format current/given epoch. CC parity.
+        // Format: "*t" (table), "!*t" (UTC table), or strftime-like string.
+        osTable.set("date", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                String fmt = args.optjstring(1, "%c");
+                long epochSec;
+                if (args.narg() >= 2 && !args.isnil(2)) {
+                    epochSec = args.checklong(2);
+                } else {
+                    epochSec = System.currentTimeMillis() / 1000L;
+                }
+                boolean utc = fmt.startsWith("!");
+                if (utc) fmt = fmt.substring(1);
+                java.util.TimeZone tz = utc
+                        ? java.util.TimeZone.getTimeZone("UTC")
+                        : java.util.TimeZone.getDefault();
+                java.util.Calendar cal = java.util.Calendar.getInstance(tz);
+                cal.setTimeInMillis(epochSec * 1000L);
+
+                if ("*t".equals(fmt)) {
+                    LuaTable tbl = new LuaTable();
+                    tbl.set("year",  LuaValue.valueOf(cal.get(java.util.Calendar.YEAR)));
+                    tbl.set("month", LuaValue.valueOf(cal.get(java.util.Calendar.MONTH) + 1));
+                    tbl.set("day",   LuaValue.valueOf(cal.get(java.util.Calendar.DAY_OF_MONTH)));
+                    tbl.set("hour",  LuaValue.valueOf(cal.get(java.util.Calendar.HOUR_OF_DAY)));
+                    tbl.set("min",   LuaValue.valueOf(cal.get(java.util.Calendar.MINUTE)));
+                    tbl.set("sec",   LuaValue.valueOf(cal.get(java.util.Calendar.SECOND)));
+                    tbl.set("wday",  LuaValue.valueOf(cal.get(java.util.Calendar.DAY_OF_WEEK)));
+                    tbl.set("yday",  LuaValue.valueOf(cal.get(java.util.Calendar.DAY_OF_YEAR)));
+                    tbl.set("isdst", LuaValue.FALSE);
+                    return tbl;
+                }
+                // Translate a subset of strftime to SimpleDateFormat
+                String pat = fmt
+                        .replace("%Y", "yyyy").replace("%m", "MM").replace("%d", "dd")
+                        .replace("%H", "HH").replace("%M", "mm").replace("%S", "ss")
+                        .replace("%A", "EEEE").replace("%a", "EEE")
+                        .replace("%B", "MMMM").replace("%b", "MMM")
+                        .replace("%p", "a")
+                        .replace("%c", "EEE MMM dd HH:mm:ss yyyy")
+                        .replace("%x", "MM/dd/yyyy").replace("%X", "HH:mm:ss");
+                try {
+                    java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat(pat);
+                    sdf.setTimeZone(tz);
+                    return LuaValue.valueOf(sdf.format(cal.getTime()));
+                } catch (Exception e) {
+                    return LuaValue.valueOf(cal.getTime().toString());
+                }
             }
         });
 
@@ -2531,6 +2620,105 @@ public class LuaRuntime {
         });
 
         globals.set("peripheral", peripheral);
+    }
+
+    /**
+     * speaker.* — built-in audio output. Plays sounds at the computer's
+     * world position. CC:Tweaked-compatible.
+     *
+     *   speaker.playSound(name [, volume [, pitch]])  -- e.g. "minecraft:block.note_block.harp"
+     *   speaker.playNote(instrument [, volume [, pitch]])  -- 0..2 volume, 0.5..2 pitch
+     *   speaker.playLocalMusic(name [, volume])       -- alias of playSound at distance
+     *   speaker.stop()                                -- (no-op; provided for parity)
+     */
+    private void installSpeakerAPI() {
+        LuaTable speaker = new LuaTable();
+
+        speaker.set("playSound", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                String soundName = args.checkjstring(1);
+                float volume = (float) args.optdouble(2, 1.0);
+                float pitch  = (float) args.optdouble(3, 1.0);
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                net.minecraft.core.BlockPos pos = os.getBlockPos();
+                if (lvl == null || pos == null || lvl.isClientSide) return LuaValue.FALSE;
+                try {
+                    net.minecraft.resources.ResourceLocation rl =
+                            net.minecraft.resources.ResourceLocation.parse(soundName);
+                    net.minecraft.sounds.SoundEvent ev =
+                            net.minecraft.core.registries.BuiltInRegistries.SOUND_EVENT.get(rl);
+                    if (ev == null) return LuaValue.FALSE;
+                    lvl.playSound(null, pos,
+                            ev,
+                            net.minecraft.sounds.SoundSource.RECORDS,
+                            Math.max(0f, Math.min(3f, volume)),
+                            Math.max(0.5f, Math.min(2f, pitch)));
+                    return LuaValue.TRUE;
+                } catch (Exception e) {
+                    return LuaValue.FALSE;
+                }
+            }
+        });
+
+        // Note instruments: 0=harp 1=basedrum 2=snare 3=hat 4=bass 5=flute
+        // 6=bell 7=guitar 8=chime 9=xylophone 10=iron_xylophone 11=cow_bell
+        // 12=didgeridoo 13=bit 14=banjo 15=pling
+        speaker.set("playNote", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                String inst   = args.checkjstring(1).toLowerCase();
+                float volume  = (float) args.optdouble(2, 1.0);
+                double note   = args.optdouble(3, 12);  // 0..24 semitones
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                net.minecraft.core.BlockPos pos = os.getBlockPos();
+                if (lvl == null || pos == null || lvl.isClientSide) return LuaValue.FALSE;
+                String soundId = switch (inst) {
+                    case "harp"            -> "minecraft:block.note_block.harp";
+                    case "basedrum"        -> "minecraft:block.note_block.basedrum";
+                    case "snare"           -> "minecraft:block.note_block.snare";
+                    case "hat"             -> "minecraft:block.note_block.hat";
+                    case "bass"            -> "minecraft:block.note_block.bass";
+                    case "flute"           -> "minecraft:block.note_block.flute";
+                    case "bell"            -> "minecraft:block.note_block.bell";
+                    case "guitar"          -> "minecraft:block.note_block.guitar";
+                    case "chime"           -> "minecraft:block.note_block.chime";
+                    case "xylophone"       -> "minecraft:block.note_block.xylophone";
+                    case "iron_xylophone"  -> "minecraft:block.note_block.iron_xylophone";
+                    case "cow_bell"        -> "minecraft:block.note_block.cow_bell";
+                    case "didgeridoo"      -> "minecraft:block.note_block.didgeridoo";
+                    case "bit"             -> "minecraft:block.note_block.bit";
+                    case "banjo"           -> "minecraft:block.note_block.banjo";
+                    case "pling"           -> "minecraft:block.note_block.pling";
+                    default                -> null;
+                };
+                if (soundId == null) return LuaValue.FALSE;
+                try {
+                    float pitch = (float) Math.pow(2.0, (note - 12) / 12.0);
+                    net.minecraft.sounds.SoundEvent ev =
+                            net.minecraft.core.registries.BuiltInRegistries.SOUND_EVENT.get(
+                                    net.minecraft.resources.ResourceLocation.parse(soundId));
+                    if (ev == null) return LuaValue.FALSE;
+                    lvl.playSound(null, pos, ev,
+                            net.minecraft.sounds.SoundSource.RECORDS,
+                            Math.max(0f, Math.min(3f, volume)), pitch);
+                    return LuaValue.TRUE;
+                } catch (Exception e) {
+                    return LuaValue.FALSE;
+                }
+            }
+        });
+
+        speaker.set("playLocalMusic", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                LuaValue ps = speaker.get("playSound");
+                return ps.invoke(args);
+            }
+        });
+
+        speaker.set("stop", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.NONE; }
+        });
+
+        globals.set("speaker", speaker);
     }
 
     /**
