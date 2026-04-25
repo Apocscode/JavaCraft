@@ -596,9 +596,40 @@ public class LuaRuntime {
         globals.set("colours", colors);
     }
 
+    /**
+     * Load + invoke a chunk with Lua varargs. Returns the chunk's return value
+     * varargs (so multi-return shell scripts work), or null on error.
+     */
+    public Varargs executeWithArgs(String code, String chunkName, Varargs args) {
+        try {
+            InputStream is = new ByteArrayInputStream(code.getBytes(StandardCharsets.UTF_8));
+            LuaValue chunk = globals.load(is, chunkName, "bt", globals);
+            return chunk.invoke(args == null ? LuaValue.NONE : args);
+        } catch (LuaError e) {
+            pushOutput("Lua Error: " + e.getMessage());
+            return null;
+        } catch (Exception e) {
+            pushOutput("Error: " + e.getMessage());
+            return null;
+        }
+    }
+
+    // --- Shell state (mutable, shared across shell.* calls) ---
+    private final java.util.LinkedHashMap<String, String> shellAliases = new java.util.LinkedHashMap<>();
+    private final java.util.ArrayDeque<String> shellProgramStack = new java.util.ArrayDeque<>();
+    private String shellPath = "/Program Files:/rom/programs";
+
     private void installShellAPI() {
         LuaTable shell = new LuaTable();
         final String[] currentDir = {"/"};
+
+        // Default aliases (CC-style).
+        shellAliases.put("ls", "list");
+        shellAliases.put("dir", "list");
+        shellAliases.put("cp", "copy");
+        shellAliases.put("mv", "move");
+        shellAliases.put("rm", "delete");
+        shellAliases.put("preview", "edit");
 
         shell.set("dir", new ZeroArgFunction() {
             @Override public LuaValue call() { return LuaValue.valueOf(currentDir[0]); }
@@ -619,23 +650,196 @@ public class LuaRuntime {
                 return LuaValue.valueOf(currentDir[0].equals("/") ? "/" + p : currentDir[0] + "/" + p);
             }
         });
-        shell.set("run", new VarArgFunction() {
-            @Override
-            public Varargs invoke(Varargs args) {
-                String path = args.checkjstring(1);
-                String resolved = path.startsWith("/") ? path :
-                    (currentDir[0].equals("/") ? "/" + path : currentDir[0] + "/" + path);
-                String content = os.getFileSystem().readFile(resolved);
-                if (content == null) {
-                    pushOutput("File not found: " + resolved);
-                    return LuaValue.FALSE;
-                }
-                LuaValue result = execute(content, resolved);
-                return result != null ? LuaValue.TRUE : LuaValue.FALSE;
+
+        // shell.path() / shell.setPath(path)
+        shell.set("path", new ZeroArgFunction() {
+            @Override public LuaValue call() { return LuaValue.valueOf(shellPath); }
+        });
+        shell.set("setPath", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue v) {
+                shellPath = v.checkjstring(); return NONE;
             }
         });
 
+        // shell.aliases() -> table { alias = command }
+        shell.set("aliases", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                LuaTable t = new LuaTable();
+                for (var e : shellAliases.entrySet()) {
+                    t.set(e.getKey(), LuaValue.valueOf(e.getValue()));
+                }
+                return t;
+            }
+        });
+        shell.set("setAlias", new TwoArgFunction() {
+            @Override public LuaValue call(LuaValue k, LuaValue v) {
+                shellAliases.put(k.checkjstring(), v.checkjstring()); return NONE;
+            }
+        });
+        shell.set("clearAlias", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue k) {
+                shellAliases.remove(k.checkjstring()); return NONE;
+            }
+        });
+
+        // shell.resolveProgram(name) -> path or nil
+        shell.set("resolveProgram", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue v) {
+                String name = v.checkjstring();
+                String alias = shellAliases.get(name);
+                if (alias != null) name = alias;
+                String found = resolveProgramOnPath(name);
+                return found != null ? LuaValue.valueOf(found) : LuaValue.NIL;
+            }
+        });
+
+        // shell.programs([includeHidden]) -> list of program names available on path
+        shell.set("programs", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                boolean inclHidden = a.optboolean(1, false);
+                java.util.TreeSet<String> names = new java.util.TreeSet<>();
+                VirtualFileSystem vfs = os.getFileSystem();
+                if (vfs != null) {
+                    for (String dir : shellPath.split(":")) {
+                        if (dir.isEmpty() || !vfs.exists(dir) || !vfs.isDirectory(dir)) continue;
+                        for (String n : vfs.list(dir)) {
+                            if (!inclHidden && n.startsWith(".")) continue;
+                            String full = dir.endsWith("/") ? dir + n : dir + "/" + n;
+                            if (vfs.isDirectory(full)) continue;
+                            // Strip .lua extension if present
+                            String prog = n.endsWith(".lua") ? n.substring(0, n.length() - 4) : n;
+                            names.add(prog);
+                        }
+                    }
+                }
+                LuaTable out = new LuaTable();
+                int i = 1;
+                for (String n : names) out.set(i++, LuaValue.valueOf(n));
+                return out;
+            }
+        });
+
+        // shell.complete(line) — completes program name (first word) or file path (later words).
+        shell.set("complete", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue v) {
+                String line = v.checkjstring();
+                LuaTable out = new LuaTable();
+                int sp = line.lastIndexOf(' ');
+                if (sp < 0) {
+                    // First word: program completion
+                    String partial = line;
+                    java.util.TreeSet<String> matches = new java.util.TreeSet<>();
+                    for (String alias : shellAliases.keySet()) {
+                        if (alias.startsWith(partial)) matches.add(alias.substring(partial.length()));
+                    }
+                    VirtualFileSystem vfs = os.getFileSystem();
+                    if (vfs != null) {
+                        for (String dir : shellPath.split(":")) {
+                            if (dir.isEmpty() || !vfs.exists(dir) || !vfs.isDirectory(dir)) continue;
+                            for (String n : vfs.list(dir)) {
+                                String prog = n.endsWith(".lua") ? n.substring(0, n.length() - 4) : n;
+                                if (prog.startsWith(partial)) matches.add(prog.substring(partial.length()));
+                            }
+                        }
+                    }
+                    int i = 1;
+                    for (String m : matches) out.set(i++, LuaValue.valueOf(m + " "));
+                } else {
+                    // Subsequent word: file completion via fs.complete
+                    String partial = line.substring(sp + 1);
+                    VirtualFileSystem vfs = os.getFileSystem();
+                    if (vfs == null) return out;
+                    int slash = partial.lastIndexOf('/');
+                    String dir = slash < 0 ? currentDir[0] : partial.substring(0, slash + 1);
+                    String name = slash < 0 ? partial : partial.substring(slash + 1);
+                    String resolveDir = dir.startsWith("/") ? dir
+                            : (currentDir[0].equals("/") ? "/" + dir : currentDir[0] + "/" + dir);
+                    if (resolveDir.isEmpty()) resolveDir = "/";
+                    if (!vfs.exists(resolveDir) || !vfs.isDirectory(resolveDir)) return out;
+                    int i = 1;
+                    for (String n : vfs.list(resolveDir)) {
+                        if (!n.startsWith(name)) continue;
+                        String full = resolveDir.endsWith("/") ? resolveDir + n : resolveDir + "/" + n;
+                        boolean isDir = vfs.isDirectory(full);
+                        out.set(i++, LuaValue.valueOf(n.substring(name.length()) + (isDir ? "/" : "")));
+                    }
+                }
+                return out;
+            }
+        });
+
+        // shell.getRunningProgram() -> path of currently-executing program (or "" if none)
+        shell.set("getRunningProgram", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                return LuaValue.valueOf(shellProgramStack.isEmpty() ? "" : shellProgramStack.peek());
+            }
+        });
+
+        // shell.run(path, ...) — run program file with args. Returns true/false.
+        shell.set("run", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                if (args.narg() == 0) return LuaValue.FALSE;
+                String first = args.checkjstring(1);
+                // Resolve via aliases + path before falling back to literal path lookup.
+                String alias = shellAliases.get(first);
+                if (alias != null) first = alias;
+                String resolved = resolveProgramOnPath(first);
+                if (resolved == null) {
+                    // Fall back to literal path resolution (cwd-relative).
+                    resolved = first.startsWith("/") ? first :
+                        (currentDir[0].equals("/") ? "/" + first : currentDir[0] + "/" + first);
+                }
+                String content = os.getFileSystem().readFile(resolved);
+                if (content == null) {
+                    pushOutput("No such program: " + first + "\n");
+                    return LuaValue.FALSE;
+                }
+                shellProgramStack.push(resolved);
+                try {
+                    Varargs result = executeWithArgs(content, resolved, args.subargs(2));
+                    return result != null ? LuaValue.TRUE : LuaValue.FALSE;
+                } finally {
+                    shellProgramStack.pop();
+                }
+            }
+        });
+
+        // shell.execute(cmd, ...) — alias of run; CC parity name.
+        shell.set("execute", shell.get("run"));
+
+        // shell.openTab / switchTab — single-shell stubs
+        shell.set("openTab", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) { return LuaValue.valueOf(1); }
+        });
+        shell.set("switchTab", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue v) { return NONE; }
+        });
+        shell.set("exit", new ZeroArgFunction() {
+            @Override public LuaValue call() { queueEvent("terminate"); return NONE; }
+        });
+
         globals.set("shell", shell);
+    }
+
+    /** Walk shell.path looking for a program by name. Tries name and name.lua. */
+    private String resolveProgramOnPath(String name) {
+        VirtualFileSystem vfs = os.getFileSystem();
+        if (vfs == null) return null;
+        if (name.startsWith("/")) {
+            if (vfs.exists(name) && !vfs.isDirectory(name)) return name;
+            String withLua = name + ".lua";
+            if (vfs.exists(withLua) && !vfs.isDirectory(withLua)) return withLua;
+            return null;
+        }
+        for (String dir : shellPath.split(":")) {
+            if (dir.isEmpty()) continue;
+            String full = dir.endsWith("/") ? dir + name : dir + "/" + name;
+            if (vfs.exists(full) && !vfs.isDirectory(full)) return full;
+            String withLua = full + ".lua";
+            if (vfs.exists(withLua) && !vfs.isDirectory(withLua)) return withLua;
+        }
+        return null;
     }
 
     private void installTextUtilsAPI() {
@@ -3277,6 +3481,35 @@ public class LuaRuntime {
                     return LuaValue.valueOf("ByteBlockOS 1.0 (Lua 5.2 / LuaJ, CC:Tweaked-compatible)");
                 }
             });
+            // os.run(env, path, ...) — load a file with a custom env, invoke with args.
+            osT.set("run", new VarArgFunction() {
+                @Override public Varargs invoke(Varargs a) {
+                    if (a.narg() < 2) return LuaValue.FALSE;
+                    LuaTable env = a.checktable(1);
+                    String path = a.checkjstring(2);
+                    String content = os.getFileSystem().readFile(path);
+                    if (content == null) {
+                        pushOutput("os.run: file not found: " + path + "\n");
+                        return LuaValue.FALSE;
+                    }
+                    // Inherit globals as fallback metatable so common APIs still resolve.
+                    LuaTable mt = new LuaTable();
+                    mt.set(LuaValue.INDEX, globals);
+                    env.setmetatable(mt);
+                    try {
+                        InputStream is = new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8));
+                        LuaValue chunk = globals.load(is, path, "bt", env);
+                        chunk.invoke(a.subargs(3));
+                        return LuaValue.TRUE;
+                    } catch (LuaError e) {
+                        pushOutput("os.run: " + e.getMessage() + "\n");
+                        return LuaValue.FALSE;
+                    } catch (Exception e) {
+                        pushOutput("os.run: " + e.getMessage() + "\n");
+                        return LuaValue.FALSE;
+                    }
+                }
+            });
         }
 
         // -- fs.* extras --
@@ -3511,34 +3744,7 @@ public class LuaRuntime {
             }
         }
 
-        // -- shell.* stubs --
-        LuaValue shv = globals.get("shell");
-        if (shv.istable()) {
-            LuaTable shT = shv.checktable();
-            shT.set("complete", new OneArgFunction() {
-                @Override public LuaValue call(LuaValue line) { return new LuaTable(); }
-            });
-            shT.set("programs", new VarArgFunction() {
-                @Override public Varargs invoke(Varargs a) { return new LuaTable(); }
-            });
-            shT.set("aliases", new ZeroArgFunction() {
-                @Override public LuaValue call() { return new LuaTable(); }
-            });
-            shT.set("setAlias", new TwoArgFunction() {
-                @Override public LuaValue call(LuaValue k, LuaValue v) { return LuaValue.NIL; }
-            });
-            shT.set("clearAlias", new OneArgFunction() {
-                @Override public LuaValue call(LuaValue k) { return LuaValue.NIL; }
-            });
-            if (shT.get("path").isnil()) {
-                shT.set("path", new ZeroArgFunction() {
-                    @Override public LuaValue call() { return LuaValue.valueOf("/Program Files"); }
-                });
-            }
-            shT.set("setPath", new OneArgFunction() {
-                @Override public LuaValue call(LuaValue p) { return LuaValue.NIL; }
-            });
-        }
+        // -- shell.* — real implementations live in installShellAPI(); no stubs here. --
     }
 
     private static void findRecursive(VirtualFileSystem vfs, String dir, java.util.regex.Pattern rx,
