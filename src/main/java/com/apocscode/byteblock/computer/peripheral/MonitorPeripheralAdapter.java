@@ -170,6 +170,54 @@ public class MonitorPeripheralAdapter implements IPeripheralAdapter {
             }
         });
 
+        // ── Per-monitor palette (CC:Tweaked-compatible) ──────────────────
+        // setPaletteColor(color, hex)   or   setPaletteColor(color, r, g, b)
+        // 'color' is the CC bitmask (1 = white, 32768 = black). Idx = log2(color) & 0xF.
+        VarArgFunction setPal = new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                int color = a.checkint(1);
+                int idx = Integer.numberOfTrailingZeros(Math.max(1, color)) & 0xF;
+                int rgb;
+                if (a.narg() >= 4) {
+                    int r = (int) Math.round(Math.max(0.0, Math.min(1.0, a.checkdouble(2))) * 255.0);
+                    int g = (int) Math.round(Math.max(0.0, Math.min(1.0, a.checkdouble(3))) * 255.0);
+                    int b = (int) Math.round(Math.max(0.0, Math.min(1.0, a.checkdouble(4))) * 255.0);
+                    rgb = (r << 16) | (g << 8) | b;
+                } else {
+                    rgb = a.checkint(2) & 0xFFFFFF;
+                }
+                origin.setPaletteColor(idx, rgb);
+                return LuaValue.NIL;
+            }
+        };
+        t.set("setPaletteColor", setPal);
+        t.set("setPaletteColour", setPal);
+
+        // getPaletteColor(color) -> r, g, b (each 0..1)
+        VarArgFunction getPal = new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                int color = a.checkint(1);
+                int idx = Integer.numberOfTrailingZeros(Math.max(1, color)) & 0xF;
+                int argb = origin.getPaletteARGB(idx);
+                return LuaValue.varargsOf(new LuaValue[]{
+                    LuaValue.valueOf(((argb >> 16) & 0xFF) / 255.0),
+                    LuaValue.valueOf(((argb >>  8) & 0xFF) / 255.0),
+                    LuaValue.valueOf(( argb        & 0xFF) / 255.0)
+                });
+            }
+        };
+        t.set("getPaletteColor", getPal);
+        t.set("getPaletteColour", getPal);
+        t.set("nativePaletteColor", getPal);
+        t.set("nativePaletteColour", getPal);
+
+        t.set("resetPalette", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                origin.resetPalette();
+                return LuaValue.NIL;
+            }
+        });
+
         // getTouchPos() -> x, y  (or nil if no touch yet)
         t.set("getTouchPos", new VarArgFunction() {
             @Override public Varargs invoke(Varargs a) {

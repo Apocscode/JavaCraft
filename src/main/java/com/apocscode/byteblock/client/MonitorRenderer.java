@@ -122,7 +122,7 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
                 }
             } else if (isText) {
                 long ver = origin.getTextVersion();
-                String sig = "text:" + ver;
+                String sig = "text:" + ver + ":p" + origin.getPaletteVersion();
                 if (!sig.equals(st.lastUploadedSig)) {
                     renderTextBuffer(st.stagingBuffer, origin);
                     uploadPixels(st, st.stagingBuffer);
@@ -131,7 +131,7 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
                 }
             } else if (isGfx) {
                 long ver = origin.getGfxVersion();
-                String sig = "gfx:" + ver;
+                String sig = "gfx:" + ver + ":p" + origin.getPaletteVersion();
                 if (!sig.equals(st.lastUploadedSig)) {
                     renderGfxBuffer(st.stagingBuffer, origin);
                     uploadPixels(st, st.stagingBuffer);
@@ -234,7 +234,7 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
             int rowOff = y * cols;
             for (int x = 0; x < effCols; x++) {
                 int idx = rowOff + x;
-                int bgC = paletteColor(bg[idx] & 0xF);
+                int bgC = paletteColor(origin, bg[idx] & 0xF);
                 pb.fillRect(x * cellW, y * cellH, cellW, cellH, bgC);
             }
         }
@@ -248,7 +248,7 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
                 int idx = rowOff + x;
                 char c = chars[idx];
                 if (c == ' ' || c == 0) continue;
-                int fgC = paletteColor(fg[idx] & 0xF);
+                int fgC = paletteColor(origin, fg[idx] & 0xF);
                 int px = x * cellW + Math.max(0, (cellW - fontW) / 2);
                 pb.drawChar(px, py, c, fgC);
             }
@@ -296,12 +296,13 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
             int py = y * sy;
             for (int x = 0; x < srcW; x++) {
                 int idx = origin.gfxGetPixel(x, y);
-                pb.fillRect(x * sx, py, sx, sy, paletteColor(idx));
+                pb.fillRect(x * sx, py, sx, sy, paletteColor(origin, idx));
             }
         }
     }
 
-    private static int paletteColor(int idx) {
+    private static int paletteColor(MonitorBlockEntity origin, int idx) {
+        if (origin != null) return origin.getPaletteARGB(idx & 0xF);
         int[] p = com.apocscode.byteblock.computer.TerminalBuffer.PALETTE;
         if (idx < 0 || idx >= p.length) return 0xFF000000;
         return p[idx];

@@ -67,6 +67,15 @@ public class MonitorBlockEntity extends BlockEntity {
     private long gfxVersion = 1L;
     private long lastSyncedGfxVersion = 0L;
 
+    // ── Per-monitor 16-color palette (ARGB) ──
+    /** Per-monitor palette, ARGB ints, indexable 0..15. Initialized from TerminalBuffer.PALETTE. */
+    private final int[] palette = new int[16];
+    /** Bumped on any palette change so renderer cache invalidates. */
+    private long paletteVersion = 1L;
+    {
+        System.arraycopy(com.apocscode.byteblock.computer.TerminalBuffer.PALETTE, 0, palette, 0, 16);
+    }
+
     // Last-known label of the linked computer; rendered on the "no signal" tombstone.
     private String lastKnownComputerLabel = "";
 
@@ -384,6 +393,44 @@ public class MonitorBlockEntity extends BlockEntity {
     public String getLastKnownComputerLabel() { return lastKnownComputerLabel; }
     public long getGfxVersion() { return gfxVersion; }
     public byte[] getGfxPixels() { return gfxPixels; }
+    public long getPaletteVersion() { return paletteVersion; }
+    public int  getPaletteARGB(int idx) {
+        if (idx < 0 || idx >= 16) return 0xFF000000;
+        return palette[idx];
+    }
+    /**
+     * Set palette entry. Accepts a 0xRRGGBB int; alpha is forced to 0xFF. Bumps versions and syncs.
+     */
+    public void setPaletteColor(int idx, int rgb) {
+        if (idx < 0 || idx >= 16) return;
+        int argb = 0xFF000000 | (rgb & 0x00FFFFFF);
+        if (palette[idx] == argb) return;
+        palette[idx] = argb;
+        paletteVersion++;
+        textVersion++;
+        gfxVersion++;
+        if (level != null && !level.isClientSide()) {
+            lastSyncedTextVersion = textVersion;
+            lastSyncedGfxVersion = gfxVersion;
+            syncToClient();
+        }
+    }
+    public void resetPalette() {
+        boolean changed = false;
+        for (int i = 0; i < 16; i++) {
+            int argb = com.apocscode.byteblock.computer.TerminalBuffer.PALETTE[i];
+            if (palette[i] != argb) { palette[i] = argb; changed = true; }
+        }
+        if (!changed) return;
+        paletteVersion++;
+        textVersion++;
+        gfxVersion++;
+        if (level != null && !level.isClientSide()) {
+            lastSyncedTextVersion = textVersion;
+            lastSyncedGfxVersion = gfxVersion;
+            syncToClient();
+        }
+    }
 
     /** Read a 4-bit palette index at (x,y). Returns 0 if OOB. */
     public int gfxGetPixel(int x, int y) {
@@ -665,6 +712,8 @@ public class MonitorBlockEntity extends BlockEntity {
         tag.putLong("TermVer", textVersion);
         tag.putByteArray("GfxPx", gfxPixels);
         tag.putLong("GfxVer", gfxVersion);
+        tag.putIntArray("Palette", palette);
+        tag.putLong("PalVer", paletteVersion);
         if (lastKnownComputerLabel != null && !lastKnownComputerLabel.isEmpty()) {
             tag.putString("LastLabel", lastKnownComputerLabel);
         }
@@ -709,6 +758,11 @@ public class MonitorBlockEntity extends BlockEntity {
             System.arraycopy(a, 0, gfxPixels, 0, Math.min(a.length, gfxPixels.length));
         }
         if (tag.contains("GfxVer")) gfxVersion = tag.getLong("GfxVer");
+        if (tag.contains("Palette")) {
+            int[] a = tag.getIntArray("Palette");
+            System.arraycopy(a, 0, palette, 0, Math.min(a.length, palette.length));
+        }
+        if (tag.contains("PalVer")) paletteVersion = tag.getLong("PalVer");
         if (tag.contains("LastLabel")) lastKnownComputerLabel = tag.getString("LastLabel");
     }
 }
