@@ -284,7 +284,8 @@ little or no modification.
 | `parallel`    | `waitForAny`, `waitForAll` (CC-compatible coroutine scheduler) |
 | `vector`      | `new(x,y,z)` with `+ - * / dot cross length normalize round tostring` metatable methods |
 | `keys`        | All 100+ CC key constants (`keys.enter`, `keys.space`, `keys.f1`–`keys.f12`, `keys.leftCtrl`, …) plus `keys.getName(code)` |
-| `paintutils`  | `loadImage`, `drawImage`, `drawPixel`, `drawLine`, `drawBox`, `drawFilledBox` |
+| `paintutils`  | `loadImage`, `drawImage`, `drawPixel`, `drawLine`, `drawBox`, `drawFilledBox`, `drawCircle`/`drawFilledCircle`, `drawTriangle`/`drawFilledTriangle`, `drawPolygon`, `drawSprite` (with transparency) |
+| `image`       | Procedural RGB images: `create(w,h,color)`, `set/get`, `fill`, `loadNFP`, `loadNFT`, `toGrid` (quantize → CC palette indices for `paintutils.drawImage`) |
 | `window`      | `create(parent, x, y, w, h, visible)` returning a redirect-capable child terminal |
 | `settings`    | `define`, `set`, `get`, `unset`, `clear`, `getNames`, `load`, `save` (persists to `/.settings`) |
 | `http`        | `get`, `post`, `request`, `checkURL`, `websocket` (HTTPS allowed by default) |
@@ -307,8 +308,40 @@ These have no CC counterpart and expose ByteBlock's hardware:
 | `robot`     | Drive a robot entity: `forward`, `dig`, `place`, `select`, `refuel`, inventory inspection, `getFuel`, `getFacing`, `findCharger`, `goHome`, etc. |
 | `turtle`    | Alias of `robot` plus CC-compatible shims (`attack*`, `place*`, `compare*`, `inspect*`, `transferTo`, `getItemSpace`). |
 | `drone`     | Issue commands to a linked drone entity (route, hover, follow, return) plus `findCharger` / `goHome` to auto-dock at the nearest **Charging Station**. |
-| `glasses`   | Build a HUD widget list (`text`, `box`, `progress`, `image`) and `flush()` to all wearers in BT range on the current channel. |
+| `glasses`   | Build a HUD widget list (`text`, `box`, `progress`, `image`, `pie`, `compass`, `minimap`, `graph`) **plus** `glasses.canvas()` for true-color free-form 2D rendering at absolute screen coords (`pixel`, `line`, `rect`, `circle`, `triangle`, `poly`, `text`, `gradient`, `bezier`, `image`). |
 | `disk`      | CC-compatible API surface backed by adjacent **Drive** blocks (mount path, label, eject). |
+
+### Bundled Lua libraries
+
+These ship inside the mod jar and are auto-registered with `package.preload`, so they Just Work via `require`:
+
+| Module     | What it gives you |
+|------------|-------------------|
+| `basalt`   | Basalt-style UI framework — `Frame`, `Label`, `Button`, `TextBox`, `List`, `Checkbox`, `ProgressBar`, hover/click/focus, event loop. Drop-in for terminals. |
+| `pine3d`   | Pine3D-style 3D wireframe renderer — projects `cube`/`pyramid`/custom meshes onto a `glasses.canvas()`, supports per-object & camera rotation, FOV. |
+
+Example:
+
+```lua
+local basalt = require("basalt")
+local main = basalt.createFrame()
+main:addLabel():setPosition(2,1):setText("Hello!")
+main:addButton():setPosition(2,3):setSize(10,1):setText("Quit")
+     :onClick(function() basalt.stop() end)
+basalt.run()
+```
+
+```lua
+local pine3d = require("pine3d")
+local cam  = pine3d.newCamera({ x=0, y=0, z=-6 })
+local cube = pine3d.cube(2, 0xFF8800)
+while true do
+  cube.ry = (cube.ry or 0) + 0.05
+  local c = glasses.canvas("cube"); c:clear()
+  pine3d.render(c, cam, { cube }, 200, 100, 160, 120)
+  c:add(); glasses.flush(); os.sleep(0.05)
+end
+```
 
 ### CC:Tweaked parity
 

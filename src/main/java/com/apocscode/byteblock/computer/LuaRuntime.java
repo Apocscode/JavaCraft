@@ -2335,6 +2335,181 @@ public class LuaRuntime {
             }
         });
 
+        // ──────────────────────────────────────────────────────────────────
+        // glasses.canvas() — true-color free-form 2D canvas. Returns a
+        // builder table with chainable draw methods. Call :add() to push
+        // it into the widget queue, then glasses.flush() to broadcast.
+        //
+        // Example:
+        //   local c = glasses.canvas()
+        //   c:rect(20,20, 100,40, 0x224488, true)
+        //   c:circle(70,40, 12, 0xFFCC00, true)
+        //   c:text(28,28, "HUD", 0xFFFFFF)
+        //   c:add(); glasses.flush()
+        // ──────────────────────────────────────────────────────────────────
+        glasses.set("canvas", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                String id = args.optjstring(1, "canvas_" + glassesWidgets.size());
+                final java.util.ArrayList<Double> ops = new java.util.ArrayList<>(64);
+                LuaTable c = new LuaTable();
+
+                c.set("pixel", new VarArgFunction() {
+                    @Override public Varargs invoke(Varargs a) {
+                        // self,x,y,color
+                        ops.add(1.0); ops.add(a.optdouble(2,0)); ops.add(a.optdouble(3,0));
+                        ops.add((double)(parseColor(a.arg(4), 0xFFFFFF) & 0xFFFFFF));
+                        return a.arg(1);
+                    }
+                });
+                c.set("line", new VarArgFunction() {
+                    @Override public Varargs invoke(Varargs a) {
+                        ops.add(2.0);
+                        ops.add(a.optdouble(2,0)); ops.add(a.optdouble(3,0));
+                        ops.add(a.optdouble(4,0)); ops.add(a.optdouble(5,0));
+                        ops.add((double)(parseColor(a.arg(6), 0xFFFFFF) & 0xFFFFFF));
+                        return a.arg(1);
+                    }
+                });
+                LuaFunction rectFn = new VarArgFunction() {
+                    @Override public Varargs invoke(Varargs a) {
+                        ops.add(3.0);
+                        ops.add(a.optdouble(2,0)); ops.add(a.optdouble(3,0));
+                        ops.add(a.optdouble(4,0)); ops.add(a.optdouble(5,0));
+                        ops.add((double)(parseColor(a.arg(6), 0xFFFFFF) & 0xFFFFFF));
+                        ops.add(a.optboolean(7, false) ? 1.0 : 0.0);
+                        return a.arg(1);
+                    }
+                };
+                c.set("rect", rectFn);
+                c.set("fillRect", new VarArgFunction() {
+                    @Override public Varargs invoke(Varargs a) {
+                        ops.add(3.0);
+                        ops.add(a.optdouble(2,0)); ops.add(a.optdouble(3,0));
+                        ops.add(a.optdouble(4,0)); ops.add(a.optdouble(5,0));
+                        ops.add((double)(parseColor(a.arg(6), 0xFFFFFF) & 0xFFFFFF));
+                        ops.add(1.0);
+                        return a.arg(1);
+                    }
+                });
+                c.set("circle", new VarArgFunction() {
+                    @Override public Varargs invoke(Varargs a) {
+                        ops.add(4.0);
+                        ops.add(a.optdouble(2,0)); ops.add(a.optdouble(3,0)); ops.add(a.optdouble(4,1));
+                        ops.add((double)(parseColor(a.arg(5), 0xFFFFFF) & 0xFFFFFF));
+                        ops.add(a.optboolean(6, false) ? 1.0 : 0.0);
+                        return a.arg(1);
+                    }
+                });
+                c.set("fillCircle", new VarArgFunction() {
+                    @Override public Varargs invoke(Varargs a) {
+                        ops.add(4.0);
+                        ops.add(a.optdouble(2,0)); ops.add(a.optdouble(3,0)); ops.add(a.optdouble(4,1));
+                        ops.add((double)(parseColor(a.arg(5), 0xFFFFFF) & 0xFFFFFF));
+                        ops.add(1.0);
+                        return a.arg(1);
+                    }
+                });
+                c.set("triangle", new VarArgFunction() {
+                    @Override public Varargs invoke(Varargs a) {
+                        ops.add(5.0);
+                        ops.add(a.optdouble(2,0)); ops.add(a.optdouble(3,0));
+                        ops.add(a.optdouble(4,0)); ops.add(a.optdouble(5,0));
+                        ops.add(a.optdouble(6,0)); ops.add(a.optdouble(7,0));
+                        ops.add((double)(parseColor(a.arg(8), 0xFFFFFF) & 0xFFFFFF));
+                        ops.add(a.optboolean(9, false) ? 1.0 : 0.0);
+                        return a.arg(1);
+                    }
+                });
+                c.set("poly", new VarArgFunction() {
+                    @Override public Varargs invoke(Varargs a) {
+                        // self, {x1,y1,x2,y2,...}, color, filled
+                        LuaValue tv = a.arg(2);
+                        if (!tv.istable()) return a.arg(1);
+                        LuaTable t = tv.checktable();
+                        int len = t.length();
+                        int n = len / 2;
+                        if (n < 2) return a.arg(1);
+                        ops.add(6.0);
+                        ops.add((double) n);
+                        for (int k = 1; k <= n * 2; k++) ops.add(t.get(k).optdouble(0));
+                        ops.add((double)(parseColor(a.arg(3), 0xFFFFFF) & 0xFFFFFF));
+                        ops.add(a.optboolean(4, false) ? 1.0 : 0.0);
+                        return a.arg(1);
+                    }
+                });
+                c.set("text", new VarArgFunction() {
+                    @Override public Varargs invoke(Varargs a) {
+                        // self, x, y, str, color
+                        ops.add(7.0);
+                        ops.add(a.optdouble(2,0)); ops.add(a.optdouble(3,0));
+                        ops.add((double)(parseColor(a.arg(5), 0xFFFFFF) & 0xFFFFFF));
+                        String s = a.optjstring(4, "");
+                        ops.add((double) s.length());
+                        for (int k = 0; k < s.length(); k++) ops.add((double)(int) s.charAt(k));
+                        return a.arg(1);
+                    }
+                });
+                c.set("gradient", new VarArgFunction() {
+                    @Override public Varargs invoke(Varargs a) {
+                        // self, x, y, w, h, c1, c2, vertical
+                        ops.add(8.0);
+                        ops.add(a.optdouble(2,0)); ops.add(a.optdouble(3,0));
+                        ops.add(a.optdouble(4,0)); ops.add(a.optdouble(5,0));
+                        ops.add((double)(parseColor(a.arg(6), 0x000000) & 0xFFFFFF));
+                        ops.add((double)(parseColor(a.arg(7), 0xFFFFFF) & 0xFFFFFF));
+                        ops.add(a.optboolean(8, true) ? 1.0 : 0.0);
+                        return a.arg(1);
+                    }
+                });
+                c.set("bezier", new VarArgFunction() {
+                    @Override public Varargs invoke(Varargs a) {
+                        // self, x1, y1, cx, cy, x2, y2, color
+                        ops.add(9.0);
+                        ops.add(a.optdouble(2,0)); ops.add(a.optdouble(3,0));
+                        ops.add(a.optdouble(4,0)); ops.add(a.optdouble(5,0));
+                        ops.add(a.optdouble(6,0)); ops.add(a.optdouble(7,0));
+                        ops.add((double)(parseColor(a.arg(8), 0xFFFFFF) & 0xFFFFFF));
+                        return a.arg(1);
+                    }
+                });
+                c.set("image", new VarArgFunction() {
+                    @Override public Varargs invoke(Varargs a) {
+                        // self, img-table {w=,h=,pixels={...}}, x, y, scale
+                        LuaValue iv = a.arg(2);
+                        if (!iv.istable()) return a.arg(1);
+                        LuaTable t = iv.checktable();
+                        int iw = t.get("w").optint(0);
+                        int ih = t.get("h").optint(0);
+                        LuaValue pv = t.get("pixels");
+                        if (iw <= 0 || ih <= 0 || !pv.istable()) return a.arg(1);
+                        LuaTable px = pv.checktable();
+                        int count = iw * ih;
+                        if (px.length() < count) return a.arg(1);
+                        ops.add(10.0);
+                        ops.add((double) iw); ops.add((double) ih);
+                        ops.add(a.optdouble(3, 0)); ops.add(a.optdouble(4, 0));
+                        ops.add((double) Math.max(1, a.optint(5, 1)));
+                        for (int k = 1; k <= count; k++) ops.add(px.get(k).optdouble(-1));
+                        return a.arg(1);
+                    }
+                });
+                c.set("clear", new ZeroArgFunction() {
+                    @Override public LuaValue call() { ops.clear(); return c; }
+                });
+                c.set("add", new ZeroArgFunction() {
+                    @Override public LuaValue call() {
+                        GlassesHudAPI.Widget w = new GlassesHudAPI.Widget("canvas", id);
+                        double[] arr = new double[ops.size()];
+                        for (int k = 0; k < arr.length; k++) arr[k] = ops.get(k);
+                        w.points = arr;
+                        glassesWidgets.add(w);
+                        return LuaValue.valueOf(arr.length);
+                    }
+                });
+                return c;
+            }
+        });
+
         globals.set("glasses", glasses);
     }
 
@@ -2732,6 +2907,229 @@ public class LuaRuntime {
         installMultishellStub();
         installCCParityGaps();
         installDiskAPI();
+        installImageAPI();
+        installPreloadModules();
+    }
+
+    // ---------- image.* — procedural image creation + NFP/NFT loaders ----------
+    // Images are tables shaped: { w=number, h=number, pixels={ARGB1, ARGB2, ...} }
+    // Pixels are 24-bit RGB ints (0xRRGGBB) or -1 for transparent.
+    // Compatible with glasses canvas:image() and (via toGrid()) with paintutils.drawImage().
+    private void installImageAPI() {
+        LuaTable img = new LuaTable();
+
+        img.set("create", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                int w = a.checkint(1), h = a.checkint(2);
+                int fill = parseColor(a.arg(3), -1);
+                LuaTable pixels = new LuaTable();
+                int n = w * h;
+                for (int i = 1; i <= n; i++) pixels.set(i, LuaValue.valueOf(fill));
+                LuaTable t = new LuaTable();
+                t.set("w", w); t.set("h", h); t.set("pixels", pixels);
+                return t;
+            }
+        });
+        img.set("set", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                LuaTable t = a.checktable(1);
+                int x = a.checkint(2), y = a.checkint(3);
+                int w = t.get("w").toint();
+                int h = t.get("h").toint();
+                if (x < 0 || y < 0 || x >= w || y >= h) return LuaValue.NIL;
+                int color = parseColor(a.arg(4), 0xFFFFFF);
+                t.get("pixels").set(y * w + x + 1, LuaValue.valueOf(color));
+                return LuaValue.NIL;
+            }
+        });
+        img.set("get", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                LuaTable t = a.checktable(1);
+                int x = a.checkint(2), y = a.checkint(3);
+                int w = t.get("w").toint();
+                return t.get("pixels").get(y * w + x + 1);
+            }
+        });
+        img.set("size", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue v) {
+                LuaTable t = v.checktable();
+                return LuaValue.varargsOf(t.get("w"), t.get("h")).arg1();
+            }
+        });
+        img.set("fill", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                LuaTable t = a.checktable(1);
+                int color = parseColor(a.arg(2), -1);
+                int w = t.get("w").toint(), h = t.get("h").toint();
+                LuaTable px = t.get("pixels").checktable();
+                for (int i = 1; i <= w * h; i++) px.set(i, LuaValue.valueOf(color));
+                return LuaValue.NIL;
+            }
+        });
+        // image.loadNFP(path) — loads a CC paintutils-style image (.nfp), returns { w, h, pixels }
+        // with pixels mapped to the 16-color CC palette as RGB ints.
+        img.set("loadNFP", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue path) {
+                String content = os.getFileSystem().readFile(path.checkjstring());
+                LuaTable t = new LuaTable();
+                if (content == null) {
+                    t.set("w", 0); t.set("h", 0); t.set("pixels", new LuaTable());
+                    return t;
+                }
+                String[] lines = content.split("\n", -1);
+                int h = lines.length;
+                int w = 0;
+                for (String ln : lines) if (ln.length() > w) w = ln.length();
+                LuaTable pixels = new LuaTable();
+                for (int y = 0; y < h; y++) {
+                    String ln = lines[y];
+                    for (int x = 0; x < w; x++) {
+                        int v = -1;
+                        if (x < ln.length()) {
+                            char ch = ln.charAt(x);
+                            if (ch != ' ') {
+                                int idx;
+                                try { idx = Integer.parseInt(String.valueOf(ch), 16); }
+                                catch (NumberFormatException e) { idx = -1; }
+                                if (idx >= 0 && idx < 16) {
+                                    int argb = TerminalBuffer.PALETTE[idx];
+                                    v = argb & 0xFFFFFF;
+                                }
+                            }
+                        }
+                        pixels.set(y * w + x + 1, LuaValue.valueOf(v));
+                    }
+                }
+                t.set("w", w); t.set("h", h); t.set("pixels", pixels);
+                return t;
+            }
+        });
+        // image.loadNFT(path) — Loads a CC NFT (foreground/background coded text).
+        // Returns { w, h, pixels }; uses background color per cell as the pixel.
+        img.set("loadNFT", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue path) {
+                String content = os.getFileSystem().readFile(path.checkjstring());
+                LuaTable t = new LuaTable();
+                if (content == null) {
+                    t.set("w", 0); t.set("h", 0); t.set("pixels", new LuaTable());
+                    return t;
+                }
+                String[] lines = content.split("\n", -1);
+                int h = lines.length;
+                int w = 0;
+                int[][] rows = new int[h][];
+                for (int y = 0; y < h; y++) {
+                    String ln = lines[y];
+                    java.util.ArrayList<Integer> cells = new java.util.ArrayList<>();
+                    int bg = -1;
+                    int i = 0;
+                    while (i < ln.length()) {
+                        char c = ln.charAt(i);
+                        if (c == '\30' && i + 1 < ln.length()) { i += 2; /* fg, ignored */ }
+                        else if (c == '\31' && i + 1 < ln.length()) {
+                            char hc = ln.charAt(i + 1);
+                            try {
+                                int idx = Integer.parseInt(String.valueOf(hc), 16);
+                                bg = TerminalBuffer.PALETTE[idx] & 0xFFFFFF;
+                            } catch (Exception ignored) { bg = -1; }
+                            i += 2;
+                        } else { cells.add(c == ' ' ? bg : bg); i++; }
+                    }
+                    rows[y] = new int[cells.size()];
+                    for (int k = 0; k < cells.size(); k++) rows[y][k] = cells.get(k);
+                    if (rows[y].length > w) w = rows[y].length;
+                }
+                LuaTable pixels = new LuaTable();
+                for (int y = 0; y < h; y++) {
+                    for (int x = 0; x < w; x++) {
+                        int v = (x < rows[y].length) ? rows[y][x] : -1;
+                        pixels.set(y * w + x + 1, LuaValue.valueOf(v));
+                    }
+                }
+                t.set("w", w); t.set("h", h); t.set("pixels", pixels);
+                return t;
+            }
+        });
+        // image.toGrid(image) — converts an RGB image to a 2D table of CC palette
+        // indices (1-based rows/cols), suitable for paintutils.drawImage / drawSprite.
+        img.set("toGrid", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue v) {
+                LuaTable t = v.checktable();
+                int w = t.get("w").toint(), h = t.get("h").toint();
+                LuaTable px = t.get("pixels").checktable();
+                LuaTable out = new LuaTable();
+                for (int y = 0; y < h; y++) {
+                    LuaTable row = new LuaTable();
+                    for (int x = 0; x < w; x++) {
+                        int p = px.get(y * w + x + 1).optint(-1);
+                        if (p < 0) { row.set(x + 1, LuaValue.valueOf(0)); continue; }
+                        int idx = nearestPaletteIndex(p);
+                        row.set(x + 1, LuaValue.valueOf(1 << idx));
+                    }
+                    out.set(y + 1, row);
+                }
+                return out;
+            }
+        });
+
+        globals.set("image", img);
+    }
+
+    private static int nearestPaletteIndex(int rgb) {
+        int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
+        int bestIdx = 0, bestDist = Integer.MAX_VALUE;
+        for (int i = 0; i < TerminalBuffer.PALETTE.length; i++) {
+            int p = TerminalBuffer.PALETTE[i];
+            int pr = (p >> 16) & 0xFF, pg = (p >> 8) & 0xFF, pb = p & 0xFF;
+            int dr = pr - r, dg = pg - g, db = pb - b;
+            int d = dr * dr + dg * dg + db * db;
+            if (d < bestDist) { bestDist = d; bestIdx = i; }
+        }
+        return bestIdx;
+    }
+
+    // ---------- preload bundled Lua modules (basalt, pine3d) ----------
+    // Loads .lua resources from /assets/byteblock/lua/ and stuffs the
+    // resulting chunk into package.preload[name] so `require("basalt")`
+    // and `require("pine3d")` Just Work.
+    private void installPreloadModules() {
+        LuaValue pkg = globals.get("package");
+        if (pkg.isnil()) return;
+        LuaValue preload = pkg.get("preload");
+        if (preload.isnil()) {
+            preload = new LuaTable();
+            pkg.set("preload", preload);
+        }
+        final LuaValue preloadF = preload;
+        String[] modules = { "basalt", "pine3d" };
+        for (final String name : modules) {
+            String src = loadResource("/assets/byteblock/lua/" + name + ".lua");
+            if (src == null) continue;
+            final String source = src;
+            preloadF.set(name, new VarArgFunction() {
+                @Override public Varargs invoke(Varargs args) {
+                    try {
+                        LuaValue chunk = globals.load(source, name);
+                        return chunk.invoke();
+                    } catch (Exception e) {
+                        return LuaValue.error("preload " + name + ": " + e.getMessage());
+                    }
+                }
+            });
+        }
+    }
+
+    private static String loadResource(String path) {
+        try (java.io.InputStream in = LuaRuntime.class.getResourceAsStream(path)) {
+            if (in == null) return null;
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            return out.toString(java.nio.charset.StandardCharsets.UTF_8);
+        } catch (java.io.IOException e) {
+            return null;
+        }
     }
 
     // ---------- CC:Tweaked parity gap fillers ----------
@@ -3528,7 +3926,167 @@ public class LuaRuntime {
                 return NONE;
             }
         });
+        // ── ByteBlock extensions: shapes that vanilla CC paintutils lacks ──
+        p.set("drawCircle", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                int cx = a.checkint(1) - 1, cy = a.checkint(2) - 1;
+                int r  = Math.max(1, a.checkint(3));
+                if (!a.isnil(4)) tb.setBackgroundColor(ccColorToIndex(a.checkint(4)));
+                int r2 = r * r, rIn = (r - 1) * (r - 1);
+                for (int dy = -r; dy <= r; dy++) {
+                    for (int dx = -r; dx <= r; dx++) {
+                        int d = dx*dx + dy*dy;
+                        if (d > r2 || d < rIn) continue;
+                        plotPixel(tb, cx + dx, cy + dy);
+                    }
+                }
+                return NONE;
+            }
+        });
+        p.set("drawFilledCircle", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                int cx = a.checkint(1) - 1, cy = a.checkint(2) - 1;
+                int r  = Math.max(1, a.checkint(3));
+                if (!a.isnil(4)) tb.setBackgroundColor(ccColorToIndex(a.checkint(4)));
+                int r2 = r * r;
+                for (int dy = -r; dy <= r; dy++) {
+                    for (int dx = -r; dx <= r; dx++) {
+                        if (dx*dx + dy*dy > r2) continue;
+                        plotPixel(tb, cx + dx, cy + dy);
+                    }
+                }
+                return NONE;
+            }
+        });
+        p.set("drawTriangle", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                int x1 = a.checkint(1)-1, y1 = a.checkint(2)-1;
+                int x2 = a.checkint(3)-1, y2 = a.checkint(4)-1;
+                int x3 = a.checkint(5)-1, y3 = a.checkint(6)-1;
+                if (!a.isnil(7)) tb.setBackgroundColor(ccColorToIndex(a.checkint(7)));
+                drawLineGrid(tb, x1, y1, x2, y2);
+                drawLineGrid(tb, x2, y2, x3, y3);
+                drawLineGrid(tb, x3, y3, x1, y1);
+                return NONE;
+            }
+        });
+        p.set("drawFilledTriangle", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                int x1 = a.checkint(1)-1, y1 = a.checkint(2)-1;
+                int x2 = a.checkint(3)-1, y2 = a.checkint(4)-1;
+                int x3 = a.checkint(5)-1, y3 = a.checkint(6)-1;
+                if (!a.isnil(7)) tb.setBackgroundColor(ccColorToIndex(a.checkint(7)));
+                fillTriangleGrid(tb, x1, y1, x2, y2, x3, y3);
+                return NONE;
+            }
+        });
+        p.set("drawPolygon", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                LuaValue pts = a.arg(1);
+                if (!pts.istable()) return NONE;
+                LuaTable t = pts.checktable();
+                int n = t.length() / 2;
+                if (n < 2) return NONE;
+                if (!a.isnil(2)) tb.setBackgroundColor(ccColorToIndex(a.checkint(2)));
+                int[] xs = new int[n], ys = new int[n];
+                for (int k = 0; k < n; k++) {
+                    xs[k] = t.get(k*2 + 1).toint() - 1;
+                    ys[k] = t.get(k*2 + 2).toint() - 1;
+                }
+                boolean filled = a.optboolean(3, false);
+                if (filled && n >= 3) fillPolygonGrid(tb, xs, ys);
+                else for (int k = 0; k < n; k++) drawLineGrid(tb, xs[k], ys[k], xs[(k+1)%n], ys[(k+1)%n]);
+                return NONE;
+            }
+        });
+        // drawSprite(img, x, y [, transparent_color_index]) — img is a 2D table of CC color indices
+        // Skips cells equal to the transparent color (default 0 = none).
+        p.set("drawSprite", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                LuaValue img = a.arg(1);
+                int ox = a.checkint(2) - 1, oy = a.checkint(3) - 1;
+                int trans = a.optint(4, 0);
+                if (!img.istable()) return NONE;
+                LuaTable t = img.checktable();
+                for (int r = 1; r <= t.length(); r++) {
+                    LuaValue row = t.get(r);
+                    if (!row.istable()) continue;
+                    LuaTable rr = row.checktable();
+                    for (int c = 1; c <= rr.length(); c++) {
+                        int col = rr.get(c).optint(0);
+                        if (col == trans) continue;
+                        tb.setBackgroundColor(ccColorToIndex(col));
+                        int x = ox + c - 1, y = oy + r - 1;
+                        if (x >= 0 && y >= 0 && x < TerminalBuffer.WIDTH && y < TerminalBuffer.HEIGHT) {
+                            tb.setCursorPos(x, y);
+                            pushOutput(" ");
+                        }
+                    }
+                }
+                return NONE;
+            }
+        });
         globals.set("paintutils", p);
+    }
+
+    // ── Char-grid pixel helpers used by extended paintutils ──────────────
+    private void plotPixel(TerminalBuffer tb, int x, int y) {
+        if (x < 0 || y < 0 || x >= TerminalBuffer.WIDTH || y >= TerminalBuffer.HEIGHT) return;
+        tb.setCursorPos(x, y);
+        pushOutput(" ");
+    }
+    private void drawLineGrid(TerminalBuffer tb, int x0, int y0, int x1, int y1) {
+        int dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+        int dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+        int err = dx + dy;
+        int safety = 0;
+        while (safety++ < 4000) {
+            plotPixel(tb, x0, y0);
+            if (x0 == x1 && y0 == y1) break;
+            int e2 = 2 * err;
+            if (e2 >= dy) { err += dy; x0 += sx; }
+            if (e2 <= dx) { err += dx; y0 += sy; }
+        }
+    }
+    private void fillTriangleGrid(TerminalBuffer tb, int x1, int y1, int x2, int y2, int x3, int y3) {
+        int minY = Math.min(y1, Math.min(y2, y3));
+        int maxY = Math.max(y1, Math.max(y2, y3));
+        for (int y = minY; y <= maxY; y++) {
+            int xa = Integer.MAX_VALUE, xb = Integer.MIN_VALUE;
+            int[][] edges = { {x1,y1,x2,y2}, {x2,y2,x3,y3}, {x3,y3,x1,y1} };
+            for (int[] e : edges) {
+                int ey1=e[1], ey2=e[3];
+                if ((ey1 <= y && ey2 > y) || (ey2 <= y && ey1 > y)) {
+                    double t = (double)(y - ey1) / (ey2 - ey1);
+                    int xi = (int) Math.round(e[0] + t * (e[2] - e[0]));
+                    if (xi < xa) xa = xi;
+                    if (xi > xb) xb = xi;
+                }
+            }
+            if (xa <= xb) for (int x = xa; x <= xb; x++) plotPixel(tb, x, y);
+        }
+    }
+    private void fillPolygonGrid(TerminalBuffer tb, int[] xs, int[] ys) {
+        int minY = Integer.MAX_VALUE, maxY = Integer.MIN_VALUE;
+        for (int v : ys) { if (v < minY) minY = v; if (v > maxY) maxY = v; }
+        int n = xs.length;
+        int[] nodeX = new int[n];
+        for (int y = minY; y <= maxY; y++) {
+            int nodes = 0;
+            int j = n - 1;
+            for (int k = 0; k < n; k++) {
+                if ((ys[k] < y && ys[j] >= y) || (ys[j] < y && ys[k] >= y)) {
+                    double t = (double)(y - ys[k]) / (ys[j] - ys[k]);
+                    nodeX[nodes++] = (int) Math.round(xs[k] + t * (xs[j] - xs[k]));
+                }
+                j = k;
+            }
+            for (int a = 0; a < nodes - 1; a++)
+                for (int b = a + 1; b < nodes; b++)
+                    if (nodeX[a] > nodeX[b]) { int t = nodeX[a]; nodeX[a] = nodeX[b]; nodeX[b] = t; }
+            for (int k = 0; k + 1 < nodes; k += 2)
+                for (int x = nodeX[k]; x <= nodeX[k+1]; x++) plotPixel(tb, x, y);
+        }
     }
 
     private static void drawRect(TerminalBuffer tb, int x1, int y1, int x2, int y2, LuaValue col, boolean filled) {

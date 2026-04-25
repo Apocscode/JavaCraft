@@ -48,27 +48,41 @@ public final class GlassesHudOverlay {
         GuiGraphics gg = event.getGuiGraphics();
         Font font = mc.font;
 
-        // No widgets received yet — show a "no signal" placeholder so the wearer
+        // Render free-form canvas widgets first (absolute screen coords, no panel).
+        long now = System.currentTimeMillis();
+        boolean hasPanelWidgets = false;
+        for (GlassesHudState.Widget w : widgets) {
+            if (w.expireMs > 0 && now > w.expireMs) continue;
+            if ("canvas".equals(w.type)) {
+                renderCanvas(gg, font, w);
+            } else {
+                hasPanelWidgets = true;
+            }
+        }
+
+        // No panel widgets received yet — show a "no signal" placeholder so the wearer
         // knows the HUD is alive and waiting for a computer to push widgets.
-        if (widgets.isEmpty()) {
-            int ch = com.apocscode.byteblock.item.GlassesItem.getChannel(head);
-            int panelH = PAD * 2 + 28;
-            gg.fill(PANEL_X, PANEL_Y, PANEL_X + PANEL_W, PANEL_Y + panelH, BG_COL);
-            gg.fill(PANEL_X, PANEL_Y, PANEL_X + PANEL_W, PANEL_Y + 1, ACC_COL);
-            gg.fill(PANEL_X, PANEL_Y + panelH - 1, PANEL_X + PANEL_W, PANEL_Y + panelH, ACC_COL);
-            gg.drawString(font, Component.literal("BYTEBLOCK HUD").withStyle(ChatFormatting.AQUA),
-                PANEL_X + PAD, PANEL_Y + PAD, 0xFFFFFFFF, false);
-            gg.drawString(font, Component.literal("ch " + ch + " — no signal").withStyle(ChatFormatting.GRAY),
-                PANEL_X + PAD, PANEL_Y + PAD + 12, 0xFFCCCCCC, false);
-            gg.drawString(font, Component.literal("run glasses_test.lua").withStyle(ChatFormatting.DARK_GRAY),
-                PANEL_X + PAD, PANEL_Y + PAD + 22, 0xFF888888, false);
+        if (!hasPanelWidgets) {
+            if (widgets.isEmpty()) {
+                int ch = com.apocscode.byteblock.item.GlassesItem.getChannel(head);
+                int panelH = PAD * 2 + 28;
+                gg.fill(PANEL_X, PANEL_Y, PANEL_X + PANEL_W, PANEL_Y + panelH, BG_COL);
+                gg.fill(PANEL_X, PANEL_Y, PANEL_X + PANEL_W, PANEL_Y + 1, ACC_COL);
+                gg.fill(PANEL_X, PANEL_Y + panelH - 1, PANEL_X + PANEL_W, PANEL_Y + panelH, ACC_COL);
+                gg.drawString(font, Component.literal("BYTEBLOCK HUD").withStyle(ChatFormatting.AQUA),
+                    PANEL_X + PAD, PANEL_Y + PAD, 0xFFFFFFFF, false);
+                gg.drawString(font, Component.literal("ch " + ch + " — no signal").withStyle(ChatFormatting.GRAY),
+                    PANEL_X + PAD, PANEL_Y + PAD + 12, 0xFFCCCCCC, false);
+                gg.drawString(font, Component.literal("run glasses_test.lua").withStyle(ChatFormatting.DARK_GRAY),
+                    PANEL_X + PAD, PANEL_Y + PAD + 22, 0xFF888888, false);
+            }
             return;
         }
 
-        int rows = widgets.size();
-        // Compute total height: each widget contributes its own height, or ROW_H by default.
+        // Panel layout pass — count panel widgets only (skip canvases already drawn).
         int totalRows = 0;
         for (GlassesHudState.Widget w : widgets) {
+            if ("canvas".equals(w.type)) continue;
             totalRows += widgetRowHeight(w);
         }
         int panelH = PAD * 2 + totalRows + 12; // header row
@@ -84,9 +98,9 @@ public final class GlassesHudOverlay {
             PANEL_X + PAD, PANEL_Y + PAD, 0xFFFFFFFF, false);
 
         int y = PANEL_Y + PAD + 10;
-        long now = System.currentTimeMillis();
         for (GlassesHudState.Widget w : widgets) {
             if (w.expireMs > 0 && now > w.expireMs) continue;
+            if ("canvas".equals(w.type)) continue;
             int h = widgetRowHeight(w);
             renderWidget(gg, font, PANEL_X + PAD, y, PANEL_W - PAD * 2, h, w);
             y += h;
@@ -301,6 +315,240 @@ public final class GlassesHudOverlay {
             int e2 = 2 * err;
             if (e2 > -dy) { err -= dy; x0 += sx; }
             if (e2 <  dx) { err += dx; y0 += sy; }
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  Canvas widget — true-color free-form 2D rendering at absolute screen
+    //  coordinates. Driven by an opcode stream packed in widget.points:
+    //
+    //    1  pixel    : 1, x, y, color
+    //    2  line     : 2, x1, y1, x2, y2, color
+    //    3  rect     : 3, x, y, w, h, color, filled(0|1)
+    //    4  circle   : 4, cx, cy, r, color, filled(0|1)
+    //    5  triangle : 5, x1, y1, x2, y2, x3, y3, color, filled(0|1)
+    //    6  poly     : 6, n, x1, y1, ..., xn, yn, color, filled(0|1)
+    //    7  text     : 7, x, y, color, len, c1, c2, ..., cN  (chars as code points)
+    //    8  gradient : 8, x, y, w, h, c1, c2, vertical(0|1)
+    //    9  bezier   : 9, x1, y1, cx, cy, x2, y2, color
+    //   10  image    : 10, w, h, x, y, scale, p1, p2, ... (p = ARGB packed; -1 = transparent)
+    // ════════════════════════════════════════════════════════════════════════
+    private static void renderCanvas(GuiGraphics gg, Font font, GlassesHudState.Widget w) {
+        double[] s = w.points;
+        if (s == null || s.length == 0) return;
+        int i = 0, n = s.length;
+        int guard = 0;
+        while (i < n && guard++ < 10000) {
+            int op = (int) s[i];
+            switch (op) {
+                case 1 -> { // pixel
+                    if (i + 3 >= n) return;
+                    int x = (int) s[i + 1], y = (int) s[i + 2];
+                    int c = 0xFF000000 | ((int) s[i + 3] & 0xFFFFFF);
+                    gg.fill(x, y, x + 1, y + 1, c);
+                    i += 4;
+                }
+                case 2 -> { // line
+                    if (i + 5 >= n) return;
+                    int c = 0xFF000000 | ((int) s[i + 5] & 0xFFFFFF);
+                    drawLine(gg, (int) s[i + 1], (int) s[i + 2], (int) s[i + 3], (int) s[i + 4], c);
+                    i += 6;
+                }
+                case 3 -> { // rect
+                    if (i + 6 >= n) return;
+                    int x = (int) s[i + 1], y = (int) s[i + 2];
+                    int rw = (int) s[i + 3], rh = (int) s[i + 4];
+                    int c = 0xFF000000 | ((int) s[i + 5] & 0xFFFFFF);
+                    boolean filled = ((int) s[i + 6]) != 0;
+                    if (filled) {
+                        gg.fill(x, y, x + rw, y + rh, c);
+                    } else {
+                        gg.fill(x, y, x + rw, y + 1, c);
+                        gg.fill(x, y + rh - 1, x + rw, y + rh, c);
+                        gg.fill(x, y, x + 1, y + rh, c);
+                        gg.fill(x + rw - 1, y, x + rw, y + rh, c);
+                    }
+                    i += 7;
+                }
+                case 4 -> { // circle
+                    if (i + 5 >= n) return;
+                    int cx = (int) s[i + 1], cy = (int) s[i + 2], r = (int) s[i + 3];
+                    int c = 0xFF000000 | ((int) s[i + 4] & 0xFFFFFF);
+                    boolean filled = ((int) s[i + 5]) != 0;
+                    int r2 = r * r;
+                    int rIn = (r - 1) * (r - 1);
+                    for (int dy = -r; dy <= r; dy++) {
+                        for (int dx = -r; dx <= r; dx++) {
+                            int d = dx * dx + dy * dy;
+                            if (d > r2) continue;
+                            if (!filled && d < rIn) continue;
+                            gg.fill(cx + dx, cy + dy, cx + dx + 1, cy + dy + 1, c);
+                        }
+                    }
+                    i += 6;
+                }
+                case 5 -> { // triangle
+                    if (i + 9 >= n) return;
+                    int x1 = (int) s[i + 1], y1 = (int) s[i + 2];
+                    int x2 = (int) s[i + 3], y2 = (int) s[i + 4];
+                    int x3 = (int) s[i + 5], y3 = (int) s[i + 6];
+                    int c = 0xFF000000 | ((int) s[i + 7] & 0xFFFFFF);
+                    boolean filled = ((int) s[i + 8]) != 0;
+                    if (filled) {
+                        fillTriangle(gg, x1, y1, x2, y2, x3, y3, c);
+                    } else {
+                        drawLine(gg, x1, y1, x2, y2, c);
+                        drawLine(gg, x2, y2, x3, y3, c);
+                        drawLine(gg, x3, y3, x1, y1, c);
+                    }
+                    i += 9;
+                }
+                case 6 -> { // poly
+                    if (i + 1 >= n) return;
+                    int pn = (int) s[i + 1];
+                    if (pn < 2 || i + 1 + pn * 2 + 2 >= n) return;
+                    int[] xs = new int[pn], ys = new int[pn];
+                    for (int k = 0; k < pn; k++) {
+                        xs[k] = (int) s[i + 2 + k * 2];
+                        ys[k] = (int) s[i + 3 + k * 2];
+                    }
+                    int c = 0xFF000000 | ((int) s[i + 2 + pn * 2] & 0xFFFFFF);
+                    boolean filled = ((int) s[i + 3 + pn * 2]) != 0;
+                    if (filled && pn >= 3) {
+                        fillPolygon(gg, xs, ys, c);
+                    } else {
+                        for (int k = 0; k < pn; k++) {
+                            int kn = (k + 1) % pn;
+                            drawLine(gg, xs[k], ys[k], xs[kn], ys[kn], c);
+                        }
+                    }
+                    i += 4 + pn * 2;
+                }
+                case 7 -> { // text
+                    if (i + 4 >= n) return;
+                    int x = (int) s[i + 1], y = (int) s[i + 2];
+                    int c = 0xFF000000 | ((int) s[i + 3] & 0xFFFFFF);
+                    int len = (int) s[i + 4];
+                    if (len < 0 || i + 5 + len > n) return;
+                    StringBuilder sb = new StringBuilder(len);
+                    for (int k = 0; k < len; k++) sb.append((char) ((int) s[i + 5 + k]));
+                    gg.drawString(font, sb.toString(), x, y, c, false);
+                    i += 5 + len;
+                }
+                case 8 -> { // gradient
+                    if (i + 7 >= n) return;
+                    int gx = (int) s[i + 1], gy = (int) s[i + 2];
+                    int gw = (int) s[i + 3], gh = (int) s[i + 4];
+                    int c1 = (int) s[i + 5] & 0xFFFFFF;
+                    int c2 = (int) s[i + 6] & 0xFFFFFF;
+                    boolean vertical = ((int) s[i + 7]) != 0;
+                    int steps = vertical ? gh : gw;
+                    if (steps < 1) steps = 1;
+                    for (int k = 0; k < steps; k++) {
+                        double t = (double) k / Math.max(1, steps - 1);
+                        int blended = 0xFF000000 | lerpColor(c1, c2, t);
+                        if (vertical) gg.fill(gx, gy + k, gx + gw, gy + k + 1, blended);
+                        else          gg.fill(gx + k, gy, gx + k + 1, gy + gh, blended);
+                    }
+                    i += 8;
+                }
+                case 9 -> { // bezier (quadratic)
+                    if (i + 7 >= n) return;
+                    int bx1 = (int) s[i + 1], by1 = (int) s[i + 2];
+                    int bcx = (int) s[i + 3], bcy = (int) s[i + 4];
+                    int bx2 = (int) s[i + 5], by2 = (int) s[i + 6];
+                    int c = 0xFF000000 | ((int) s[i + 7] & 0xFFFFFF);
+                    int prevX = bx1, prevY = by1;
+                    int segs = 32;
+                    for (int k = 1; k <= segs; k++) {
+                        double t = (double) k / segs;
+                        double u = 1.0 - t;
+                        int px = (int) Math.round(u * u * bx1 + 2 * u * t * bcx + t * t * bx2);
+                        int py = (int) Math.round(u * u * by1 + 2 * u * t * bcy + t * t * by2);
+                        drawLine(gg, prevX, prevY, px, py, c);
+                        prevX = px; prevY = py;
+                    }
+                    i += 8;
+                }
+                case 10 -> { // image
+                    if (i + 5 >= n) return;
+                    int iw = (int) s[i + 1], ih = (int) s[i + 2];
+                    int ix = (int) s[i + 3], iy = (int) s[i + 4];
+                    int scale = Math.max(1, (int) s[i + 5]);
+                    int pixCount = iw * ih;
+                    if (iw <= 0 || ih <= 0 || i + 5 + pixCount >= n) return;
+                    for (int py = 0; py < ih; py++) {
+                        for (int px = 0; px < iw; px++) {
+                            int v = (int) s[i + 6 + py * iw + px];
+                            if (v < 0) continue; // -1 = transparent
+                            int c = 0xFF000000 | (v & 0xFFFFFF);
+                            int dx = ix + px * scale, dy = iy + py * scale;
+                            gg.fill(dx, dy, dx + scale, dy + scale, c);
+                        }
+                    }
+                    i += 6 + pixCount;
+                }
+                default -> { return; } // unknown opcode aborts to avoid runaway
+            }
+        }
+    }
+
+    private static int lerpColor(int c1, int c2, double t) {
+        int r1 = (c1 >> 16) & 0xFF, g1 = (c1 >> 8) & 0xFF, b1 = c1 & 0xFF;
+        int r2 = (c2 >> 16) & 0xFF, g2 = (c2 >> 8) & 0xFF, b2 = c2 & 0xFF;
+        int r = (int) (r1 + (r2 - r1) * t);
+        int g = (int) (g1 + (g2 - g1) * t);
+        int b = (int) (b1 + (b2 - b1) * t);
+        return (r << 16) | (g << 8) | b;
+    }
+
+    private static void fillTriangle(GuiGraphics gg, int x1, int y1, int x2, int y2, int x3, int y3, int color) {
+        int minY = Math.min(y1, Math.min(y2, y3));
+        int maxY = Math.max(y1, Math.max(y2, y3));
+        for (int y = minY; y <= maxY; y++) {
+            int[] xs = new int[3];
+            int n = 0;
+            n = addEdgeX(xs, n, x1, y1, x2, y2, y);
+            n = addEdgeX(xs, n, x2, y2, x3, y3, y);
+            n = addEdgeX(xs, n, x3, y3, x1, y1, y);
+            if (n < 2) continue;
+            int xa = Math.min(xs[0], xs[1]);
+            int xb = Math.max(xs[0], xs[1]);
+            gg.fill(xa, y, xb + 1, y + 1, color);
+        }
+    }
+
+    private static int addEdgeX(int[] xs, int n, int x1, int y1, int x2, int y2, int y) {
+        if (n >= 2) return n;
+        if ((y1 <= y && y2 > y) || (y2 <= y && y1 > y)) {
+            double t = (double) (y - y1) / (y2 - y1);
+            xs[n++] = (int) Math.round(x1 + t * (x2 - x1));
+        }
+        return n;
+    }
+
+    private static void fillPolygon(GuiGraphics gg, int[] xs, int[] ys, int color) {
+        int minY = Integer.MAX_VALUE, maxY = Integer.MIN_VALUE;
+        for (int v : ys) { if (v < minY) minY = v; if (v > maxY) maxY = v; }
+        int n = xs.length;
+        int[] nodeX = new int[n];
+        for (int y = minY; y <= maxY; y++) {
+            int nodes = 0;
+            int j = n - 1;
+            for (int k = 0; k < n; k++) {
+                if ((ys[k] < y && ys[j] >= y) || (ys[j] < y && ys[k] >= y)) {
+                    double t = (double) (y - ys[k]) / (ys[j] - ys[k]);
+                    nodeX[nodes++] = (int) Math.round(xs[k] + t * (xs[j] - xs[k]));
+                }
+                j = k;
+            }
+            // Sort
+            for (int a = 0; a < nodes - 1; a++)
+                for (int b = a + 1; b < nodes; b++)
+                    if (nodeX[a] > nodeX[b]) { int t = nodeX[a]; nodeX[a] = nodeX[b]; nodeX[b] = t; }
+            for (int k = 0; k + 1 < nodes; k += 2) {
+                gg.fill(nodeX[k], y, nodeX[k + 1] + 1, y + 1, color);
+            }
         }
     }
 }
