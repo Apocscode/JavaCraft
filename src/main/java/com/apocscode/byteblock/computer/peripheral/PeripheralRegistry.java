@@ -35,6 +35,9 @@ public class PeripheralRegistry {
         if (initialized) return;
         initialized = true;
 
+        // ByteBlock built-ins
+        register(new MonitorPeripheralAdapter());
+
         if (ModList.get().isLoaded("logiclink")) {
             register(new LogicLinkPeripheralAdapter());
         }

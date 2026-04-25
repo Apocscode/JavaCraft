@@ -32,10 +32,32 @@ public class MonitorBlockEntity extends BlockEntity {
     // Bluetooth registration
     private UUID deviceId = UUID.randomUUID();
 
-    // Display mode: "mirror" (default) or "test:<pattern>"
+    // Display mode: "mirror" (default), "test:<pattern>", or "text" (driven by peripheral API)
     private String displayMode = "mirror";
 
     private int autoDetectCooldown = 0;
+
+    // ── Text-buffer state (used when displayMode == "text") ──
+    public static final int TEXT_COLS = 80;
+    public static final int TEXT_ROWS = 25;
+    private final char[] textChars = new char[TEXT_COLS * TEXT_ROWS];
+    private final byte[] textFg    = new byte[TEXT_COLS * TEXT_ROWS]; // palette idx 0..15
+    private final byte[] textBg    = new byte[TEXT_COLS * TEXT_ROWS];
+    private int  termCursorX = 0, termCursorY = 0;
+    private int  termFg = 0;   // white  (palette index 0)
+    private int  termBg = 15;  // black  (palette index 15)
+    private double textScale = 1.0;
+    /** Bumped on any change to the text buffer (origin-only). Drives renderer cache invalidation. */
+    private long textVersion = 1L;
+    private long lastSyncedTextVersion = 0L;
+    /** Set by client/server when a player right-clicks the screen in text mode. */
+    private int  lastTouchX = -1, lastTouchY = -1;
+    private long lastTouchVersion = 0L;
+    {
+        java.util.Arrays.fill(textChars, ' ');
+        java.util.Arrays.fill(textFg, (byte) 0);   // white
+        java.util.Arrays.fill(textBg, (byte) 15);  // black
+    }
 
     public MonitorBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.MONITOR.get(), pos, state);
@@ -333,6 +355,146 @@ public class MonitorBlockEntity extends BlockEntity {
     public int getOffsetX() { return offsetX; }
     public int getOffsetY() { return offsetY; }
     public BlockPos getLinkedComputerPos() { return linkedComputerPos; }
+    public long getTextVersion() { return textVersion; }
+    public char[] getTextChars() { return textChars; }
+    public byte[] getTextFg() { return textFg; }
+    public byte[] getTextBg() { return textBg; }
+    public double getTextScale() { return textScale; }
+    public int getLastTouchX() { return lastTouchX; }
+    public int getLastTouchY() { return lastTouchY; }
+
+    // ── Lua-side terminal API (called on the origin entity) ──
+
+    private void termMarkDirty() {
+        textVersion++;
+        if (level != null && !level.isClientSide()) {
+            // Throttle network sync to once every 4 ticks (5 Hz) to avoid spam.
+            if (textVersion - lastSyncedTextVersion >= 1
+                    && level.getGameTime() % 4 == 0) {
+                lastSyncedTextVersion = textVersion;
+                syncToClient();
+            }
+        }
+    }
+
+    /** Force a sync regardless of throttle (used at end of a Lua call burst). */
+    public void termFlush() {
+        if (level != null && !level.isClientSide() && textVersion != lastSyncedTextVersion) {
+            lastSyncedTextVersion = textVersion;
+            syncToClient();
+        }
+    }
+
+    public void termClear() {
+        java.util.Arrays.fill(textChars, ' ');
+        java.util.Arrays.fill(textFg, (byte) (termFg & 0xF));
+        java.util.Arrays.fill(textBg, (byte) (termBg & 0xF));
+        termCursorX = 0; termCursorY = 0;
+        termMarkDirty();
+    }
+
+    public void termClearLine() {
+        if (termCursorY < 0 || termCursorY >= TEXT_ROWS) return;
+        int off = termCursorY * TEXT_COLS;
+        for (int i = 0; i < TEXT_COLS; i++) {
+            textChars[off + i] = ' ';
+            textFg[off + i] = (byte) (termFg & 0xF);
+            textBg[off + i] = (byte) (termBg & 0xF);
+        }
+        termMarkDirty();
+    }
+
+    public void termSetCursorPos(int x, int y) {
+        termCursorX = x; termCursorY = y;
+    }
+
+    public int termGetCursorX() { return termCursorX; }
+    public int termGetCursorY() { return termCursorY; }
+
+    public void termSetTextColor(int paletteIdx) { termFg = paletteIdx & 0xF; }
+    public void termSetBackgroundColor(int paletteIdx) { termBg = paletteIdx & 0xF; }
+    public int  termGetTextColor() { return termFg; }
+    public int  termGetBackgroundColor() { return termBg; }
+
+    public void termSetTextScale(double s) {
+        if (s < 0.5) s = 0.5; else if (s > 5.0) s = 5.0;
+        if (s != textScale) { textScale = s; termMarkDirty(); }
+    }
+
+    public void termWrite(String s) {
+        if (s == null || s.isEmpty()) return;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\n') {
+                termCursorX = 0;
+                termCursorY++;
+                continue;
+            }
+            if (c == '\r') { termCursorX = 0; continue; }
+            if (termCursorX >= 0 && termCursorX < TEXT_COLS
+                    && termCursorY >= 0 && termCursorY < TEXT_ROWS) {
+                int off = termCursorY * TEXT_COLS + termCursorX;
+                textChars[off] = c;
+                textFg[off] = (byte) (termFg & 0xF);
+                textBg[off] = (byte) (termBg & 0xF);
+            }
+            termCursorX++;
+        }
+        termMarkDirty();
+    }
+
+    /** Scroll the buffer vertically by n rows (positive = up). */
+    public void termScroll(int n) {
+        if (n == 0 || n >= TEXT_ROWS || -n >= TEXT_ROWS) {
+            // Beyond buffer: clear everything (preserve current colors)
+            for (int i = 0; i < textChars.length; i++) {
+                textChars[i] = ' ';
+                textFg[i] = (byte) (termFg & 0xF);
+                textBg[i] = (byte) (termBg & 0xF);
+            }
+            termMarkDirty();
+            return;
+        }
+        if (n > 0) {
+            // Move row k -> row k-n (for k >= n). Top n rows become blank.
+            for (int k = n; k < TEXT_ROWS; k++) {
+                System.arraycopy(textChars, k * TEXT_COLS, textChars, (k - n) * TEXT_COLS, TEXT_COLS);
+                System.arraycopy(textFg,    k * TEXT_COLS, textFg,    (k - n) * TEXT_COLS, TEXT_COLS);
+                System.arraycopy(textBg,    k * TEXT_COLS, textBg,    (k - n) * TEXT_COLS, TEXT_COLS);
+            }
+            for (int k = TEXT_ROWS - n; k < TEXT_ROWS; k++) {
+                int off = k * TEXT_COLS;
+                for (int i = 0; i < TEXT_COLS; i++) {
+                    textChars[off + i] = ' ';
+                    textFg[off + i] = (byte) (termFg & 0xF);
+                    textBg[off + i] = (byte) (termBg & 0xF);
+                }
+            }
+        } else {
+            int m = -n;
+            for (int k = TEXT_ROWS - 1 - m; k >= 0; k--) {
+                System.arraycopy(textChars, k * TEXT_COLS, textChars, (k + m) * TEXT_COLS, TEXT_COLS);
+                System.arraycopy(textFg,    k * TEXT_COLS, textFg,    (k + m) * TEXT_COLS, TEXT_COLS);
+                System.arraycopy(textBg,    k * TEXT_COLS, textBg,    (k + m) * TEXT_COLS, TEXT_COLS);
+            }
+            for (int k = 0; k < m; k++) {
+                int off = k * TEXT_COLS;
+                for (int i = 0; i < TEXT_COLS; i++) {
+                    textChars[off + i] = ' ';
+                    textFg[off + i] = (byte) (termFg & 0xF);
+                    textBg[off + i] = (byte) (termBg & 0xF);
+                }
+            }
+        }
+        termMarkDirty();
+    }
+
+    public void recordTouch(int x, int y) {
+        this.lastTouchX = x;
+        this.lastTouchY = y;
+        this.lastTouchVersion++;
+        // Don't sync touch back to client — server-only state
+    }
 
     public MonitorBlockEntity getOriginEntity() {
         if (level == null) return null;
@@ -377,6 +539,16 @@ public class MonitorBlockEntity extends BlockEntity {
         }
         tag.putUUID("DeviceId", deviceId);
         tag.putString("DisplayMode", displayMode);
+        // Text buffer (only meaningful when displayMode == "text")
+        tag.putString("TermText", new String(textChars));
+        tag.putByteArray("TermFg", textFg);
+        tag.putByteArray("TermBg", textBg);
+        tag.putInt("TermCx", termCursorX);
+        tag.putInt("TermCy", termCursorY);
+        tag.putInt("TermFgCol", termFg);
+        tag.putInt("TermBgCol", termBg);
+        tag.putDouble("TermScale", textScale);
+        tag.putLong("TermVer", textVersion);
     }
 
     @Override
@@ -394,5 +566,24 @@ public class MonitorBlockEntity extends BlockEntity {
         }
         if (tag.hasUUID("DeviceId")) deviceId = tag.getUUID("DeviceId");
         if (tag.contains("DisplayMode")) displayMode = tag.getString("DisplayMode");
+        if (tag.contains("TermText")) {
+            String s = tag.getString("TermText");
+            int n = Math.min(s.length(), textChars.length);
+            for (int i = 0; i < n; i++) textChars[i] = s.charAt(i);
+        }
+        if (tag.contains("TermFg")) {
+            byte[] a = tag.getByteArray("TermFg");
+            System.arraycopy(a, 0, textFg, 0, Math.min(a.length, textFg.length));
+        }
+        if (tag.contains("TermBg")) {
+            byte[] a = tag.getByteArray("TermBg");
+            System.arraycopy(a, 0, textBg, 0, Math.min(a.length, textBg.length));
+        }
+        if (tag.contains("TermCx")) termCursorX = tag.getInt("TermCx");
+        if (tag.contains("TermCy")) termCursorY = tag.getInt("TermCy");
+        if (tag.contains("TermFgCol")) termFg = tag.getInt("TermFgCol");
+        if (tag.contains("TermBgCol")) termBg = tag.getInt("TermBgCol");
+        if (tag.contains("TermScale")) textScale = tag.getDouble("TermScale");
+        if (tag.contains("TermVer")) textVersion = tag.getLong("TermVer");
     }
 }

@@ -38,8 +38,15 @@ public class PixelBuffer {
 
     // ── Core pixel operations ───────────────────────────────
 
+    /** Bumped on any mutating operation. Renderers can compare against last
+     * uploaded value to skip GPU re-uploads when the framebuffer is unchanged. */
+    private long version = 1L;
+    public long getVersion() { return version; }
+    public void markDirty() { version++; }
+
     public void clear(int color) {
         java.util.Arrays.fill(pixels, color);
+        version++;
     }
 
     public void clear() {
@@ -49,6 +56,7 @@ public class PixelBuffer {
     public void setPixel(int x, int y, int argb) {
         if (x >= 0 && x < width && y >= 0 && y < height) {
             pixels[y * width + x] = argb;
+            version++;
         }
     }
 
@@ -76,6 +84,7 @@ public class PixelBuffer {
                 pixels[off + px] = color;
             }
         }
+        if (x2 > x1 && y2 > y1) version++;
     }
 
     public void drawRect(int x, int y, int w, int h, int color) {

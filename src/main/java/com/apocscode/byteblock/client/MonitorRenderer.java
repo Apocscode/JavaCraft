@@ -50,6 +50,8 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         final PixelBuffer stagingBuffer;
         long lastUsedTick;
         long lastUploadTick;
+        long lastUploadedSourceVersion = -1;
+        String lastUploadedSig = "";
 
         ScreenTexture(NativeImage image, DynamicTexture texture, ResourceLocation location) {
             this.image = image;
@@ -71,19 +73,21 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         if (origin == null) return;
 
         BlockPos originPos = origin.getBlockPos();
-        BlockPos linkedPos = origin.getLinkedComputerPos();
-        if (linkedPos == null) return;
-
-        // Get linked computer's PixelBuffer
-        BlockEntity compBe = be.getLevel().getBlockEntity(linkedPos);
-        if (!(compBe instanceof ComputerBlockEntity computer)) return;
-
-        PixelBuffer pb = computer.getOS().getPixelBuffer();
-        if (pb == null) return;
-
         long currentTick = be.getLevel().getGameTime();
 
-        // Get or create texture for this formation
+        // Determine source: linked-computer mirror, monitor's own text buffer, or test pattern.
+        String displayMode = origin.getDisplayMode();
+        BlockPos linkedPos = origin.getLinkedComputerPos();
+        ComputerBlockEntity computer = null;
+        if (linkedPos != null) {
+            BlockEntity compBe = be.getLevel().getBlockEntity(linkedPos);
+            if (compBe instanceof ComputerBlockEntity c) computer = c;
+        }
+        boolean isMirror = displayMode == null || "mirror".equals(displayMode);
+        boolean isText   = "text".equals(displayMode);
+        boolean isTest   = displayMode != null && displayMode.startsWith("test:");
+
+        // Get/create texture
         ScreenTexture st = TEXTURE_CACHE.get(originPos);
         if (st == null) {
             st = createTexture(originPos);
@@ -91,16 +95,46 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         }
         st.lastUsedTick = currentTick;
 
-        // Upload pixels once per tick per formation
+        // Decide what to upload (with dirty-tracking to skip GPU work when nothing changed).
         if (st.lastUploadTick != currentTick) {
             st.lastUploadTick = currentTick;
-            PixelBuffer source = pb;
-            String displayMode = origin.getDisplayMode();
-            if (displayMode != null && !"mirror".equals(displayMode)) {
-                source = st.stagingBuffer;
-                renderDisplayMode(source, displayMode);
+            if (isMirror) {
+                if (computer == null) {
+                    String sig = "tomb:" + (linkedPos == null ? "nolink" : linkedPos.asLong());
+                    if (!sig.equals(st.lastUploadedSig)) {
+                        renderTombstone(st.stagingBuffer, linkedPos);
+                        uploadPixels(st, st.stagingBuffer);
+                        st.lastUploadedSig = sig;
+                        st.lastUploadedSourceVersion = -1;
+                    }
+                } else {
+                    PixelBuffer pb = computer.getOS().getPixelBuffer();
+                    if (pb == null) return;
+                    long ver = pb.getVersion();
+                    if (ver != st.lastUploadedSourceVersion || !"mirror".equals(st.lastUploadedSig)) {
+                        uploadPixels(st, pb);
+                        st.lastUploadedSourceVersion = ver;
+                        st.lastUploadedSig = "mirror";
+                    }
+                }
+            } else if (isText) {
+                long ver = origin.getTextVersion();
+                String sig = "text:" + ver;
+                if (!sig.equals(st.lastUploadedSig)) {
+                    renderTextBuffer(st.stagingBuffer, origin);
+                    uploadPixels(st, st.stagingBuffer);
+                    st.lastUploadedSig = sig;
+                    st.lastUploadedSourceVersion = -1;
+                }
+            } else if (isTest) {
+                String sig = displayMode;
+                if (!sig.equals(st.lastUploadedSig)) {
+                    renderDisplayMode(st.stagingBuffer, displayMode);
+                    uploadPixels(st, st.stagingBuffer);
+                    st.lastUploadedSig = sig;
+                    st.lastUploadedSourceVersion = -1;
+                }
             }
-            uploadPixels(st, source);
         }
 
         // Render the screen quad for this block
@@ -160,6 +194,84 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         int textW = label.length() * PixelBuffer.CELL_W;
         pb.fillRect((w - textW) / 2 - 6, h - 24, textW + 12, 18, 0xCC000000);
         pb.drawStringCentered(0, w, h - 22, label, 0xFFFFFFFF);
+    }
+
+    /** Render the monitor's own terminal buffer (used in display_mode == "text"). */
+    private static void renderTextBuffer(PixelBuffer pb, MonitorBlockEntity origin) {
+        int w = pb.getWidth();
+        int h = pb.getHeight();
+        char[] chars = origin.getTextChars();
+        byte[] fg    = origin.getTextFg();
+        byte[] bg    = origin.getTextBg();
+        int cols = MonitorBlockEntity.TEXT_COLS;
+        int rows = MonitorBlockEntity.TEXT_ROWS;
+        // Use the formation size to scale text up: bigger formation = larger characters.
+        // textScale further multiplies size (scale 1 = normal CC monitor text).
+        double scale = Math.max(0.5, Math.min(5.0, origin.getTextScale()));
+        int multiW = origin.getMultiWidth();
+        int multiH = origin.getMultiHeight();
+        int effCols = Math.max(1, (int)Math.round(cols * multiW / scale));
+        int effRows = Math.max(1, (int)Math.round(rows * multiH / scale));
+        // Cap at our buffer
+        effCols = Math.min(effCols, cols);
+        effRows = Math.min(effRows, rows);
+        int cellW = w / effCols;
+        int cellH = h / effRows;
+        // First fill all backgrounds
+        for (int y = 0; y < effRows; y++) {
+            int rowOff = y * cols;
+            for (int x = 0; x < effCols; x++) {
+                int idx = rowOff + x;
+                int bgC = paletteColor(bg[idx] & 0xF);
+                pb.fillRect(x * cellW, y * cellH, cellW, cellH, bgC);
+            }
+        }
+        // Then draw characters
+        int fontW = PixelBuffer.CELL_W;
+        int fontH = PixelBuffer.CELL_H;
+        for (int y = 0; y < effRows; y++) {
+            int rowOff = y * cols;
+            int py = y * cellH + Math.max(0, (cellH - fontH) / 2);
+            for (int x = 0; x < effCols; x++) {
+                int idx = rowOff + x;
+                char c = chars[idx];
+                if (c == ' ' || c == 0) continue;
+                int fgC = paletteColor(fg[idx] & 0xF);
+                int px = x * cellW + Math.max(0, (cellW - fontW) / 2);
+                pb.drawChar(px, py, c, fgC);
+            }
+        }
+    }
+
+    /** "No signal" tombstone shown in mirror mode when the linked computer is missing. */
+    private static void renderTombstone(PixelBuffer pb, BlockPos linkedPos) {
+        int w = pb.getWidth();
+        int h = pb.getHeight();
+        // Snow noise
+        java.util.Random rng = new java.util.Random(0xCAFEBABEL);
+        for (int y = 0; y < h; y += 4) {
+            for (int x = 0; x < w; x += 4) {
+                int v = rng.nextInt(64);
+                int g = 0x33 + v;
+                pb.fillRect(x, y, 4, 4, 0xFF000000 | (g << 16) | (g << 8) | g);
+            }
+        }
+        // Banner
+        int bw = 380, bh = 80;
+        pb.fillRoundRect((w - bw) / 2, (h - bh) / 2, bw, bh, 8, 0xCC000000);
+        pb.drawRect((w - bw) / 2, (h - bh) / 2, bw, bh, 0xFFFF4444);
+        pb.drawStringCentered(0, w, h / 2 - 20, "NO SIGNAL", 0xFFFF4444);
+        String detail = (linkedPos == null)
+                ? "No computer linked. Place one adjacent."
+                : ("Lost link to computer at "
+                    + linkedPos.getX() + ", " + linkedPos.getY() + ", " + linkedPos.getZ());
+        pb.drawStringCentered(0, w, h / 2 + 4, detail, 0xFFCCCCCC);
+    }
+
+    private static int paletteColor(int idx) {
+        int[] p = com.apocscode.byteblock.computer.TerminalBuffer.PALETTE;
+        if (idx < 0 || idx >= p.length) return 0xFF000000;
+        return p[idx];
     }
 
     private static void renderColorBars(PixelBuffer pb, int w, int h) {

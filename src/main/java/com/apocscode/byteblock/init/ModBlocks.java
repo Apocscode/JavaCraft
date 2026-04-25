@@ -82,6 +82,7 @@ public class ModBlocks {
                     .strength(2.0f)
                     .sound(SoundType.METAL)
                     .requiresCorrectToolForDrops()
+                    .lightLevel(state -> 7)
                     .noOcclusion()));
 
     // Redstone Relay — bridge between computer programs and physical redstone
