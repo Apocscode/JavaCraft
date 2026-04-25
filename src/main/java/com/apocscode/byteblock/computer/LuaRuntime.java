@@ -3985,9 +3985,84 @@ public class LuaRuntime {
             }
         });
 
+        // textutils.complete(partial [, environment]) — returns list of identifier
+        // completions, mirroring CC:Tweaked. Walks dotted/colon paths through
+        // tables in the supplied environment (defaulting to globals) and returns
+        // the suffixes that complete the partial token. Functions get "(", tables
+        // get "." or ":" depending on traversal.
         tu.set("complete", new VarArgFunction() {
-            @Override public Varargs invoke(Varargs a) { return new LuaTable(); }
+            @Override public Varargs invoke(Varargs a) {
+                String partial = a.optjstring(1, "");
+                LuaValue env = a.arg(2);
+                if (!env.istable()) env = globals;
+                LuaTable out = new LuaTable();
+                if (partial == null) partial = "";
+                // Split at last separator (. or :). Everything before is the table
+                // path; everything after is the prefix to match against keys.
+                int lastDot = partial.lastIndexOf('.');
+                int lastColon = partial.lastIndexOf(':');
+                int split = Math.max(lastDot, lastColon);
+                LuaValue scope = env;
+                String prefix;
+                boolean colonScope = false;
+                if (split >= 0) {
+                    String path = partial.substring(0, split);
+                    prefix = partial.substring(split + 1);
+                    colonScope = (split == lastColon);
+                    // Walk the dotted path.
+                    String[] parts = path.split("[.:]");
+                    for (String p : parts) {
+                        if (p.isEmpty()) continue;
+                        LuaValue next = scope.get(p);
+                        if (!next.istable()) { return out; }
+                        scope = next;
+                    }
+                } else {
+                    prefix = partial;
+                }
+                if (!scope.istable()) return out;
+                LuaTable st = scope.checktable();
+                LuaValue k = LuaValue.NIL;
+                int idx = 1;
+                while (true) {
+                    Varargs n;
+                    try { n = st.next(k); }
+                    catch (LuaError e) { break; }
+                    k = n.arg1();
+                    if (k.isnil()) break;
+                    if (!k.isstring()) continue;
+                    String key = k.tojstring();
+                    if (!key.startsWith(prefix)) continue;
+                    String suffix = key.substring(prefix.length());
+                    LuaValue v = n.arg(2);
+                    if (v.isfunction()) {
+                        suffix = suffix + "(";
+                    } else if (v.istable()) {
+                        // For tables, suggest both . and : continuations.
+                        out.set(idx++, LuaValue.valueOf(suffix + "."));
+                        if (!colonScope) out.set(idx++, LuaValue.valueOf(suffix + ":"));
+                        continue;
+                    }
+                    out.set(idx++, LuaValue.valueOf(suffix));
+                }
+                return out;
+            }
         });
+
+        // CC:Tweaked sentinels for JSON serialization edge cases. empty_json_array
+        // forces an empty table to encode as `[]` instead of `{}`. json_null
+        // encodes as the literal `null`.
+        LuaTable emptyJsonArray = new LuaTable();
+        LuaTable emptyJsonMt = new LuaTable();
+        emptyJsonMt.set("__name", LuaValue.valueOf("empty_json_array"));
+        emptyJsonArray.setmetatable(emptyJsonMt);
+        tu.set("empty_json_array", emptyJsonArray);
+
+        LuaTable jsonNull = new LuaTable();
+        LuaTable jsonNullMt = new LuaTable();
+        jsonNullMt.set("__name", LuaValue.valueOf("json_null"));
+        jsonNull.setmetatable(jsonNullMt);
+        tu.set("json_null", jsonNull);
     }
 
     // ---------- parallel ----------
@@ -5607,6 +5682,18 @@ public class LuaRuntime {
         if (v.isstring())        { jsonEscape(v.tojstring(), sb); return; }
         if (v.istable()) {
             LuaTable t = v.checktable();
+            // CC sentinels: textutils.empty_json_array and textutils.json_null
+            // are tagged via metatable __name. Honor them so callers can force
+            // empty array / explicit null encodings.
+            LuaValue mt = t.getmetatable();
+            if (mt != null && mt.istable()) {
+                LuaValue nm = mt.get("__name");
+                if (nm.isstring()) {
+                    String name = nm.tojstring();
+                    if ("json_null".equals(name))         { sb.append("null"); return; }
+                    if ("empty_json_array".equals(name))  { sb.append("[]"); return; }
+                }
+            }
             int len = t.length();
             boolean asArray = len > 0;
             // Determine if keys are all 1..len
