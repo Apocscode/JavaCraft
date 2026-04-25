@@ -3309,6 +3309,7 @@ public class LuaRuntime {
         installCCParityGaps();
         installDiskAPI();
         installImageAPI();
+        installOpenComputersExtras();
         installPreloadModules();
     }
 
@@ -3560,6 +3561,244 @@ public class LuaRuntime {
             if (d < bestDist) { bestDist = d; bestIdx = i; }
         }
         return bestIdx;
+    }
+
+    // ---------- OpenComputers-inspired extras: event.* / text.* / uuid.* ----------
+    // Pure-Lua libraries borrowed from OpenComputers (ocdoc.cil.li). They sit
+    // alongside the CC:Tweaked APIs without conflict (no globals named "event",
+    // "text", or "uuid" exist in CC). Built on our existing primitives so they
+    // require no scheduler changes.
+    //
+    //   event.listen(name, fn)   register persistent listener (fires inside event.pull)
+    //   event.ignore(name, fn)   unregister
+    //   event.timer(secs, fn[, n])  fire fn after delay, optionally repeated n times
+    //   event.cancel(timerId)    stop a pending event.timer
+    //   event.pull([timeout][, name][, ...])  CC os.pullEvent + OC timeout/filter args
+    //   event.pullFiltered([timeout][, filterFn])  custom filter callback
+    //   event.pullMultiple(...)  pull next event matching any of the supplied names
+    //   event.push(name, ...)    alias of os.queueEvent
+    //
+    //   text.padLeft(s, n) / text.padRight(s, n) / text.trim(s)
+    //   text.tokenize(s)         split on whitespace runs
+    //   text.detab(s, tabWidth)  expand \t to spaces aligned to tabWidth
+    //   text.wrap(s, w)          wrap to width, returns (firstLine, rest)
+    //
+    //   uuid.next()              random UUID v4 (8-4-4-4-12 hex)
+    private void installOpenComputersExtras() {
+        execute(
+            "do\n" +
+            "  -- ===== event API (OpenComputers-style) =====\n" +
+            "  local listeners = {}        -- name -> array of callbacks\n" +
+            "  local timerCallbacks = {}   -- timerId -> { fn, interval, remaining }\n" +
+            "  event = {}\n" +
+            "  function event.listen(name, fn)\n" +
+            "    if type(name) ~= 'string' or type(fn) ~= 'function' then return false end\n" +
+            "    local list = listeners[name]\n" +
+            "    if not list then list = {}; listeners[name] = list end\n" +
+            "    for i = 1, #list do if list[i] == fn then return false end end\n" +
+            "    list[#list + 1] = fn\n" +
+            "    return true\n" +
+            "  end\n" +
+            "  function event.ignore(name, fn)\n" +
+            "    local list = listeners[name]\n" +
+            "    if not list then return false end\n" +
+            "    for i = 1, #list do\n" +
+            "      if list[i] == fn then table.remove(list, i); return true end\n" +
+            "    end\n" +
+            "    return false\n" +
+            "  end\n" +
+            "  -- Internal: dispatch to listeners + handle timer callbacks. Returns\n" +
+            "  -- true to forward the event to the caller, false to suppress (a\n" +
+            "  -- timer fired its callback and the user shouldn't see it).\n" +
+            "  local function dispatch(name, ...)\n" +
+            "    if name == 'timer' then\n" +
+            "      local id = ...\n" +
+            "      local cb = timerCallbacks[id]\n" +
+            "      if cb then\n" +
+            "        local ok, err = pcall(cb.fn)\n" +
+            "        if not ok and event.onError then pcall(event.onError, err) end\n" +
+            "        cb.remaining = cb.remaining - 1\n" +
+            "        if cb.remaining > 0 and cb.interval > 0 then\n" +
+            "          local newId = os.startTimer(cb.interval)\n" +
+            "          timerCallbacks[newId] = cb\n" +
+            "        end\n" +
+            "        timerCallbacks[id] = nil\n" +
+            "        return false\n" +
+            "      end\n" +
+            "    end\n" +
+            "    local list = listeners[name]\n" +
+            "    if list then\n" +
+            "      local i = 1\n" +
+            "      while i <= #list do\n" +
+            "        local fn = list[i]\n" +
+            "        local ok, ret = pcall(fn, name, ...)\n" +
+            "        if not ok then\n" +
+            "          if event.onError then pcall(event.onError, ret) end\n" +
+            "          table.remove(list, i)\n" +
+            "        elseif ret == false then\n" +
+            "          table.remove(list, i)\n" +
+            "        else\n" +
+            "          i = i + 1\n" +
+            "        end\n" +
+            "      end\n" +
+            "    end\n" +
+            "    return true\n" +
+            "  end\n" +
+            "  function event.timer(interval, fn, times)\n" +
+            "    times = times or 1\n" +
+            "    local id = os.startTimer(interval)\n" +
+            "    timerCallbacks[id] = { fn = fn, interval = interval, remaining = times }\n" +
+            "    return id\n" +
+            "  end\n" +
+            "  function event.cancel(timerId)\n" +
+            "    if timerCallbacks[timerId] then\n" +
+            "      timerCallbacks[timerId] = nil\n" +
+            "      pcall(os.cancelTimer, timerId)\n" +
+            "      return true\n" +
+            "    end\n" +
+            "    return false\n" +
+            "  end\n" +
+            "  function event.push(...) return os.queueEvent(...) end\n" +
+            "  -- event.pull([timeout][, name][, ...filters])\n" +
+            "  function event.pull(...)\n" +
+            "    local args = {...}\n" +
+            "    local i = 1\n" +
+            "    local timeout = nil\n" +
+            "    if type(args[1]) == 'number' then timeout = args[1]; i = 2 end\n" +
+            "    local nameFilter = args[i]\n" +
+            "    local extraFilters = {}\n" +
+            "    for j = i + 1, #args do extraFilters[j - i] = args[j] end\n" +
+            "    local timerId\n" +
+            "    if timeout then timerId = os.startTimer(timeout) end\n" +
+            "    while true do\n" +
+            "      local ev = { os.pullEventRaw() }\n" +
+            "      local name = ev[1]\n" +
+            "      if name == 'timer' and timerId and ev[2] == timerId then\n" +
+            "        return nil\n" +
+            "      end\n" +
+            "      local rest = {}; for k = 2, #ev do rest[k-1] = ev[k] end\n" +
+            "      local forward = dispatch(name, table.unpack(rest))\n" +
+            "      if forward then\n" +
+            "        local match = true\n" +
+            "        if nameFilter and not string.match(tostring(name), nameFilter) then match = false end\n" +
+            "        if match then\n" +
+            "          for k, v in pairs(extraFilters) do\n" +
+            "            if v ~= nil and rest[k] ~= v then match = false; break end\n" +
+            "          end\n" +
+            "        end\n" +
+            "        if match then\n" +
+            "          if timerId then pcall(os.cancelTimer, timerId) end\n" +
+            "          return name, table.unpack(rest)\n" +
+            "        end\n" +
+            "      end\n" +
+            "    end\n" +
+            "  end\n" +
+            "  function event.pullFiltered(timeout, filter)\n" +
+            "    if type(timeout) == 'function' then filter = timeout; timeout = nil end\n" +
+            "    local timerId\n" +
+            "    if timeout then timerId = os.startTimer(timeout) end\n" +
+            "    while true do\n" +
+            "      local ev = { os.pullEventRaw() }\n" +
+            "      local name = ev[1]\n" +
+            "      if name == 'timer' and timerId and ev[2] == timerId then return nil end\n" +
+            "      local rest = {}; for k = 2, #ev do rest[k-1] = ev[k] end\n" +
+            "      if dispatch(name, table.unpack(rest)) then\n" +
+            "        if not filter or filter(name, table.unpack(rest)) then\n" +
+            "          if timerId then pcall(os.cancelTimer, timerId) end\n" +
+            "          return name, table.unpack(rest)\n" +
+            "        end\n" +
+            "      end\n" +
+            "    end\n" +
+            "  end\n" +
+            "  function event.pullMultiple(...)\n" +
+            "    local names = {...}\n" +
+            "    local set = {}; for _, n in ipairs(names) do set[n] = true end\n" +
+            "    while true do\n" +
+            "      local ev = { os.pullEventRaw() }\n" +
+            "      local name = ev[1]\n" +
+            "      local rest = {}; for k = 2, #ev do rest[k-1] = ev[k] end\n" +
+            "      if dispatch(name, table.unpack(rest)) and set[name] then\n" +
+            "        return name, table.unpack(rest)\n" +
+            "      end\n" +
+            "    end\n" +
+            "  end\n" +
+            "\n" +
+            "  -- ===== text API (OpenComputers-style) =====\n" +
+            "  text = {}\n" +
+            "  function text.padRight(s, n)\n" +
+            "    s = tostring(s); if #s >= n then return s end\n" +
+            "    return s .. string.rep(' ', n - #s)\n" +
+            "  end\n" +
+            "  function text.padLeft(s, n)\n" +
+            "    s = tostring(s); if #s >= n then return s end\n" +
+            "    return string.rep(' ', n - #s) .. s\n" +
+            "  end\n" +
+            "  function text.trim(s)\n" +
+            "    s = tostring(s); return (s:gsub('^%s+', ''):gsub('%s+$', ''))\n" +
+            "  end\n" +
+            "  function text.tokenize(s)\n" +
+            "    local out, i = {}, 1\n" +
+            "    for tok in tostring(s):gmatch('%S+') do out[i] = tok; i = i + 1 end\n" +
+            "    return out\n" +
+            "  end\n" +
+            "  function text.detab(s, tabWidth)\n" +
+            "    tabWidth = tabWidth or 8\n" +
+            "    local out, col = {}, 0\n" +
+            "    for c in tostring(s):gmatch('.') do\n" +
+            "      if c == '\\t' then\n" +
+            "        local pad = tabWidth - (col % tabWidth)\n" +
+            "        out[#out+1] = string.rep(' ', pad); col = col + pad\n" +
+            "      elseif c == '\\n' then\n" +
+            "        out[#out+1] = c; col = 0\n" +
+            "      else\n" +
+            "        out[#out+1] = c; col = col + 1\n" +
+            "      end\n" +
+            "    end\n" +
+            "    return table.concat(out)\n" +
+            "  end\n" +
+            "  function text.wrap(s, width)\n" +
+            "    s = tostring(s); width = width or 80\n" +
+            "    if #s <= width then return s, '' end\n" +
+            "    -- Try to break at last whitespace within width.\n" +
+            "    local cut = width\n" +
+            "    for i = width, 1, -1 do\n" +
+            "      if s:sub(i, i):match('%s') then cut = i - 1; break end\n" +
+            "    end\n" +
+            "    local first = s:sub(1, cut)\n" +
+            "    local rest  = s:sub(cut + 1):gsub('^%s+', '')\n" +
+            "    return first, rest\n" +
+            "  end\n" +
+            "  function text.wrappedLines(s, width)\n" +
+            "    local rest = s\n" +
+            "    return function()\n" +
+            "      if rest == nil or rest == '' then return nil end\n" +
+            "      local line\n" +
+            "      line, rest = text.wrap(rest, width)\n" +
+            "      return line\n" +
+            "    end\n" +
+            "  end\n" +
+            "\n" +
+            "  -- ===== uuid (OpenComputers-style) =====\n" +
+            "  uuid = {}\n" +
+            "  function uuid.next()\n" +
+            "    local hex = '0123456789abcdef'\n" +
+            "    local function chars(n)\n" +
+            "      local t = {}\n" +
+            "      for i = 1, n do\n" +
+            "        local r = math.random(1, 16)\n" +
+            "        t[i] = hex:sub(r, r)\n" +
+            "      end\n" +
+            "      return table.concat(t)\n" +
+            "    end\n" +
+            "    -- v4 layout: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx\n" +
+            "    -- where y is 8/9/a/b. Use math.random to choose y.\n" +
+            "    local yChars = '89ab'\n" +
+            "    local y = yChars:sub(math.random(1, 4), math.random(1, 4))\n" +
+            "    return chars(8) .. '-' .. chars(4) .. '-4' .. chars(3)\n" +
+            "        .. '-' .. y .. chars(3) .. '-' .. chars(12)\n" +
+            "  end\n" +
+            "end\n",
+            "=oc_extras");
     }
 
     // ---------- preload bundled Lua modules (basalt, pine3d) ----------
