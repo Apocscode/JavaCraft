@@ -50,6 +50,12 @@ public class PeripheralRegistry {
         if (ModList.get().isLoaded("fxntstorage")) {
             register(new CreateStoragePeripheralAdapter());
         }
+        if (ModList.get().isLoaded("mekanism")) {
+            register(new MekanismPeripheralAdapter());
+        }
+
+        // Universal capability fallback — must be LAST so specific adapters win.
+        register(new GenericPeripheralAdapter());
     }
 
     /**
