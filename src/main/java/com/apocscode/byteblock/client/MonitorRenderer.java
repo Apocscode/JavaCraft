@@ -382,9 +382,13 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         int offX = be.getOffsetX();
         int offY = be.getOffsetY();
 
-        // UV coordinates for this block's slice of the full texture
-        float u0 = (float) offX / multiW;
-        float u1 = (float) (offX + 1) / multiW;
+        // UV coordinates for this block's slice of the full texture.
+        // Note: a screen-facing player sees the block's local +X axis on their LEFT
+        // (when facing NORTH-facing block, world +X = east = player left). We mirror
+        // the per-block U range and swap the quad's U vertices so the texture reads
+        // left-to-right naturally across multi-block formations.
+        float u0 = (float) (multiW - 1 - offX) / multiW;
+        float u1 = (float) (multiW - offX) / multiW;
         float v0 = (float) (multiH - 1 - offY) / multiH;
         float v1 = (float) (multiH - offY) / multiH;
 
@@ -482,22 +486,23 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         addQuad(bezel, mat, pose,
                 0, 0, frontZ,   1, 0, frontZ,   1, 1, frontZ,   0, 1, frontZ,
                 0, 0, 1, 1, 0, 0, -1);
-        // -------------------------------------------------------------------------
+        // -----------------------------------------------------------.
 
         VertexConsumer vc = buffers.getBuffer(RenderType.entityCutoutNoCull(st.location));
 
-        // Quad: CCW winding when viewed from -Z (front of the screen)
-        // Top-left → Bottom-left → Bottom-right → Top-right
-        vc.addVertex(mat, m, 1 - m, screenZ).setColor(255, 255, 255, 255).setUv(u0, v0)
+        // Quad: CCW winding when viewed from -Z (front of the screen).
+        // Vertices use swapped U so texture reads correctly to the player (see u0/u1 above).
+        // Top-left → Bottom-left → Bottom-right → Top-right (block-local; player sees mirrored).
+        vc.addVertex(mat, m, 1 - m, screenZ).setColor(255, 255, 255, 255).setUv(u1, v0)
                 .setOverlay(OverlayTexture.NO_OVERLAY).setLight(FULLBRIGHT)
                 .setNormal(pose.last(), 0, 0, -1);
-        vc.addVertex(mat, m, m, screenZ).setColor(255, 255, 255, 255).setUv(u0, v1)
+        vc.addVertex(mat, m, m, screenZ).setColor(255, 255, 255, 255).setUv(u1, v1)
                 .setOverlay(OverlayTexture.NO_OVERLAY).setLight(FULLBRIGHT)
                 .setNormal(pose.last(), 0, 0, -1);
-        vc.addVertex(mat, 1 - m, m, screenZ).setColor(255, 255, 255, 255).setUv(u1, v1)
+        vc.addVertex(mat, 1 - m, m, screenZ).setColor(255, 255, 255, 255).setUv(u0, v1)
                 .setOverlay(OverlayTexture.NO_OVERLAY).setLight(FULLBRIGHT)
                 .setNormal(pose.last(), 0, 0, -1);
-        vc.addVertex(mat, 1 - m, 1 - m, screenZ).setColor(255, 255, 255, 255).setUv(u1, v0)
+        vc.addVertex(mat, 1 - m, 1 - m, screenZ).setColor(255, 255, 255, 255).setUv(u0, v0)
                 .setOverlay(OverlayTexture.NO_OVERLAY).setLight(FULLBRIGHT)
                 .setNormal(pose.last(), 0, 0, -1);
 
