@@ -25,12 +25,34 @@ public class ShellProgram extends OSProgram {
         super("Shell");
     }
 
+    private static final String HISTORY_FILE = "/.shell_history";
+    private static final int HISTORY_MAX = 200;
+
     @Override
     public void init(JavaOS os) {
         this.os = os;
+        loadHistory();
         appendOutput("ByteBlock OS v1.0\n");
         appendOutput("Type 'help' for a list of commands.\n");
         appendOutput("\n");
+    }
+
+    private void loadHistory() {
+        String content = os.getFileSystem().readFile(HISTORY_FILE);
+        if (content == null) return;
+        for (String line : content.split("\n")) {
+            String t = line.trim();
+            if (!t.isEmpty()) history.add(t);
+        }
+        historyIndex = history.size();
+    }
+
+    private void saveHistory() {
+        int n = history.size();
+        int from = Math.max(0, n - HISTORY_MAX);
+        StringBuilder sb = new StringBuilder();
+        for (int i = from; i < n; i++) sb.append(history.get(i)).append('\n');
+        os.getFileSystem().writeFile(HISTORY_FILE, sb.toString());
     }
 
     @Override
@@ -74,6 +96,7 @@ public class ShellProgram extends OSProgram {
                 if (!cmd.isEmpty()) {
                     history.add(cmd);
                     historyIndex = history.size();
+                    saveHistory();
                     executeCommand(cmd);
                 }
                 needsRedraw = true;
@@ -130,13 +153,35 @@ public class ShellProgram extends OSProgram {
             case "lua" -> cmdLua(args);
             case "java" -> cmdJava(args);
             case "javarun" -> cmdJavaRun(args);
+            case "apt" -> cmdApt(args);
             case "mkshortcut" -> cmdMkshortcut(args);
             case "puzzle" -> cmdPuzzle(args);
             case "ide" -> cmdIde(args);
             case "basemon" -> cmdBasemon(args);
             case "exit" -> running = false;
-            default -> appendOutput("Unknown command: " + cmd + "\nType 'help' for commands.\n");
+            default -> {
+                // Try resolving as an installed program first (auto-run from /Users/User/).
+                if (!tryRunInstalledProgram(cmd, args)) {
+                    appendOutput("Unknown command: " + cmd + "\nType 'help' for commands.\n");
+                }
+            }
         }
+    }
+
+    private boolean tryRunInstalledProgram(String name, String args) {
+        String[] candidates = {
+            "/Users/User/" + name + ".lua",
+            "/Users/User/" + name + ".bsh",
+        };
+        for (String p : candidates) {
+            String content = os.getFileSystem().readFile(p);
+            if (content != null) {
+                if (p.endsWith(".lua")) os.launchProgram(new LuaShellProgram(p));
+                else os.launchProgram(new JavaShellProgram(p));
+                return true;
+            }
+        }
+        return false;
     }
 
     private void cmdHelp() {
@@ -504,6 +549,46 @@ public class ShellProgram extends OSProgram {
             return;
         }
         os.launchProgram(new JavaShellProgram(path));
+    }
+
+    // Bundled program library installer ("app store").
+    private static final String[] APT_PROGRAMS = {
+        "clock", "snake", "weather", "power-monitor", "paint"
+    };
+    private void cmdApt(String args) {
+        String[] parts = args.trim().split("\\s+", 2);
+        String sub = parts[0];
+        switch (sub) {
+            case "list" -> {
+                appendOutput("Available programs:\n");
+                for (String p : APT_PROGRAMS) appendOutput("  " + p + "\n");
+                appendOutput("Use: apt install <name>\n");
+            }
+            case "install" -> {
+                if (parts.length < 2) { appendOutput("Usage: apt install <name>\n"); return; }
+                String name = parts[1].trim();
+                String resourcePath = "/assets/byteblock/programs/" + name + ".lua";
+                String content = readClasspath(resourcePath);
+                if (content == null) {
+                    appendOutput("Unknown program: " + name + "\n");
+                    return;
+                }
+                String dest = "/Users/User/" + name + ".lua";
+                os.getFileSystem().writeFile(dest, content);
+                appendOutput("Installed " + name + " -> " + dest + "\n");
+                appendOutput("Run with: " + name + "  (or: lua " + dest + ")\n");
+            }
+            default -> {
+                appendOutput("Usage: apt list | apt install <name>\n");
+            }
+        }
+    }
+
+    private static String readClasspath(String path) {
+        try (java.io.InputStream in = ShellProgram.class.getResourceAsStream(path)) {
+            if (in == null) return null;
+            return new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (java.io.IOException e) { return null; }
     }
 
     private void cmdPuzzle(String args) {

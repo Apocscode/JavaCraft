@@ -21,6 +21,9 @@ public class LuaShellProgram extends OSProgram {
     // Optional: run a file immediately on launch
     private final String runFile;
 
+    private static final String HISTORY_FILE = "/.lua_history";
+    private static final int HISTORY_MAX = 200;
+
     public LuaShellProgram() {
         super("Lua");
         this.runFile = null;
@@ -38,6 +41,7 @@ public class LuaShellProgram extends OSProgram {
     public void init(JavaOS os) {
         this.os = os;
         this.lua = new LuaRuntime(os);
+        loadHistory();
 
         appendOutput("ByteBlock Lua 5.2 Shell\n");
         appendOutput("CC-style APIs: term, fs, os, colors, shell\n");
@@ -126,6 +130,7 @@ public class LuaShellProgram extends OSProgram {
                 if (!input.isEmpty()) {
                     history.add(input);
                     historyIndex = history.size();
+                    saveHistory();
                     executeInput(input);
                 }
                 needsRedraw = true;
@@ -215,6 +220,24 @@ public class LuaShellProgram extends OSProgram {
             appendOutput(out);
             if (!out.endsWith("\n")) appendOutput("\n");
         }
+    }
+
+    private void loadHistory() {
+        String content = os.getFileSystem().readFile(HISTORY_FILE);
+        if (content == null) return;
+        for (String line : content.split("\n")) {
+            String t = line.trim();
+            if (!t.isEmpty()) history.add(t);
+        }
+        historyIndex = history.size();
+    }
+
+    private void saveHistory() {
+        int n = history.size();
+        int from = Math.max(0, n - HISTORY_MAX);
+        StringBuilder sb = new StringBuilder();
+        for (int i = from; i < n; i++) sb.append(history.get(i)).append('\n');
+        os.getFileSystem().writeFile(HISTORY_FILE, sb.toString());
     }
 
     private void appendOutput(String text) {

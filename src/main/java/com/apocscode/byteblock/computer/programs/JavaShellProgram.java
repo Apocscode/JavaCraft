@@ -31,6 +31,9 @@ public class JavaShellProgram extends OSProgram {
 
     private final String runFile;
 
+    private static final String HISTORY_FILE = "/.java_history";
+    private static final int HISTORY_MAX = 200;
+
     public JavaShellProgram() { super("Java"); this.runFile = null; }
     public JavaShellProgram(String filePath) { super("Java"); this.runFile = filePath; }
 
@@ -40,6 +43,7 @@ public class JavaShellProgram extends OSProgram {
         this.java = new JavaRuntime(os);
         this.sharedLua = new LuaRuntime(os);
         this.java.attachLua(sharedLua);
+        loadHistory();
 
         appendOutput("ByteBlock Java (BeanShell 2.0) Shell\n");
         appendOutput("Sandbox: file/network/reflection blocked\n");
@@ -102,6 +106,7 @@ public class JavaShellProgram extends OSProgram {
                 if (!input.isEmpty()) {
                     history.add(input);
                     historyIndex = history.size();
+                    saveHistory();
                     executeInput(input);
                 }
                 needsRedraw = true;
@@ -172,6 +177,24 @@ public class JavaShellProgram extends OSProgram {
             appendOutput(out);
             if (!out.endsWith("\n")) appendOutput("\n");
         }
+    }
+
+    private void loadHistory() {
+        String content = os.getFileSystem().readFile(HISTORY_FILE);
+        if (content == null) return;
+        for (String line : content.split("\n")) {
+            String t = line.trim();
+            if (!t.isEmpty()) history.add(t);
+        }
+        historyIndex = history.size();
+    }
+
+    private void saveHistory() {
+        int n = history.size();
+        int from = Math.max(0, n - HISTORY_MAX);
+        StringBuilder sb = new StringBuilder();
+        for (int i = from; i < n; i++) sb.append(history.get(i)).append('\n');
+        os.getFileSystem().writeFile(HISTORY_FILE, sb.toString());
     }
 
     private void appendOutput(String text) {

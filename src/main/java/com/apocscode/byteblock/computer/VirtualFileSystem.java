@@ -172,6 +172,19 @@ public class VirtualFileSystem {
         return node.content;
     }
 
+    /** Read raw bytes (uses ISO-8859-1 round-trip for binary safety). */
+    public byte[] readBytes(String path) {
+        String s = readFile(path);
+        if (s == null) return null;
+        return s.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+    }
+
+    /** Write raw bytes (stored as ISO-8859-1 string for binary safety). */
+    public boolean writeBytes(String path, byte[] data) {
+        if (data == null) return false;
+        return writeFile(path, new String(data, java.nio.charset.StandardCharsets.ISO_8859_1));
+    }
+
     public boolean writeFile(String path, String content) {
         String norm = normalize(path);
         String[] parts = splitPath(norm);

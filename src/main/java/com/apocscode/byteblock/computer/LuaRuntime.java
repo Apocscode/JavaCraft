@@ -3071,6 +3071,79 @@ public class LuaRuntime {
                 return out;
             }
         });
+        // image.loadPNG(path [, maxW, maxH]) — decodes PNG/JPEG/GIF/BMP via javax.imageio.
+        // Optional maxW/maxH downscale (nearest-neighbor) so HUD-sized images don't blow the stack.
+        // Returns { w, h, pixels } table where pixels are 0xRRGGBB ints (-1 for fully transparent).
+        img.set("loadPNG", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                String path = a.checkjstring(1);
+                int maxW = a.optint(2, 0);
+                int maxH = a.optint(3, 0);
+                LuaTable t = new LuaTable();
+                try {
+                    byte[] bytes = os.getFileSystem().readBytes(path);
+                    if (bytes == null) {
+                        t.set("w", 0); t.set("h", 0); t.set("pixels", new LuaTable());
+                        return LuaValue.varargsOf(t, LuaValue.valueOf("file not found: " + path));
+                    }
+                    java.awt.image.BufferedImage src = javax.imageio.ImageIO.read(
+                        new java.io.ByteArrayInputStream(bytes));
+                    if (src == null) {
+                        t.set("w", 0); t.set("h", 0); t.set("pixels", new LuaTable());
+                        return LuaValue.varargsOf(t, LuaValue.valueOf("unsupported image format"));
+                    }
+                    int sw = src.getWidth(), sh = src.getHeight();
+                    int w = sw, h = sh;
+                    if (maxW > 0 && maxH > 0 && (sw > maxW || sh > maxH)) {
+                        double rx = (double) maxW / sw, ry = (double) maxH / sh;
+                        double r = Math.min(rx, ry);
+                        w = Math.max(1, (int) Math.round(sw * r));
+                        h = Math.max(1, (int) Math.round(sh * r));
+                    }
+                    LuaTable pixels = new LuaTable();
+                    for (int y = 0; y < h; y++) {
+                        int sy = (h == sh) ? y : Math.min(sh - 1, y * sh / h);
+                        for (int x = 0; x < w; x++) {
+                            int sx = (w == sw) ? x : Math.min(sw - 1, x * sw / w);
+                            int argb = src.getRGB(sx, sy);
+                            int alpha = (argb >>> 24) & 0xFF;
+                            int v = (alpha < 16) ? -1 : (argb & 0xFFFFFF);
+                            pixels.set(y * w + x + 1, LuaValue.valueOf(v));
+                        }
+                    }
+                    t.set("w", w); t.set("h", h); t.set("pixels", pixels);
+                    return t;
+                } catch (Exception e) {
+                    t.set("w", 0); t.set("h", 0); t.set("pixels", new LuaTable());
+                    return LuaValue.varargsOf(t, LuaValue.valueOf(e.getMessage()));
+                }
+            }
+        });
+        // image.savePNG(image, path) — encode image table to PNG bytes via ImageIO.
+        img.set("savePNG", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                LuaTable img = a.checktable(1);
+                String path = a.checkjstring(2);
+                int w = img.get("w").toint(), h = img.get("h").toint();
+                LuaTable px = img.get("pixels").checktable();
+                java.awt.image.BufferedImage out = new java.awt.image.BufferedImage(
+                    w, h, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+                for (int y = 0; y < h; y++) {
+                    for (int x = 0; x < w; x++) {
+                        int p = px.get(y * w + x + 1).optint(-1);
+                        out.setRGB(x, y, p < 0 ? 0 : (0xFF000000 | (p & 0xFFFFFF)));
+                    }
+                }
+                try {
+                    java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                    javax.imageio.ImageIO.write(out, "png", baos);
+                    os.getFileSystem().writeBytes(path, baos.toByteArray());
+                    return LuaValue.TRUE;
+                } catch (Exception e) {
+                    return LuaValue.varargsOf(LuaValue.FALSE, LuaValue.valueOf(e.getMessage()));
+                }
+            }
+        });
 
         globals.set("image", img);
     }
@@ -4566,6 +4639,176 @@ public class LuaRuntime {
             }
         });
         globals.set("pastebin", pb);
+        installGistAPI();
+    }
+
+    // ---------- gist (GitHub Gists, anonymous read; auth token optional for write) ----------
+    // gist.get(idOrUrl [, file]) -> content, err
+    // gist.run(idOrUrl [, args...]) -> ...
+    // gist.put(path [, name [, public]]) -> id, err   (requires settings.set("gist.token", "..."))
+    // gist.download(idOrUrl, path [, file]) -> true|false, err
+    private void installGistAPI() {
+        LuaTable g = new LuaTable();
+        final java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+
+        g.set("get", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                String id = extractGistId(a.checkjstring(1));
+                String wantFile = a.optjstring(2, null);
+                try {
+                    java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder(
+                        java.net.URI.create("https://api.github.com/gists/" + id))
+                        .header("Accept", "application/vnd.github+json")
+                        .GET().build();
+                    java.net.http.HttpResponse<String> resp = client.send(req,
+                        java.net.http.HttpResponse.BodyHandlers.ofString());
+                    if (resp.statusCode() != 200)
+                        return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf("HTTP " + resp.statusCode()));
+                    // Quick & dirty: pull "raw_url" of first (or named) file out of the JSON.
+                    String body = resp.body();
+                    int filesIdx = body.indexOf("\"files\"");
+                    if (filesIdx < 0) return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf("no files in gist"));
+                    String rawUrl;
+                    if (wantFile != null) {
+                        int fIdx = body.indexOf("\"" + wantFile + "\"", filesIdx);
+                        if (fIdx < 0) return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf("file not in gist"));
+                        rawUrl = extractJsonString(body, "raw_url", fIdx);
+                    } else {
+                        rawUrl = extractJsonString(body, "raw_url", filesIdx);
+                    }
+                    if (rawUrl == null) return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf("raw_url missing"));
+                    java.net.http.HttpRequest rawReq = java.net.http.HttpRequest.newBuilder(
+                        java.net.URI.create(rawUrl)).GET().build();
+                    java.net.http.HttpResponse<String> raw = client.send(rawReq,
+                        java.net.http.HttpResponse.BodyHandlers.ofString());
+                    if (raw.statusCode() != 200)
+                        return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf("HTTP " + raw.statusCode()));
+                    return LuaValue.valueOf(raw.body());
+                } catch (Exception e) {
+                    return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf(e.getMessage()));
+                }
+            }
+        });
+        g.set("download", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                Varargs got = ((VarArgFunction) g.get("get")).invoke(LuaValue.varargsOf(new LuaValue[]{a.arg(1), a.arg(3).isnil() ? LuaValue.NIL : a.arg(3)}));
+                if (got.arg1().isnil()) return got;
+                os.getFileSystem().writeFile(a.checkjstring(2), got.arg1().tojstring());
+                return LuaValue.TRUE;
+            }
+        });
+        g.set("run", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                Varargs got = ((VarArgFunction) g.get("get")).invoke(LuaValue.varargsOf(new LuaValue[]{a.arg(1)}));
+                if (got.arg1().isnil()) return got;
+                try {
+                    LuaValue chunk = globals.load(got.arg1().tojstring(), "=gist", globals);
+                    return chunk.invoke(a.subargs(2));
+                } catch (LuaError e) { return LuaValue.varargsOf(LuaValue.FALSE, LuaValue.valueOf(e.getMessage())); }
+            }
+        });
+        g.set("put", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs a) {
+                String path = a.checkjstring(1);
+                String name = a.optjstring(2, path.substring(path.lastIndexOf('/') + 1));
+                boolean isPublic = a.optboolean(3, false);
+                String content = os.getFileSystem().readFile(path);
+                if (content == null) return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf("file not found"));
+                String token = settingsGetString("gist.token", "");
+                if (token.isEmpty())
+                    return LuaValue.varargsOf(LuaValue.NIL,
+                        LuaValue.valueOf("set settings: gist.token = \"<github PAT>\""));
+                String json = "{\"public\":" + isPublic + ",\"files\":{\""
+                    + jsonEscape(name) + "\":{\"content\":\"" + jsonEscape(content) + "\"}}}";
+                try {
+                    java.net.http.HttpRequest req = java.net.http.HttpRequest.newBuilder(
+                        java.net.URI.create("https://api.github.com/gists"))
+                        .header("Authorization", "Bearer " + token)
+                        .header("Accept", "application/vnd.github+json")
+                        .header("Content-Type", "application/json")
+                        .POST(java.net.http.HttpRequest.BodyPublishers.ofString(json)).build();
+                    java.net.http.HttpResponse<String> resp = client.send(req,
+                        java.net.http.HttpResponse.BodyHandlers.ofString());
+                    if (resp.statusCode() / 100 != 2)
+                        return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf("HTTP " + resp.statusCode()));
+                    String id = extractJsonString(resp.body(), "id", 0);
+                    return LuaValue.valueOf(id == null ? "" : id);
+                } catch (Exception e) {
+                    return LuaValue.varargsOf(LuaValue.NIL, LuaValue.valueOf(e.getMessage()));
+                }
+            }
+        });
+        globals.set("gist", g);
+    }
+
+    private static String extractGistId(String s) {
+        if (s == null) return "";
+        int slash = s.lastIndexOf('/');
+        return slash >= 0 ? s.substring(slash + 1) : s;
+    }
+
+    private static String extractJsonString(String body, String key, int fromIdx) {
+        String needle = "\"" + key + "\"";
+        int k = body.indexOf(needle, fromIdx);
+        if (k < 0) return null;
+        int colon = body.indexOf(':', k);
+        if (colon < 0) return null;
+        int q1 = body.indexOf('"', colon);
+        if (q1 < 0) return null;
+        StringBuilder out = new StringBuilder();
+        int i = q1 + 1;
+        while (i < body.length()) {
+            char c = body.charAt(i);
+            if (c == '\\' && i + 1 < body.length()) {
+                char n = body.charAt(i + 1);
+                switch (n) {
+                    case 'n' -> out.append('\n');
+                    case 't' -> out.append('\t');
+                    case 'r' -> out.append('\r');
+                    case '"' -> out.append('"');
+                    case '\\' -> out.append('\\');
+                    case '/' -> out.append('/');
+                    default -> out.append(n);
+                }
+                i += 2;
+            } else if (c == '"') {
+                return out.toString();
+            } else {
+                out.append(c);
+                i++;
+            }
+        }
+        return null;
+    }
+
+    private static String jsonEscape(String s) {
+        StringBuilder sb = new StringBuilder(s.length() + 16);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"' -> sb.append("\\\"");
+                case '\\' -> sb.append("\\\\");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                default -> {
+                    if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
+                    else sb.append(c);
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    private String settingsGetString(String key, String defaultValue) {
+        LuaValue settings = globals.get("settings");
+        if (settings.isnil()) return defaultValue;
+        LuaValue get = settings.get("get");
+        if (get.isnil() || !get.isfunction()) return defaultValue;
+        try {
+            LuaValue v = get.call(LuaValue.valueOf(key));
+            return v.isnil() ? defaultValue : v.tojstring();
+        } catch (Exception e) { return defaultValue; }
     }
 
     private static String urlEnc(String s) {

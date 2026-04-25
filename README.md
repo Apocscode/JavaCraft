@@ -285,11 +285,12 @@ little or no modification.
 | `vector`      | `new(x,y,z)` with `+ - * / dot cross length normalize round tostring` metatable methods |
 | `keys`        | All 100+ CC key constants (`keys.enter`, `keys.space`, `keys.f1`–`keys.f12`, `keys.leftCtrl`, …) plus `keys.getName(code)` |
 | `paintutils`  | `loadImage`, `drawImage`, `drawPixel`, `drawLine`, `drawBox`, `drawFilledBox`, `drawCircle`/`drawFilledCircle`, `drawTriangle`/`drawFilledTriangle`, `drawPolygon`, `drawSprite` (with transparency) |
-| `image`       | Procedural RGB images: `create(w,h,color)`, `set/get`, `fill`, `loadNFP`, `loadNFT`, `toGrid` (quantize → CC palette indices for `paintutils.drawImage`) |
+| `image`       | Procedural RGB images: `create(w,h,color)`, `set/get`, `fill`, `loadNFP`, `loadNFT`, `loadPNG(path[, maxW, maxH])` (PNG/JPEG/GIF/BMP via ImageIO), `savePNG(image, path)`, `toGrid` (quantize → CC palette indices for `paintutils.drawImage`) |
 | `window`      | `create(parent, x, y, w, h, visible)` returning a redirect-capable child terminal |
 | `settings`    | `define`, `set`, `get`, `unset`, `clear`, `getNames`, `load`, `save` (persists to `/.settings`) |
 | `http`        | `get`, `post`, `request`, `checkURL`, `websocket` (HTTPS allowed by default) |
 | `pastebin`    | `get`, `put`, `run` (delegates to https://pastebin.com/raw) |
+| `gist`        | GitHub Gists: `get(id [, file])`, `download(id, path [, file])`, `run(id, ...)`, `put(path [, name [, public]])` (write needs `settings.set("gist.token", "<PAT>")`) |
 | `wget`, `read`, `help`, `multishell` | Globals matching CC behavior. `multishell` is a single-tab stub. |
 
 ### ByteBlock-only APIs
@@ -338,6 +339,26 @@ In-script helpers: `print(x)`, `println(x)`, `sleep(seconds)`, `term.*`, `os`, p
 **Sandbox blocks:** `java.io.File*`, `java.lang.Runtime`, `ProcessBuilder`, `java.lang.reflect.*`, `java.lang.invoke.*`, `ClassLoader`, `SecurityManager`, `Thread`/`ThreadGroup`, `java.net.*`, `java.nio.file.*`, `java.security.*`, `javax.script.*`, `javax.tools.*`, `sun.*`, `jdk.internal.*`, `com.sun.*`, plus Minecraft/NeoForge internals.
 
 **Watchdog:** scripts are interrupted after 5000 ms by default (configurable per OS instance via `JavaRuntime.scriptTimeoutMs`).
+
+### App store (`apt`)
+
+Bundled programs ship inside the mod jar. Install them into the in-game filesystem with:
+
+```
+> apt list
+> apt install snake
+> snake               # auto-runs /Users/User/snake.lua
+```
+
+| Program          | What it does |
+|------------------|--------------|
+| `clock`          | Animated analog + digital clock |
+| `snake`          | Classic snake game (arrows / WASD) |
+| `weather`        | Pulls current weather from open-meteo and posts to glasses |
+| `power-monitor`  | Glasses-HUD power gauge polling a `peripheral.find("energy")` |
+| `paint`          | Click-and-drag paint app, exports `.nfp` files |
+
+History for `Shell`, `Lua`, and `Java` REPLs is now persisted to `/.shell_history`, `/.lua_history`, and `/.java_history` in the in-game filesystem.
 
 ### Bundled Lua libraries
 
