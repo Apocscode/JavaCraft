@@ -2659,6 +2659,386 @@ public class LuaRuntime {
         installReadGlobal();
         installHelpAPI();
         installMultishellStub();
+        installCCParityGaps();
+        installDiskAPI();
+    }
+
+    // ---------- CC:Tweaked parity gap fillers ----------
+    private void installCCParityGaps() {
+        // -- os.* extras --
+        LuaValue osv = globals.get("os");
+        if (osv.istable()) {
+            LuaTable osT = osv.checktable();
+            osT.set("cancelTimer", new OneArgFunction() {
+                @Override public LuaValue call(LuaValue id) {
+                    os.cancelTimer(id.checkint());
+                    return LuaValue.NIL;
+                }
+            });
+            osT.set("epoch", new VarArgFunction() {
+                @Override public Varargs invoke(Varargs a) {
+                    String kind = a.optjstring(1, "ingame");
+                    if ("utc".equalsIgnoreCase(kind) || "local".equalsIgnoreCase(kind)) {
+                        return LuaValue.valueOf((double) System.currentTimeMillis());
+                    }
+                    var lvl = os.getLevel();
+                    long dt = lvl != null ? lvl.getDayTime() : 0L;
+                    // 24000 ticks per MC day -> 86_400_000 ms per MC day
+                    double ms = (dt / 24000.0) * 86_400_000.0;
+                    return LuaValue.valueOf(ms);
+                }
+            });
+            osT.set("day", new VarArgFunction() {
+                @Override public Varargs invoke(Varargs a) {
+                    String kind = a.optjstring(1, "ingame");
+                    if ("utc".equalsIgnoreCase(kind) || "local".equalsIgnoreCase(kind)) {
+                        return LuaValue.valueOf(System.currentTimeMillis() / 86_400_000L);
+                    }
+                    var lvl = os.getLevel();
+                    return LuaValue.valueOf(lvl != null ? lvl.getDayTime() / 24000L : 0L);
+                }
+            });
+            osT.set("date", new VarArgFunction() {
+                @Override public Varargs invoke(Varargs a) {
+                    String fmt = a.optjstring(1, "%c");
+                    long t = a.isnumber(2) ? (long) a.todouble(2) : System.currentTimeMillis() / 1000L;
+                    java.util.Date d = new java.util.Date(t * 1000L);
+                    boolean utc = fmt.startsWith("!");
+                    if (utc) fmt = fmt.substring(1);
+                    String javaFmt = fmt
+                            .replace("%Y", "yyyy").replace("%m", "MM").replace("%d", "dd")
+                            .replace("%H", "HH").replace("%M", "mm").replace("%S", "ss")
+                            .replace("%c", "EEE MMM d HH:mm:ss yyyy")
+                            .replace("%x", "MM/dd/yy").replace("%X", "HH:mm:ss")
+                            .replace("%A", "EEEE").replace("%a", "EEE")
+                            .replace("%B", "MMMM").replace("%b", "MMM")
+                            .replace("%p", "a").replace("%j", "DDD");
+                    try {
+                        java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat(javaFmt);
+                        if (utc) sdf.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+                        return LuaValue.valueOf(sdf.format(d));
+                    } catch (Exception e) {
+                        return LuaValue.valueOf(d.toString());
+                    }
+                }
+            });
+            osT.set("about", new ZeroArgFunction() {
+                @Override public LuaValue call() {
+                    return LuaValue.valueOf("ByteBlockOS 1.0 (Lua 5.2 / LuaJ, CC:Tweaked-compatible)");
+                }
+            });
+        }
+
+        // -- fs.* extras --
+        LuaValue fsv = globals.get("fs");
+        if (fsv.istable()) {
+            LuaTable fsT = fsv.checktable();
+            final VirtualFileSystem vfs = os.getFileSystem();
+
+            fsT.set("combine", new VarArgFunction() {
+                @Override public Varargs invoke(Varargs a) {
+                    StringBuilder sb = new StringBuilder();
+                    for (int i = 1; i <= a.narg(); i++) {
+                        String seg = a.tojstring(i);
+                        if (seg == null || seg.isEmpty()) continue;
+                        if (sb.length() > 0 && !sb.toString().endsWith("/") && !seg.startsWith("/")) sb.append('/');
+                        sb.append(seg);
+                    }
+                    String[] parts = sb.toString().split("/");
+                    java.util.ArrayDeque<String> stack = new java.util.ArrayDeque<>();
+                    for (String p : parts) {
+                        if (p.isEmpty() || p.equals(".")) continue;
+                        if (p.equals("..")) { if (!stack.isEmpty()) stack.pollLast(); continue; }
+                        stack.addLast(p);
+                    }
+                    return LuaValue.valueOf(String.join("/", stack));
+                }
+            });
+            fsT.set("attributes", new OneArgFunction() {
+                @Override public LuaValue call(LuaValue p) {
+                    if (vfs == null) return LuaValue.NIL;
+                    String path = p.checkjstring();
+                    if (!vfs.exists(path)) return LuaValue.NIL;
+                    LuaTable t = new LuaTable();
+                    t.set("size", LuaValue.valueOf(vfs.isDirectory(path) ? 0 : vfs.getSize(path)));
+                    t.set("isDir", LuaValue.valueOf(vfs.isDirectory(path)));
+                    t.set("isReadOnly", LuaValue.FALSE);
+                    t.set("created", LuaValue.valueOf(0));
+                    t.set("modified", LuaValue.valueOf(0));
+                    t.set("modification", LuaValue.valueOf(0));
+                    return t;
+                }
+            });
+            fsT.set("isReadOnly", new OneArgFunction() {
+                @Override public LuaValue call(LuaValue p) { return LuaValue.FALSE; }
+            });
+            fsT.set("getDrive", new OneArgFunction() {
+                @Override public LuaValue call(LuaValue p) { return LuaValue.valueOf("hdd"); }
+            });
+            fsT.set("getCapacity", new OneArgFunction() {
+                @Override public LuaValue call(LuaValue p) { return LuaValue.valueOf(1_000_000); }
+            });
+            fsT.set("getFreeSpace", new OneArgFunction() {
+                @Override public LuaValue call(LuaValue p) { return LuaValue.valueOf(500_000); }
+            });
+            fsT.set("complete", new VarArgFunction() {
+                @Override public Varargs invoke(Varargs a) {
+                    LuaTable out = new LuaTable();
+                    if (vfs == null) return out;
+                    String partial = a.optjstring(1, "");
+                    String dir = a.optjstring(2, "");
+                    boolean inclFiles = a.optboolean(3, true);
+                    boolean inclDirs = a.optboolean(4, true);
+                    String base = dir.isEmpty() ? "" : (dir.endsWith("/") ? dir : dir + "/");
+                    if (!vfs.exists(dir.isEmpty() ? "/" : dir)) return out;
+                    int idx = 1;
+                    for (String name : vfs.list(dir.isEmpty() ? "/" : dir)) {
+                        if (!name.startsWith(partial)) continue;
+                        String full = base + name;
+                        boolean isDir = vfs.isDirectory(full);
+                        if (isDir && !inclDirs) continue;
+                        if (!isDir && !inclFiles) continue;
+                        String suffix = name.substring(partial.length()) + (isDir ? "/" : "");
+                        out.set(idx++, LuaValue.valueOf(suffix));
+                    }
+                    return out;
+                }
+            });
+            fsT.set("find", new OneArgFunction() {
+                @Override public LuaValue call(LuaValue pattern) {
+                    LuaTable out = new LuaTable();
+                    if (vfs == null) return out;
+                    String pat = pattern.checkjstring();
+                    String regex = "^" + java.util.regex.Pattern.quote(pat)
+                            .replace("*", "\\E[^/]*\\Q").replace("?", "\\E.\\Q") + "$";
+                    java.util.regex.Pattern rx;
+                    try { rx = java.util.regex.Pattern.compile(regex); } catch (Exception e) { return out; }
+                    java.util.ArrayList<String> hits = new java.util.ArrayList<>();
+                    findRecursive(vfs, "/", rx, hits, 0);
+                    for (int i = 0; i < hits.size(); i++) out.set(i + 1, LuaValue.valueOf(hits.get(i)));
+                    return out;
+                }
+            });
+        }
+
+        // -- term.* extras --
+        LuaValue termv = globals.get("term");
+        if (termv.istable()) {
+            LuaTable termT = termv.checktable();
+            final TerminalBuffer tb = os.getTerminal();
+            termT.set("blit", new ThreeArgFunction() {
+                @Override public LuaValue call(LuaValue text, LuaValue fg, LuaValue bg) {
+                    if (tb == null) return LuaValue.NIL;
+                    String s = text.checkjstring();
+                    String f = fg.checkjstring();
+                    String b = bg.checkjstring();
+                    int n = Math.min(s.length(), Math.min(f.length(), b.length()));
+                    int x = tb.getCursorX(), y = tb.getCursorY();
+                    int saveFg = tb.getCurrentFg(), saveBg = tb.getCurrentBg();
+                    for (int i = 0; i < n; i++) {
+                        int fc = Character.digit(f.charAt(i), 16);
+                        int bc = Character.digit(b.charAt(i), 16);
+                        if (fc < 0) fc = saveFg;
+                        if (bc < 0) bc = saveBg;
+                        tb.setTextColor(fc);
+                        tb.setBackgroundColor(bc);
+                        tb.writeAt(x + i, y, String.valueOf(s.charAt(i)));
+                    }
+                    tb.setTextColor(saveFg);
+                    tb.setBackgroundColor(saveBg);
+                    tb.setCursorPos(x + n, y);
+                    return LuaValue.NIL;
+                }
+            });
+            // Fixed CC palette (no actual mutation – stored in static array)
+            final int[] palette = {
+                0xF0F0F0, 0xF2B233, 0xE57FD8, 0x99B2F2, 0xDEDE6C, 0x7FCC19, 0xF2B2CC, 0x4C4C4C,
+                0x999999, 0x4C99B2, 0xB266E5, 0x3366CC, 0x7F664C, 0x57A64E, 0xCC4C4C, 0x111111
+            };
+            OneArgFunction getPal = new OneArgFunction() {
+                @Override public LuaValue call(LuaValue c) {
+                    int idx = Integer.numberOfTrailingZeros(Math.max(1, c.checkint())) & 0xF;
+                    int rgb = palette[idx];
+                    return LuaValue.varargsOf(new LuaValue[]{
+                        LuaValue.valueOf(((rgb >> 16) & 0xFF) / 255.0),
+                        LuaValue.valueOf(((rgb >> 8) & 0xFF) / 255.0),
+                        LuaValue.valueOf((rgb & 0xFF) / 255.0)
+                    }).arg1();
+                }
+            };
+            termT.set("getPaletteColor", getPal);
+            termT.set("getPaletteColour", getPal);
+            termT.set("nativePaletteColor", getPal);
+            termT.set("nativePaletteColour", getPal);
+            VarArgFunction setPal = new VarArgFunction() {
+                @Override public Varargs invoke(Varargs a) { return LuaValue.NIL; } // no-op
+            };
+            termT.set("setPaletteColor", setPal);
+            termT.set("setPaletteColour", setPal);
+            // Redirect stubs – ByteBlock has a single terminal context.
+            ZeroArgFunction selfTerm = new ZeroArgFunction() {
+                @Override public LuaValue call() { return termT; }
+            };
+            termT.set("current", selfTerm);
+            termT.set("native", selfTerm);
+            termT.set("redirect", new OneArgFunction() {
+                @Override public LuaValue call(LuaValue t) { return termT; }
+            });
+        }
+
+        // -- peripheral.getNames --
+        LuaValue periv = globals.get("peripheral");
+        if (periv.istable()) {
+            LuaTable periT = periv.checktable();
+            periT.set("getNames", new ZeroArgFunction() {
+                @Override public LuaValue call() {
+                    LuaTable out = new LuaTable();
+                    var lvl = os.getLevel();
+                    var pos = os.getBlockPos();
+                    if (lvl == null || pos == null) return out;
+                    var devs = BluetoothNetwork.getDevicesInRange(lvl, pos, BluetoothNetwork.BLOCK_RANGE);
+                    int i = 1;
+                    for (var d : devs) {
+                        out.set(i++, LuaValue.valueOf(d.type().name().toLowerCase() + "_" + d.deviceId().toString().substring(0, 8)));
+                    }
+                    return out;
+                }
+            });
+        }
+
+        // -- turtle.* extras (added on top of robot alias) --
+        LuaValue turtv = globals.get("turtle");
+        if (turtv.istable()) {
+            LuaTable t = turtv.checktable();
+            final String[] queueables = {
+                "attack", "attackUp", "attackDown",
+                "placeUp", "placeDown",
+                "compare", "compareUp", "compareDown",
+                "inspect", "inspectUp", "inspectDown"
+            };
+            for (String name : queueables) {
+                if (!t.get(name).isnil()) continue;
+                final String cmd = name;
+                t.set(name, new ZeroArgFunction() {
+                    @Override public LuaValue call() {
+                        com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                        if (r == null) return LuaValue.FALSE;
+                        r.queueCommand(cmd);
+                        return LuaValue.TRUE;
+                    }
+                });
+            }
+            if (t.get("transferTo").isnil()) {
+                t.set("transferTo", new VarArgFunction() {
+                    @Override public Varargs invoke(Varargs a) {
+                        com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                        if (r == null) return LuaValue.FALSE;
+                        r.queueCommand("transferTo:" + a.checkint(1) + ":" + a.optint(2, 64));
+                        return LuaValue.TRUE;
+                    }
+                });
+            }
+            if (t.get("craft").isnil()) {
+                t.set("craft", new VarArgFunction() {
+                    @Override public Varargs invoke(Varargs a) { return LuaValue.FALSE; }
+                });
+            }
+            if (t.get("getItemSpace").isnil()) {
+                t.set("getItemSpace", new OneArgFunction() {
+                    @Override public LuaValue call(LuaValue slot) {
+                        com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                        if (r == null) return LuaValue.valueOf(0);
+                        int s = slot.checkint() - 1;
+                        if (s < 0 || s >= r.getInventory().getContainerSize()) return LuaValue.valueOf(0);
+                        var stack = r.getInventory().getItem(s);
+                        int max = stack.isEmpty() ? 64 : stack.getMaxStackSize();
+                        return LuaValue.valueOf(max - stack.getCount());
+                    }
+                });
+            }
+            if (t.get("getSelectedSlot").isnil() && !t.get("getSelected").isnil()) {
+                t.set("getSelectedSlot", t.get("getSelected"));
+            }
+        }
+
+        // -- shell.* stubs --
+        LuaValue shv = globals.get("shell");
+        if (shv.istable()) {
+            LuaTable shT = shv.checktable();
+            shT.set("complete", new OneArgFunction() {
+                @Override public LuaValue call(LuaValue line) { return new LuaTable(); }
+            });
+            shT.set("programs", new VarArgFunction() {
+                @Override public Varargs invoke(Varargs a) { return new LuaTable(); }
+            });
+            shT.set("aliases", new ZeroArgFunction() {
+                @Override public LuaValue call() { return new LuaTable(); }
+            });
+            shT.set("setAlias", new TwoArgFunction() {
+                @Override public LuaValue call(LuaValue k, LuaValue v) { return LuaValue.NIL; }
+            });
+            shT.set("clearAlias", new OneArgFunction() {
+                @Override public LuaValue call(LuaValue k) { return LuaValue.NIL; }
+            });
+            if (shT.get("path").isnil()) {
+                shT.set("path", new ZeroArgFunction() {
+                    @Override public LuaValue call() { return LuaValue.valueOf("/Program Files"); }
+                });
+            }
+            shT.set("setPath", new OneArgFunction() {
+                @Override public LuaValue call(LuaValue p) { return LuaValue.NIL; }
+            });
+        }
+    }
+
+    private static void findRecursive(VirtualFileSystem vfs, String dir, java.util.regex.Pattern rx,
+                                      java.util.List<String> out, int depth) {
+        if (depth > 32 || vfs == null) return;
+        if (!vfs.exists(dir) || !vfs.isDirectory(dir)) return;
+        for (String name : vfs.list(dir)) {
+            String full = dir.endsWith("/") ? dir + name : dir + "/" + name;
+            if (rx.matcher(full).matches() || rx.matcher(name).matches()) out.add(full);
+            if (vfs.isDirectory(full)) findRecursive(vfs, full, rx, out, depth + 1);
+        }
+    }
+
+    // ---------- disk API (CC:Tweaked compat over BluetoothNetwork drives) ----------
+    private void installDiskAPI() {
+        LuaTable disk = new LuaTable();
+        disk.set("isPresent", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue side) { return LuaValue.FALSE; }
+        });
+        disk.set("hasData", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue side) { return LuaValue.FALSE; }
+        });
+        disk.set("getMountPath", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue side) { return LuaValue.valueOf("/disk"); }
+        });
+        disk.set("setLabel", new TwoArgFunction() {
+            @Override public LuaValue call(LuaValue side, LuaValue label) { return LuaValue.NIL; }
+        });
+        disk.set("getLabel", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue side) { return LuaValue.NIL; }
+        });
+        disk.set("getID", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue side) { return LuaValue.NIL; }
+        });
+        disk.set("hasAudio", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue side) { return LuaValue.FALSE; }
+        });
+        disk.set("getAudioTitle", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue side) { return LuaValue.NIL; }
+        });
+        disk.set("playAudio", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue side) { return LuaValue.NIL; }
+        });
+        disk.set("stopAudio", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue side) { return LuaValue.NIL; }
+        });
+        disk.set("eject", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue side) { return LuaValue.NIL; }
+        });
+        globals.set("disk", disk);
     }
 
     // ---------- textutils extensions ----------
