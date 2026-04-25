@@ -383,12 +383,13 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         int offY = be.getOffsetY();
 
         // UV coordinates for this block's slice of the full texture.
-        // Note: a screen-facing player sees the block's local +X axis on their LEFT
-        // (when facing NORTH-facing block, world +X = east = player left). We mirror
-        // the per-block U range and swap the quad's U vertices so the texture reads
-        // left-to-right naturally across multi-block formations.
-        float u0 = (float) (multiW - 1 - offX) / multiW;
-        float u1 = (float) (multiW - offX) / multiW;
+        // For all four facings, formation offX=0 lies on the player's LEFT and
+        // offX=multiW-1 on the player's RIGHT. Each block's renderer-local x=0 lies
+        // on the player's RIGHT side of that block (renderer +X = player's left).
+        // So u at renderer x=m (player-right edge of this block) = (offX+1)/multiW,
+        // and u at renderer x=1-m (player-left edge) = offX/multiW.
+        float u0 = (float) offX / multiW;
+        float u1 = (float) (offX + 1) / multiW;
         float v0 = (float) (multiH - 1 - offY) / multiH;
         float v1 = (float) (multiH - offY) / multiH;
 
@@ -446,6 +447,14 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         boolean hasRight  = offX < multiWf - 1;
         boolean hasBottom = offY > 0;
         boolean hasTop    = offY < multiHf - 1;
+        // Per-side screen margins: 0 on inner edges (screen extends to block edge so
+        // adjacent monitors form one seamless display), `m` on outer edges (black bezel).
+        // Note: renderer +X is on the player's LEFT, so hasLeft (player-left neighbor) =
+        // offX > 0 corresponds to the renderer's +X side (x=1).
+        float ml = hasRight  ? 0f : m;   // player-right edge of this block (renderer x=0)
+        float mr = hasLeft   ? 0f : m;   // player-left edge of this block (renderer x=1)
+        float mb = hasBottom ? 0f : m;
+        float mt = hasTop    ? 0f : m;
         VertexConsumer frame = buffers.getBuffer(RenderType.entityCutoutNoCull(FRAME_TEXTURE));
 
         // Back face (z=1) — facing +Z (away from screen)
@@ -478,31 +487,52 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
                     0, 0, 1, 1, 1, 0, 0);
         }
 
-        // Front bezel — thin black ring around the screen quad. Drawn slightly behind the
-        // screen (frontZ vs screenZ which is frontZ - 0.005) using BEZEL_TEXTURE.
+        // Front bezel — black border only on outer formation edges. Inner edges have no
+        // bezel so adjacent screens form one seamless display.
         VertexConsumer bezel = buffers.getBuffer(RenderType.entityCutoutNoCull(BEZEL_TEXTURE));
-        // Draw the entire front face — the screen quad will cover the inner area, leaving
-        // an `m`-wide black border (since screen quad is inset by `m`).
-        addQuad(bezel, mat, pose,
-                0, 0, frontZ,   1, 0, frontZ,   1, 1, frontZ,   0, 1, frontZ,
-                0, 0, 1, 1, 0, 0, -1);
+        // Bottom strip (player-bottom edge, renderer y=0..mb)
+        if (mb > 0) {
+            addQuad(bezel, mat, pose,
+                    0, 0, frontZ,   1, 0, frontZ,   1, mb, frontZ,   0, mb, frontZ,
+                    0, 0, 1, 1, 0, 0, -1);
+        }
+        // Top strip (renderer y=1-mt..1)
+        if (mt > 0) {
+            addQuad(bezel, mat, pose,
+                    0, 1 - mt, frontZ,   1, 1 - mt, frontZ,   1, 1, frontZ,   0, 1, frontZ,
+                    0, 0, 1, 1, 0, 0, -1);
+        }
+        // Renderer-left strip (player's RIGHT edge, x=0..ml). Only fills the area not
+        // already covered by top/bottom strips (y from mb to 1-mt).
+        if (ml > 0) {
+            addQuad(bezel, mat, pose,
+                    0, mb, frontZ,   ml, mb, frontZ,   ml, 1 - mt, frontZ,   0, 1 - mt, frontZ,
+                    0, 0, 1, 1, 0, 0, -1);
+        }
+        // Renderer-right strip (player's LEFT edge, x=1-mr..1)
+        if (mr > 0) {
+            addQuad(bezel, mat, pose,
+                    1 - mr, mb, frontZ,   1, mb, frontZ,   1, 1 - mt, frontZ,   1 - mr, 1 - mt, frontZ,
+                    0, 0, 1, 1, 0, 0, -1);
+        }
         // -----------------------------------------------------------.
 
         VertexConsumer vc = buffers.getBuffer(RenderType.entityCutoutNoCull(st.location));
 
         // Quad: CCW winding when viewed from -Z (front of the screen).
-        // Vertices use swapped U so texture reads correctly to the player (see u0/u1 above).
-        // Top-left → Bottom-left → Bottom-right → Top-right (block-local; player sees mirrored).
-        vc.addVertex(mat, m, 1 - m, screenZ).setColor(255, 255, 255, 255).setUv(u1, v0)
+        // Per-side margins: outer edges have `m`-wide bezel, inner edges have 0 margin
+        // so screens butt up seamlessly. Vertex U is swapped (renderer x=ml gets u1,
+        // x=1-mr gets u0) so the texture reads correctly to the player.
+        vc.addVertex(mat, ml, 1 - mt, screenZ).setColor(255, 255, 255, 255).setUv(u1, v0)
                 .setOverlay(OverlayTexture.NO_OVERLAY).setLight(FULLBRIGHT)
                 .setNormal(pose.last(), 0, 0, -1);
-        vc.addVertex(mat, m, m, screenZ).setColor(255, 255, 255, 255).setUv(u1, v1)
+        vc.addVertex(mat, ml, mb, screenZ).setColor(255, 255, 255, 255).setUv(u1, v1)
                 .setOverlay(OverlayTexture.NO_OVERLAY).setLight(FULLBRIGHT)
                 .setNormal(pose.last(), 0, 0, -1);
-        vc.addVertex(mat, 1 - m, m, screenZ).setColor(255, 255, 255, 255).setUv(u0, v1)
+        vc.addVertex(mat, 1 - mr, mb, screenZ).setColor(255, 255, 255, 255).setUv(u0, v1)
                 .setOverlay(OverlayTexture.NO_OVERLAY).setLight(FULLBRIGHT)
                 .setNormal(pose.last(), 0, 0, -1);
-        vc.addVertex(mat, 1 - m, 1 - m, screenZ).setColor(255, 255, 255, 255).setUv(u0, v0)
+        vc.addVertex(mat, 1 - mr, 1 - mt, screenZ).setColor(255, 255, 255, 255).setUv(u0, v0)
                 .setOverlay(OverlayTexture.NO_OVERLAY).setLight(FULLBRIGHT)
                 .setNormal(pose.last(), 0, 0, -1);
 
