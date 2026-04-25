@@ -446,7 +446,7 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         boolean hasRight  = offX < multiWf - 1;
         boolean hasBottom = offY > 0;
         boolean hasTop    = offY < multiHf - 1;
-        VertexConsumer frame = buffers.getBuffer(RenderType.entitySolid(FRAME_TEXTURE));
+        VertexConsumer frame = buffers.getBuffer(RenderType.entityCutoutNoCull(FRAME_TEXTURE));
 
         // Back face (z=1) — facing +Z (away from screen)
         addQuad(frame, mat, pose,
@@ -480,7 +480,7 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
 
         // Front bezel — thin black ring around the screen quad. Drawn slightly behind the
         // screen (frontZ vs screenZ which is frontZ - 0.005) using BEZEL_TEXTURE.
-        VertexConsumer bezel = buffers.getBuffer(RenderType.entitySolid(BEZEL_TEXTURE));
+        VertexConsumer bezel = buffers.getBuffer(RenderType.entityCutoutNoCull(BEZEL_TEXTURE));
         // Draw the entire front face — the screen quad will cover the inner area, leaving
         // an `m`-wide black border (since screen quad is inset by `m`).
         addQuad(bezel, mat, pose,
