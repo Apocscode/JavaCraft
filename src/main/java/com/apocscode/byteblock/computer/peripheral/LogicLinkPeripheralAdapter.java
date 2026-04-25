@@ -79,10 +79,19 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
     private static Method mGetRemoteRedstoneChannels;
     private static Method mSetAllRemoteRedstoneOutputs;
     private static Method mRequestItem;
+    private static Method mRequestItems;
+    private static Method mGetAllRemoteSensorData;
+    private static Method mGetTrackSwitchState;
+
+    // Hub BE — refresh
+    private static Method mRefreshNetworkSummary;
 
     // Sensor BE — direct methods
     private static Method mSensorGetCachedData;
     private static Method mSensorGetTargetPos;
+    private static Method mSensorIsLinked;
+    private static Method mSensorGetNetworkFrequency;
+    private static Method mSensorRefresh;
 
     // Motor BE — direct methods
     private static Method mMotorIsEnabled;
@@ -94,6 +103,12 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
     private static Method mMotorGetStressUsage;
     private static Method mMotorIsSequenceRunning;
     private static Method mMotorGetSequenceSize;
+    private static Method mMotorClearSequence;
+    private static Method mMotorAddRotateStep;
+    private static Method mMotorAddWaitStep;
+    private static Method mMotorAddSpeedStep;
+    private static Method mMotorRunSequence;
+    private static Method mMotorStopSequence;
 
     // Drive BE — direct methods
     private static Method mDriveIsEnabled;
@@ -102,12 +117,25 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
     private static Method mDriveSetModifier;
     private static Method mDriveIsReversed;
     private static Method mDriveSetReversed;
+    private static Method mDriveGetInputSpeed;
+    private static Method mDriveGetOutputSpeed;
+    private static Method mDriveClearSequence;
+    private static Method mDriveAddRotateStep;
+    private static Method mDriveAddWaitStep;
+    private static Method mDriveAddModifierStep;
+    private static Method mDriveRunSequence;
+    private static Method mDriveStopSequence;
+    private static Method mDriveIsSequenceRunning;
+    private static Method mDriveGetSequenceSize;
 
     // Redstone Controller BE — direct methods
     private static Method mRedstoneSetOutput;
     private static Method mRedstoneGetInput;
+    private static Method mRedstoneGetOutput;
+    private static Method mRedstoneRemoveChannel;
     private static Method mRedstoneGetChannelList;
     private static Method mRedstoneSetAllOutputs;
+    private static Method mRedstoneClearChannels;
 
     // ══════════════════════════════════════════════════════════════════════
     // IPeripheralAdapter implementation
@@ -201,6 +229,26 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
         t.set("setHubLabel", new OneArgFunction() {
             @Override public LuaValue call(LuaValue s) {
                 try { mSetHubLabel.invoke(be, s.checkjstring()); } catch (Exception ignored) {}
+                return LuaValue.NONE;
+            }
+        });
+
+        // getNetworkID() — alias of getNetworkFrequency, matches CC:Tweaked LogicLink API
+        t.set("getNetworkID", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                try {
+                    Object uuid = mGetNetworkFrequency.invoke(be);
+                    return uuid != null ? LuaValue.valueOf(uuid.toString()) : LuaValue.NIL;
+                } catch (Exception e) { return LuaValue.NIL; }
+            }
+        });
+
+        // refresh() — force-refresh cached inventory summary
+        t.set("refresh", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                if (mRefreshNetworkSummary != null) {
+                    try { mRefreshNetworkSummary.invoke(be); } catch (Exception ignored) {}
+                }
                 return LuaValue.NONE;
             }
         });
@@ -423,6 +471,54 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
             }
         });
 
+        // requestItems(items, address) → boolean — bulk request
+        t.set("requestItems", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                if (peripheral == null || mRequestItems == null) return LuaValue.FALSE;
+                try {
+                    LuaTable itemsTbl = args.checktable(1);
+                    String address = args.checkjstring(2);
+                    java.util.Map<Object, Object> javaItems = new java.util.HashMap<>();
+                    LuaValue k = LuaValue.NIL;
+                    while (true) {
+                        Varargs n = itemsTbl.next(k);
+                        if (n.arg1().isnil()) break;
+                        k = n.arg1();
+                        LuaValue v = n.arg(2);
+                        if (v.istable()) {
+                            LuaTable entry = v.checktable();
+                            java.util.Map<String, Object> javaEntry = new java.util.HashMap<>();
+                            LuaValue name  = entry.get("name");
+                            LuaValue count = entry.get("count");
+                            if (!name.isnil())  javaEntry.put("name",  name.tojstring());
+                            if (!count.isnil()) javaEntry.put("count", count.toint());
+                            javaItems.put(k.isint() ? Integer.valueOf(k.toint()) : k.tojstring(), javaEntry);
+                        }
+                    }
+                    Object r = mRequestItems.invoke(peripheral, javaItems, address);
+                    return javaToLua(r);
+                } catch (Exception e) { return LuaValue.FALSE; }
+            }
+        });
+
+        // getAllRemoteSensorData() → list of sensor data
+        t.set("getAllRemoteSensorData", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                if (peripheral == null || mGetAllRemoteSensorData == null) return new LuaTable();
+                try { return javaToLua(mGetAllRemoteSensorData.invoke(peripheral)); }
+                catch (Exception e) { return new LuaTable(); }
+            }
+        });
+
+        // getTrackSwitchState(sensorId) → table
+        t.set("getTrackSwitchState", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue arg) {
+                if (peripheral == null || mGetTrackSwitchState == null) return LuaValue.NIL;
+                try { return javaToLua(mGetTrackSwitchState.invoke(peripheral, arg.checkjstring())); }
+                catch (Exception e) { return LuaValue.NIL; }
+            }
+        });
+
         return t;
     }
 
@@ -470,6 +566,51 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
             }
         });
 
+        // getTargetPosition() — README naming alias for getTargetPos
+        t.set("getTargetPosition", t.get("getTargetPos"));
+
+        // isLinked() → boolean
+        t.set("isLinked", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                if (mSensorIsLinked == null) return LuaValue.FALSE;
+                try { return LuaValue.valueOf((boolean) mSensorIsLinked.invoke(be)); }
+                catch (Exception e) { return LuaValue.FALSE; }
+            }
+        });
+
+        // getNetworkID() → string | nil
+        t.set("getNetworkID", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                if (mSensorGetNetworkFrequency == null) return LuaValue.NIL;
+                try {
+                    Object uuid = mSensorGetNetworkFrequency.invoke(be);
+                    return uuid != null ? LuaValue.valueOf(uuid.toString()) : LuaValue.NIL;
+                } catch (Exception e) { return LuaValue.NIL; }
+            }
+        });
+
+        // refresh() — force refresh of cached sensor data (best-effort)
+        t.set("refresh", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                if (mSensorRefresh != null) {
+                    try { mSensorRefresh.invoke(be); } catch (Exception ignored) {}
+                }
+                return LuaValue.NONE;
+            }
+        });
+
+        // getTargetData() → fresh data table (alias of getData; sensor caches updates each tick)
+        t.set("getTargetData", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                if (mSensorRefresh != null) {
+                    try { mSensorRefresh.invoke(be); } catch (Exception ignored) {}
+                }
+                if (mSensorGetCachedData == null) return LuaValue.NIL;
+                try { return javaToLua(mSensorGetCachedData.invoke(be)); }
+                catch (Exception e) { return LuaValue.NIL; }
+            }
+        });
+
         return t;
     }
 
@@ -493,6 +634,42 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
             @Override public LuaValue call(LuaValue v) {
                 try { mMotorSetEnabled.invoke(be, v.toboolean()); } catch (Exception ignored) {}
                 return LuaValue.NONE;
+            }
+        });
+
+        // enable() — alias for setEnabled(true)
+        t.set("enable", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                try { mMotorSetEnabled.invoke(be, true); } catch (Exception ignored) {}
+                return LuaValue.NONE;
+            }
+        });
+
+        // disable() — alias for setEnabled(false)
+        t.set("disable", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                try { mMotorSetEnabled.invoke(be, false); } catch (Exception ignored) {}
+                return LuaValue.NONE;
+            }
+        });
+
+        // stop() — set speed to 0 and disable
+        t.set("stop", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                try { mMotorSetSpeed.invoke(be, 0); } catch (Exception ignored) {}
+                try { mMotorSetEnabled.invoke(be, false); } catch (Exception ignored) {}
+                return LuaValue.NONE;
+            }
+        });
+
+        // isRunning() — enabled and speed != 0
+        t.set("isRunning", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                try {
+                    boolean en = (boolean) mMotorIsEnabled.invoke(be);
+                    int spd = (int) mMotorGetSpeed.invoke(be);
+                    return LuaValue.valueOf(en && spd != 0);
+                } catch (Exception e) { return LuaValue.FALSE; }
             }
         });
 
@@ -576,6 +753,51 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
             }
         });
 
+        // ── Sequence API ───────────────────────────────────────────────────
+        t.set("clearSequence", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                if (mMotorClearSequence == null) return LuaValue.NONE;
+                try { mMotorClearSequence.invoke(be); } catch (Exception ignored) {}
+                return LuaValue.NONE;
+            }
+        });
+        t.set("addRotateStep", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                if (mMotorAddRotateStep == null) return LuaValue.NONE;
+                try { mMotorAddRotateStep.invoke(be, (float) args.checkdouble(1), args.checkint(2)); }
+                catch (Exception ignored) {}
+                return LuaValue.NONE;
+            }
+        });
+        t.set("addWaitStep", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue n) {
+                if (mMotorAddWaitStep == null) return LuaValue.NONE;
+                try { mMotorAddWaitStep.invoke(be, n.checkint()); } catch (Exception ignored) {}
+                return LuaValue.NONE;
+            }
+        });
+        t.set("addSpeedStep", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue n) {
+                if (mMotorAddSpeedStep == null) return LuaValue.NONE;
+                try { mMotorAddSpeedStep.invoke(be, n.checkint()); } catch (Exception ignored) {}
+                return LuaValue.NONE;
+            }
+        });
+        t.set("runSequence", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue v) {
+                if (mMotorRunSequence == null) return LuaValue.NONE;
+                try { mMotorRunSequence.invoke(be, v.toboolean()); } catch (Exception ignored) {}
+                return LuaValue.NONE;
+            }
+        });
+        t.set("stopSequence", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                if (mMotorStopSequence == null) return LuaValue.NONE;
+                try { mMotorStopSequence.invoke(be); } catch (Exception ignored) {}
+                return LuaValue.NONE;
+            }
+        });
+
         return t;
     }
 
@@ -602,7 +824,39 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
             }
         });
 
-        // getModifier() → number
+        // enable() — alias for setEnabled(true)
+        t.set("enable", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                try { mDriveSetEnabled.invoke(be, true); } catch (Exception ignored) {}
+                return LuaValue.NONE;
+            }
+        });
+
+        // disable() — alias for setEnabled(false)
+        t.set("disable", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                try { mDriveSetEnabled.invoke(be, false); } catch (Exception ignored) {}
+                return LuaValue.NONE;
+            }
+        });
+
+        // getInputSpeed() → number
+        t.set("getInputSpeed", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                if (mDriveGetInputSpeed == null) return LuaValue.valueOf(0);
+                try { return LuaValue.valueOf(((Number) mDriveGetInputSpeed.invoke(be)).doubleValue()); }
+                catch (Exception e) { return LuaValue.valueOf(0); }
+            }
+        });
+
+        // getOutputSpeed() → number
+        t.set("getOutputSpeed", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                if (mDriveGetOutputSpeed == null) return LuaValue.valueOf(0);
+                try { return LuaValue.valueOf(((Number) mDriveGetOutputSpeed.invoke(be)).doubleValue()); }
+                catch (Exception e) { return LuaValue.valueOf(0); }
+            }
+        });
         t.set("getModifier", new ZeroArgFunction() {
             @Override public LuaValue call() {
                 try { return LuaValue.valueOf(((Number) mDriveGetModifier.invoke(be)).doubleValue()); }
@@ -642,7 +896,74 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
                 try { info.set("enabled",  LuaValue.valueOf((boolean) mDriveIsEnabled.invoke(be))); }  catch (Exception ignored) {}
                 try { info.set("modifier", LuaValue.valueOf(((Number) mDriveGetModifier.invoke(be)).doubleValue())); } catch (Exception ignored) {}
                 try { info.set("reversed", LuaValue.valueOf((boolean) mDriveIsReversed.invoke(be))); } catch (Exception ignored) {}
+                if (mDriveGetInputSpeed != null)
+                    try { info.set("inputSpeed",  LuaValue.valueOf(((Number) mDriveGetInputSpeed.invoke(be)).doubleValue())); } catch (Exception ignored) {}
+                if (mDriveGetOutputSpeed != null)
+                    try { info.set("outputSpeed", LuaValue.valueOf(((Number) mDriveGetOutputSpeed.invoke(be)).doubleValue())); } catch (Exception ignored) {}
+                if (mDriveIsSequenceRunning != null)
+                    try { info.set("sequenceRunning", LuaValue.valueOf((boolean) mDriveIsSequenceRunning.invoke(be))); } catch (Exception ignored) {}
+                if (mDriveGetSequenceSize != null)
+                    try { info.set("sequenceSize",    LuaValue.valueOf((int) mDriveGetSequenceSize.invoke(be))); } catch (Exception ignored) {}
                 return info;
+            }
+        });
+
+        // ── Sequence API ───────────────────────────────────────────────────
+        t.set("clearSequence", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                if (mDriveClearSequence == null) return LuaValue.NONE;
+                try { mDriveClearSequence.invoke(be); } catch (Exception ignored) {}
+                return LuaValue.NONE;
+            }
+        });
+        t.set("addRotateStep", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                if (mDriveAddRotateStep == null) return LuaValue.NONE;
+                try { mDriveAddRotateStep.invoke(be, (float) args.checkdouble(1), (float) args.checkdouble(2)); }
+                catch (Exception ignored) {}
+                return LuaValue.NONE;
+            }
+        });
+        t.set("addWaitStep", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue n) {
+                if (mDriveAddWaitStep == null) return LuaValue.NONE;
+                try { mDriveAddWaitStep.invoke(be, n.checkint()); } catch (Exception ignored) {}
+                return LuaValue.NONE;
+            }
+        });
+        t.set("addModifierStep", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue n) {
+                if (mDriveAddModifierStep == null) return LuaValue.NONE;
+                try { mDriveAddModifierStep.invoke(be, (float) n.checkdouble()); } catch (Exception ignored) {}
+                return LuaValue.NONE;
+            }
+        });
+        t.set("runSequence", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue v) {
+                if (mDriveRunSequence == null) return LuaValue.NONE;
+                try { mDriveRunSequence.invoke(be, v.toboolean()); } catch (Exception ignored) {}
+                return LuaValue.NONE;
+            }
+        });
+        t.set("stopSequence", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                if (mDriveStopSequence == null) return LuaValue.NONE;
+                try { mDriveStopSequence.invoke(be); } catch (Exception ignored) {}
+                return LuaValue.NONE;
+            }
+        });
+        t.set("isSequenceRunning", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                if (mDriveIsSequenceRunning == null) return LuaValue.FALSE;
+                try { return LuaValue.valueOf((boolean) mDriveIsSequenceRunning.invoke(be)); }
+                catch (Exception e) { return LuaValue.FALSE; }
+            }
+        });
+        t.set("getSequenceSize", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                if (mDriveGetSequenceSize == null) return LuaValue.valueOf(0);
+                try { return LuaValue.valueOf((int) mDriveGetSequenceSize.invoke(be)); }
+                catch (Exception e) { return LuaValue.valueOf(0); }
             }
         });
 
@@ -693,6 +1014,46 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
             }
         });
 
+        // getOutput(item1, item2) → int
+        t.set("getOutput", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                if (mRedstoneGetOutput == null) return LuaValue.valueOf(0);
+                try { return javaToLua(mRedstoneGetOutput.invoke(be, args.checkjstring(1), args.checkjstring(2))); }
+                catch (Exception e) { return LuaValue.valueOf(0); }
+            }
+        });
+
+        // removeChannel(item1, item2)
+        t.set("removeChannel", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                if (mRedstoneRemoveChannel == null) return LuaValue.NONE;
+                try { mRedstoneRemoveChannel.invoke(be, args.checkjstring(1), args.checkjstring(2)); }
+                catch (Exception ignored) {}
+                return LuaValue.NONE;
+            }
+        });
+
+        // clearChannels()
+        t.set("clearChannels", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                if (mRedstoneClearChannels == null) return LuaValue.NONE;
+                try { mRedstoneClearChannels.invoke(be); } catch (Exception ignored) {}
+                return LuaValue.NONE;
+            }
+        });
+
+        // getPosition() → {x, y, z}
+        t.set("getPosition", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                BlockPos pos = be.getBlockPos();
+                LuaTable tbl = new LuaTable();
+                tbl.set("x", LuaValue.valueOf(pos.getX()));
+                tbl.set("y", LuaValue.valueOf(pos.getY()));
+                tbl.set("z", LuaValue.valueOf(pos.getZ()));
+                return tbl;
+            }
+        });
+
         return t;
     }
 
@@ -719,6 +1080,7 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
             mSetHubRange         = clsHubBE.getMethod("setHubRange", int.class);
             mGetHubLabel         = clsHubBE.getMethod("getHubLabel");
             mSetHubLabel         = clsHubBE.getMethod("setHubLabel", String.class);
+            mRefreshNetworkSummary = safeMethod(clsHubBE, "refreshNetworkSummary");
 
             // ── InventorySummary (Create) ──────────────────────────────────
             Class<?> clsInventorySummary =
@@ -760,13 +1122,22 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
                         String.class, int.class);
                 mRequestItem                = safeMethod(clsHubPeri, "requestItem",
                         String.class, int.class, String.class);
+                mRequestItems               = safeMethod(clsHubPeri, "requestItems",
+                        Map.class, String.class);
+                mGetAllRemoteSensorData     = safeMethod(clsHubPeri, "getAllRemoteSensorData");
+                mGetTrackSwitchState        = safeMethod(clsHubPeri, "getTrackSwitchState", String.class);
             }
 
             // ── Sensor BE (direct) ─────────────────────────────────────────
             if (clsSensorBE != null) {
                 mSensorGetCachedData = safeMethod(clsSensorBE, "getCachedData");
-                mSensorGetTargetPos  = safeMethod(clsSensorBE, "getTargetPos");
-            }
+                mSensorGetTargetPos  = safeMethod(clsSensorBE, "getTargetPos");                mSensorIsLinked          = safeMethod(clsSensorBE, "isLinked");
+                mSensorGetNetworkFrequency = safeMethod(clsSensorBE, "getNetworkFrequency");
+                mSensorRefresh           = safeMethod(clsSensorBE, "refresh");
+                if (mSensorRefresh == null)
+                    mSensorRefresh       = safeMethod(clsSensorBE, "refreshSensorData");
+                if (mSensorRefresh == null)
+                    mSensorRefresh       = safeMethod(clsSensorBE, "updateCachedData");            }
 
             // ── Motor BE (direct) ──────────────────────────────────────────
             if (clsMotorBE != null) {
@@ -779,6 +1150,12 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
                 mMotorGetStressUsage     = safeMethod(clsMotorBE, "getStressUsageValue");
                 mMotorIsSequenceRunning  = safeMethod(clsMotorBE, "isSequenceRunning");
                 mMotorGetSequenceSize    = safeMethod(clsMotorBE, "getSequenceSize");
+                mMotorClearSequence      = safeMethod(clsMotorBE, "clearSequence");
+                mMotorAddRotateStep      = safeMethod(clsMotorBE, "addRotateStep", float.class, int.class);
+                mMotorAddWaitStep        = safeMethod(clsMotorBE, "addWaitStep",   int.class);
+                mMotorAddSpeedStep       = safeMethod(clsMotorBE, "addSpeedStep",  int.class);
+                mMotorRunSequence        = safeMethod(clsMotorBE, "runSequence",   boolean.class);
+                mMotorStopSequence       = safeMethod(clsMotorBE, "stopSequence");
             }
 
             // ── Drive BE (direct) ──────────────────────────────────────────
@@ -789,6 +1166,16 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
                 mDriveSetModifier = safeMethod(clsDriveBE, "setSpeedModifier", float.class);
                 mDriveIsReversed  = safeMethod(clsDriveBE, "isReversed");
                 mDriveSetReversed = safeMethod(clsDriveBE, "setReversed",      boolean.class);
+                mDriveGetInputSpeed   = safeMethod(clsDriveBE, "getInputSpeed");
+                mDriveGetOutputSpeed  = safeMethod(clsDriveBE, "getOutputSpeed");
+                mDriveClearSequence   = safeMethod(clsDriveBE, "clearSequence");
+                mDriveAddRotateStep   = safeMethod(clsDriveBE, "addRotateStep",   float.class, float.class);
+                mDriveAddWaitStep     = safeMethod(clsDriveBE, "addWaitStep",     int.class);
+                mDriveAddModifierStep = safeMethod(clsDriveBE, "addModifierStep", float.class);
+                mDriveRunSequence     = safeMethod(clsDriveBE, "runSequence",     boolean.class);
+                mDriveStopSequence    = safeMethod(clsDriveBE, "stopSequence");
+                mDriveIsSequenceRunning = safeMethod(clsDriveBE, "isSequenceRunning");
+                mDriveGetSequenceSize   = safeMethod(clsDriveBE, "getSequenceSize");
             }
 
             // ── Redstone Controller BE (direct) ────────────────────────────
@@ -799,6 +1186,9 @@ public class LogicLinkPeripheralAdapter implements IPeripheralAdapter {
                         String.class, String.class);
                 mRedstoneGetChannelList = safeMethod(clsRedstoneBE, "getChannelList");
                 mRedstoneSetAllOutputs  = safeMethod(clsRedstoneBE, "setAllOutputs", int.class);
+                mRedstoneGetOutput      = safeMethod(clsRedstoneBE, "getOutput",     String.class, String.class);
+                mRedstoneRemoveChannel  = safeMethod(clsRedstoneBE, "removeChannel", String.class, String.class);
+                mRedstoneClearChannels  = safeMethod(clsRedstoneBE, "clearChannels");
             }
 
             return true;
