@@ -79,6 +79,14 @@ public class MonitorBlockEntity extends BlockEntity {
     // Last-known label of the linked computer; rendered on the "no signal" tombstone.
     private String lastKnownComputerLabel = "";
 
+    // ── Display geometry (Nuclear-Control-style thin panel + tilt/yaw) ──
+    /** Slab thickness in pixels (1..4). 2 = thin panel default. */
+    private int   thicknessPx = 2;
+    /** Pitch of the rendered screen surface around its horizontal axis, degrees (-45..45). */
+    private float tiltDegrees = 0f;
+    /** Yaw of the rendered screen surface around its vertical axis, degrees (-45..45). */
+    private float yawDegrees  = 0f;
+
     public MonitorBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.MONITOR.get(), pos, state);
         this.originPos = pos;
@@ -152,6 +160,9 @@ public class MonitorBlockEntity extends BlockEntity {
             // Format: "display_mode:mirror" or "display_mode:test:bars" etc.
             String mode = content.substring("display_mode:".length());
             setDisplayMode(mode);
+        } else if (content.startsWith("config:")) {
+            // Format: "config:tilt=15.0,yaw=-10.0,thickness=2" — any subset of keys allowed.
+            applyConfigString(content.substring("config:".length()));
         } else if (content.startsWith("link:")) {
             // Format: "link:x,y,z" — sets the linked computer position for mirror mode
             try {
@@ -391,6 +402,66 @@ public class MonitorBlockEntity extends BlockEntity {
     public int getLastTouchX() { return lastTouchX; }
     public int getLastTouchY() { return lastTouchY; }
     public String getLastKnownComputerLabel() { return lastKnownComputerLabel; }
+
+    public int   getThicknessPx() { return thicknessPx; }
+    public float getTiltDegrees() { return tiltDegrees; }
+    public float getYawDegrees()  { return yawDegrees; }
+
+    /**
+     * Apply a {@code key=value,key=value,...} config string from a Bluetooth
+     * "config:" message. Mutates only the addressed fields, propagates to all
+     * formation members so render/shape stay coherent, and syncs to clients.
+     */
+    public void applyConfigString(String body) {
+        if (level == null || level.isClientSide() || body == null) return;
+        Float  newTilt   = null;
+        Float  newYaw    = null;
+        Integer newThick = null;
+        for (String kv : body.split(",")) {
+            int eq = kv.indexOf('=');
+            if (eq <= 0) continue;
+            String k = kv.substring(0, eq).trim().toLowerCase();
+            String v = kv.substring(eq + 1).trim();
+            try {
+                switch (k) {
+                    case "tilt"      -> newTilt  = Float.parseFloat(v);
+                    case "yaw"       -> newYaw   = Float.parseFloat(v);
+                    case "thickness" -> newThick = Integer.parseInt(v);
+                    default -> {}
+                }
+            } catch (NumberFormatException ignored) {}
+        }
+        // Walk formation and update every member
+        MonitorBlockEntity origin = getOriginEntity();
+        if (origin == null) origin = this;
+        for (int ox = 0; ox < origin.multiWidth; ox++) {
+            for (int oy = 0; oy < origin.multiHeight; oy++) {
+                BlockPos memberPos = origin.getWorldPosForOffset(ox, oy);
+                BlockEntity be = level.getBlockEntity(memberPos);
+                if (be instanceof MonitorBlockEntity m) {
+                    if (newTilt  != null) m.tiltDegrees  = clamp(newTilt,  -45f, 45f);
+                    if (newYaw   != null) m.yawDegrees   = clamp(newYaw,   -45f, 45f);
+                    if (newThick != null) m.thicknessPx  = (int) clamp(newThick, 1, 6);
+                    m.setChanged();
+                    m.syncToClient();
+                }
+            }
+        }
+        // Block shape depends on thickness — refresh collision/raytrace shape
+        if (newThick != null && level != null) {
+            for (int ox = 0; ox < origin.multiWidth; ox++) {
+                for (int oy = 0; oy < origin.multiHeight; oy++) {
+                    BlockPos memberPos = origin.getWorldPosForOffset(ox, oy);
+                    BlockState st = level.getBlockState(memberPos);
+                    level.sendBlockUpdated(memberPos, st, st, 3);
+                }
+            }
+        }
+    }
+
+    private static float clamp(float v, float lo, float hi) {
+        return v < lo ? lo : (v > hi ? hi : v);
+    }
     public long getGfxVersion() { return gfxVersion; }
     public byte[] getGfxPixels() { return gfxPixels; }
     public long getPaletteVersion() { return paletteVersion; }
@@ -717,6 +788,9 @@ public class MonitorBlockEntity extends BlockEntity {
         if (lastKnownComputerLabel != null && !lastKnownComputerLabel.isEmpty()) {
             tag.putString("LastLabel", lastKnownComputerLabel);
         }
+        tag.putInt("ThicknessPx", thicknessPx);
+        tag.putFloat("TiltDeg",    tiltDegrees);
+        tag.putFloat("YawDeg",     yawDegrees);
     }
 
     @Override
@@ -764,5 +838,8 @@ public class MonitorBlockEntity extends BlockEntity {
         }
         if (tag.contains("PalVer")) paletteVersion = tag.getLong("PalVer");
         if (tag.contains("LastLabel")) lastKnownComputerLabel = tag.getString("LastLabel");
+        if (tag.contains("ThicknessPx")) thicknessPx = (int) clamp(tag.getInt("ThicknessPx"), 1, 6);
+        if (tag.contains("TiltDeg"))     tiltDegrees = clamp(tag.getFloat("TiltDeg"), -45f, 45f);
+        if (tag.contains("YawDeg"))      yawDegrees  = clamp(tag.getFloat("YawDeg"),  -45f, 45f);
     }
 }

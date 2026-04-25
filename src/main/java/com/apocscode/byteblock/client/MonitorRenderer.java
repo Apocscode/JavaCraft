@@ -400,25 +400,43 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
             default -> { /* NORTH: no transform */ }
         }
 
-        // Mass slab is 4px thick hugging the far side of the cell (against mounting wall).
-        // The screen quad sits just in front of the slab's front face at cell-local z=12/16.
-        float z = 12.0f / 16.0f - 0.005f;
+        // Slab thickness (per-BE) defines where the screen face sits. The slab back is at z=1,
+        // front face is at z = 1 - (thickness/16). Place the screen quad just barely in front
+        // of that surface (inset by 0.005 to avoid z-fighting with the block model).
+        int thickness = Math.max(1, Math.min(6, origin.getThicknessPx()));
+        float screenZ = 1.0f - (thickness / 16.0f) - 0.005f;
         float m = 0.01f;    // tiny margin to prevent edge artifacts
+
+        // Apply per-BE tilt (X axis) and yaw (Y axis) around the screen face center.
+        // Edge blocks in a multi-block formation use the formation-wide center so the
+        // surface stays coplanar across the whole panel.
+        float tilt = origin.getTiltDegrees();
+        float yaw  = origin.getYawDegrees();
+        if (tilt != 0f || yaw != 0f) {
+            // Center of this block within formation:
+            float cx = 0.5f - offX;          // formation center x in this-block local coords
+            float cy = 0.5f - offY;          // formation center y in this-block local coords (y-up)
+            pose.translate(cx, cy, screenZ);
+            pose.mulPose(Axis.YP.rotationDegrees(yaw));
+            pose.mulPose(Axis.XP.rotationDegrees(tilt));
+            pose.translate(-cx, -cy, -screenZ);
+        }
+
         Matrix4f mat = pose.last().pose();
         VertexConsumer vc = buffers.getBuffer(RenderType.entityCutoutNoCull(st.location));
 
         // Quad: CCW winding when viewed from -Z (front of the screen)
         // Top-left → Bottom-left → Bottom-right → Top-right
-        vc.addVertex(mat, m, 1 - m, z).setColor(255, 255, 255, 255).setUv(u0, v0)
+        vc.addVertex(mat, m, 1 - m, screenZ).setColor(255, 255, 255, 255).setUv(u0, v0)
                 .setOverlay(OverlayTexture.NO_OVERLAY).setLight(FULLBRIGHT)
                 .setNormal(pose.last(), 0, 0, -1);
-        vc.addVertex(mat, m, m, z).setColor(255, 255, 255, 255).setUv(u0, v1)
+        vc.addVertex(mat, m, m, screenZ).setColor(255, 255, 255, 255).setUv(u0, v1)
                 .setOverlay(OverlayTexture.NO_OVERLAY).setLight(FULLBRIGHT)
                 .setNormal(pose.last(), 0, 0, -1);
-        vc.addVertex(mat, 1 - m, m, z).setColor(255, 255, 255, 255).setUv(u1, v1)
+        vc.addVertex(mat, 1 - m, m, screenZ).setColor(255, 255, 255, 255).setUv(u1, v1)
                 .setOverlay(OverlayTexture.NO_OVERLAY).setLight(FULLBRIGHT)
                 .setNormal(pose.last(), 0, 0, -1);
-        vc.addVertex(mat, 1 - m, 1 - m, z).setColor(255, 255, 255, 255).setUv(u1, v0)
+        vc.addVertex(mat, 1 - m, 1 - m, screenZ).setColor(255, 255, 255, 255).setUv(u1, v0)
                 .setOverlay(OverlayTexture.NO_OVERLAY).setLight(FULLBRIGHT)
                 .setNormal(pose.last(), 0, 0, -1);
 

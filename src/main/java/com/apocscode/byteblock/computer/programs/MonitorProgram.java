@@ -29,6 +29,12 @@ public class MonitorProgram extends OSProgram {
     // Active test pattern (null = normal GUI)
     private String activePattern = null;
 
+    // Configure-mode state (per-monitor geometry editor)
+    private boolean configMode = false;
+    private int     configThickness = 2;     // 1..6 px
+    private float   configTilt = 0f;          // -45..+45
+    private float   configYaw  = 0f;          // -45..+45
+
     // Layout
     private static final int HEADER_H = 20;
     private static final int ROW_H = 16;
@@ -133,6 +139,8 @@ public class MonitorProgram extends OSProgram {
                 if (code == 256) { // ESC
                     if (activePattern != null) {
                         activePattern = null; // exit test pattern
+                    } else if (configMode) {
+                        configMode = false;
                     } else {
                         running = false;
                     }
@@ -141,7 +149,7 @@ public class MonitorProgram extends OSProgram {
             case MOUSE_CLICK_PX -> handleClickPx(event.getInt(1), event.getInt(2));
             case MOUSE_SCROLL -> {
                 int dir = event.getInt(0);
-                if (activePattern == null) {
+                if (activePattern == null && !configMode) {
                     scrollOffset = Math.max(0, scrollOffset + (dir < 0 ? -1 : 1));
                 }
             }
@@ -156,6 +164,7 @@ public class MonitorProgram extends OSProgram {
             activePattern = null;
             return;
         }
+        if (configMode) { handleConfigClickPx(mx, my); return; }
 
         int w = PixelBuffer.SCREEN_W;
 
@@ -189,6 +198,13 @@ public class MonitorProgram extends OSProgram {
         if (mx >= btnStartX && mx < btnStartX + BTN_W * 2 + BTN_GAP && my >= clearBtnY && my < clearBtnY + BTN_H) {
             applyDisplayMode("mirror");
             activePattern = null;
+            return;
+        }
+
+        // "Configure…" button — opens the geometry editor for the selected monitor.
+        int cfgBtnY = clearBtnY + BTN_H + 6;
+        if (mx >= btnStartX && mx < btnStartX + BTN_W * 2 + BTN_GAP && my >= cfgBtnY && my < cfgBtnY + BTN_H) {
+            openConfigForSelected();
         }
     }
 
@@ -234,6 +250,10 @@ public class MonitorProgram extends OSProgram {
 
         if (activePattern != null) {
             renderTestPattern(pb);
+            return;
+        }
+        if (configMode) {
+            renderConfigPanel(pb);
             return;
         }
 
@@ -305,6 +325,14 @@ public class MonitorProgram extends OSProgram {
         int clearW = BTN_W * 2 + BTN_GAP;
         pb.fillRoundRect(btnStartX, clearBtnY, clearW, BTN_H, 3, 0xFF2A4A2A);
         pb.drawStringCentered(btnStartX, clearW, clearBtnY + 1, "Reset to Mirror", GREEN);
+
+        // "Configure…" button — opens the geometry editor for the selected monitor.
+        int cfgBtnY = clearBtnY + BTN_H + 6;
+        boolean cfgEnabled = selectedIndex >= 0 && selectedIndex < monitors.size();
+        int cfgBg = cfgEnabled ? 0xFF2A3A4A : 0xFF2A2A35;
+        int cfgFg = cfgEnabled ? CYAN       : TEXT_DIM;
+        pb.fillRoundRect(btnStartX, cfgBtnY, clearW, BTN_H, 3, cfgBg);
+        pb.drawStringCentered(btnStartX, clearW, cfgBtnY + 1, "Configure Geometry...", cfgFg);
 
         // Selected monitor info
         if (selectedIndex >= 0 && selectedIndex < monitors.size()) {
@@ -427,5 +455,169 @@ public class MonitorProgram extends OSProgram {
             case "white" -> 0xFFFFFFFF;
             default -> TEXT_NORM;
         };
+    }
+
+    // ────────────────────── Configure (geometry editor) ──────────────────────
+    //
+    // Layout (640×400 PixelBuffer):
+    //   - Header bar at y=0..20
+    //   - Three rows for Thickness / Tilt / Yaw, each with [--] [-] value [+] [++]
+    //   - Apply / Back buttons at the bottom
+
+    private static final int CFG_ROW_Y0 = 80;
+    private static final int CFG_ROW_H  = 56;
+    private static final int CFG_BTN_W  = 36;
+    private static final int CFG_BTN_H  = 26;
+
+    private void openConfigForSelected() {
+        if (selectedIndex < 0 || selectedIndex >= monitors.size()) {
+            statusText = "Select a monitor first to configure it.";
+            return;
+        }
+        // Pre-fill from the live BE if present.
+        MonitorInfo sel = monitors.get(selectedIndex);
+        if (os != null && os.getLevel() != null
+                && os.getLevel().getBlockEntity(sel.pos) instanceof MonitorBlockEntity m) {
+            configThickness = m.getThicknessPx();
+            configTilt      = m.getTiltDegrees();
+            configYaw       = m.getYawDegrees();
+        } else {
+            configThickness = 2;
+            configTilt = 0f;
+            configYaw  = 0f;
+        }
+        configMode = true;
+    }
+
+    private void renderConfigPanel(PixelBuffer pb) {
+        int w = pb.getWidth();
+        int h = pb.getHeight();
+        pb.fillRect(0, 0, w, h, BG);
+
+        // Header
+        pb.fillRect(0, 0, w, HEADER_H, HEADER_BG);
+        pb.drawString(4, 2, "Monitor Configure", ACCENT);
+        if (selectedIndex >= 0 && selectedIndex < monitors.size()) {
+            MonitorInfo sel = monitors.get(selectedIndex);
+            pb.drawStringRight(w - 4, 2, "Editing " + sel.shortId, CYAN);
+        }
+
+        renderConfigRow(pb, 0, "Thickness", String.format("%d px", configThickness));
+        renderConfigRow(pb, 1, "Tilt",      String.format("%+.1f\u00B0", configTilt));
+        renderConfigRow(pb, 2, "Yaw",       String.format("%+.1f\u00B0", configYaw));
+
+        // Apply + Back row
+        int applyY = CFG_ROW_Y0 + 3 * CFG_ROW_H + 16;
+        int applyW = 140;
+        int applyX = w / 2 - applyW - 8;
+        int backX  = w / 2 + 8;
+        pb.fillRoundRect(applyX, applyY, applyW, BTN_H + 6, 4, 0xFF2A4A2A);
+        pb.drawStringCentered(applyX, applyW, applyY + 5, "Apply", GREEN);
+        pb.fillRoundRect(backX,  applyY, applyW, BTN_H + 6, 4, 0xFF3A3A4A);
+        pb.drawStringCentered(backX,  applyW, applyY + 5, "Back",  TEXT_NORM);
+
+        // Hint
+        pb.drawString(4, h - 14,
+                "Tilt rotates the screen up/down, yaw rotates left/right. Thickness changes the slab depth (1-6px). ESC = Back.",
+                TEXT_DIM);
+    }
+
+    private void renderConfigRow(PixelBuffer pb, int rowIdx, String label, String value) {
+        int w = PixelBuffer.SCREEN_W;
+        int rowY = CFG_ROW_Y0 + rowIdx * CFG_ROW_H;
+        int centerX = w / 2;
+
+        pb.drawString(20, rowY, label, ACCENT);
+
+        // Buttons: [--] [-]  value  [+] [++]
+        int spacing = 6;
+        int valueW  = 110;
+        int totalW  = CFG_BTN_W * 4 + valueW + spacing * 4;
+        int startX  = centerX - totalW / 2;
+        int btnY    = rowY + 16;
+
+        drawCfgBtn(pb, startX,                                  btnY, "--");
+        drawCfgBtn(pb, startX + (CFG_BTN_W + spacing),          btnY, "-");
+        // Value box
+        int valX = startX + (CFG_BTN_W + spacing) * 2;
+        pb.fillRoundRect(valX, btnY, valueW, CFG_BTN_H, 3, 0xFF15151F);
+        pb.drawStringCentered(valX, valueW, btnY + 9, value, TEXT_NORM);
+        drawCfgBtn(pb, valX + valueW + spacing,                 btnY, "+");
+        drawCfgBtn(pb, valX + valueW + spacing + (CFG_BTN_W + spacing), btnY, "++");
+    }
+
+    private static void drawCfgBtn(PixelBuffer pb, int x, int y, String label) {
+        pb.fillRoundRect(x, y, CFG_BTN_W, CFG_BTN_H, 3, 0xFF333348);
+        pb.drawStringCentered(x, CFG_BTN_W, y + 9, label, 0xFFCCCCCC);
+    }
+
+    private void handleConfigClickPx(int mx, int my) {
+        int w = PixelBuffer.SCREEN_W;
+        int centerX = w / 2;
+
+        // Adjuster rows
+        for (int rowIdx = 0; rowIdx < 3; rowIdx++) {
+            int rowY = CFG_ROW_Y0 + rowIdx * CFG_ROW_H;
+            int btnY = rowY + 16;
+            if (my < btnY || my >= btnY + CFG_BTN_H) continue;
+
+            int spacing = 6, valueW = 110;
+            int totalW  = CFG_BTN_W * 4 + valueW + spacing * 4;
+            int startX  = centerX - totalW / 2;
+
+            int[] xs = new int[] {
+                startX,
+                startX + (CFG_BTN_W + spacing),
+                startX + (CFG_BTN_W + spacing) * 2 + valueW + spacing,
+                startX + (CFG_BTN_W + spacing) * 3 + valueW + spacing,
+            };
+            int[] deltas = (rowIdx == 0)
+                    ? new int[]{-2, -1, +1, +2}        // thickness px
+                    : new int[]{-15, -5, +5, +15};     // tilt/yaw degrees (×0.1 below for thickness)
+            for (int i = 0; i < 4; i++) {
+                if (mx >= xs[i] && mx < xs[i] + CFG_BTN_W) {
+                    adjustConfig(rowIdx, deltas[i]);
+                    return;
+                }
+            }
+        }
+
+        // Apply / Back
+        int applyY = CFG_ROW_Y0 + 3 * CFG_ROW_H + 16;
+        int applyW = 140;
+        int applyX = w / 2 - applyW - 8;
+        int backX  = w / 2 + 8;
+        if (my >= applyY && my < applyY + BTN_H + 6) {
+            if (mx >= applyX && mx < applyX + applyW) {
+                sendConfigToSelected();
+            } else if (mx >= backX && mx < backX + applyW) {
+                configMode = false;
+            }
+        }
+    }
+
+    private void adjustConfig(int rowIdx, int delta) {
+        switch (rowIdx) {
+            case 0 -> configThickness = clampInt(configThickness + delta, 1, 6);
+            case 1 -> configTilt      = clampF  (configTilt + delta,  -45f, 45f);
+            case 2 -> configYaw       = clampF  (configYaw  + delta,  -45f, 45f);
+        }
+    }
+
+    private static int   clampInt(int v, int lo, int hi)         { return v < lo ? lo : (v > hi ? hi : v); }
+    private static float clampF  (float v, float lo, float hi)   { return v < lo ? lo : (v > hi ? hi : v); }
+
+    private void sendConfigToSelected() {
+        if (selectedIndex < 0 || selectedIndex >= monitors.size()) return;
+        if (os == null || os.getLevel() == null || os.getBlockPos() == null) return;
+        MonitorInfo sel = monitors.get(selectedIndex);
+        String msg = String.format(
+                "config:thickness=%d,tilt=%.1f,yaw=%.1f",
+                configThickness, configTilt, configYaw);
+        BluetoothNetwork.send(os.getLevel(), os.getBlockPos(), os.getComputerId(),
+                sel.fullId(), 1, msg);
+        statusText = "Applied geometry to " + sel.shortId;
+        configMode = false;
+        refreshMonitors();
     }
 }

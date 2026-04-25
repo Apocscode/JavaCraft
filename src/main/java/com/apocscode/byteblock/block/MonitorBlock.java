@@ -27,13 +27,19 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 public class MonitorBlock extends Block implements EntityBlock {
     public static final DirectionProperty FACING = HorizontalDirectionalBlock.FACING;
 
-    // Monitor slab (4px thick) hugs the side of the cell AWAY from the player, so the slab's
-    // back is flush with the block the monitor is mounted on. FACING = direction the screen points.
-    // For FACING=X, mass sits on the +X side of the cell (so the back is against a wall in +X direction).
-    private static final VoxelShape SHAPE_NORTH = Block.box(0, 0, 12, 16, 16, 16); // back against wall SOUTH
-    private static final VoxelShape SHAPE_SOUTH = Block.box(0, 0, 0, 16, 16, 4);   // back against wall NORTH
-    private static final VoxelShape SHAPE_EAST  = Block.box(0, 0, 0, 4, 16, 16);   // back against wall WEST
-    private static final VoxelShape SHAPE_WEST  = Block.box(12, 0, 0, 16, 16, 16); // back against wall EAST
+    // Monitor slab thickness is configurable per-BE (1..6 px). Shape is computed lazily
+    // and indexed by (facing, thickness). FACING = direction the screen points (front face).
+    // For FACING=NORTH, slab sits at the SOUTH side of the cell (back against +Z wall).
+    private static VoxelShape buildShape(Direction facing, int thicknessPx) {
+        int t = Math.max(1, Math.min(16, thicknessPx));
+        return switch (facing) {
+            case SOUTH -> Block.box(0, 0, 0, 16, 16, t);
+            case EAST  -> Block.box(0, 0, 0, t, 16, 16);
+            case WEST  -> Block.box(16 - t, 0, 0, 16, 16, 16);
+            default    -> Block.box(0, 0, 16 - t, 16, 16, 16);  // NORTH
+        };
+    }
+    private static final VoxelShape[][] SHAPE_CACHE = new VoxelShape[6][7]; // 6 dirs, thickness 0..6
 
     public MonitorBlock(Properties properties) {
         super(properties);
@@ -59,12 +65,18 @@ public class MonitorBlock extends Block implements EntityBlock {
 
     @Override
     public VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
-        return switch (state.getValue(FACING)) {
-            case SOUTH -> SHAPE_SOUTH;
-            case EAST  -> SHAPE_EAST;
-            case WEST  -> SHAPE_WEST;
-            default    -> SHAPE_NORTH;
-        };
+        Direction facing = state.getValue(FACING);
+        int thickness = 2;
+        BlockEntity be = level.getBlockEntity(pos);
+        if (be instanceof MonitorBlockEntity m) thickness = m.getThicknessPx();
+        thickness = Math.max(1, Math.min(6, thickness));
+        int dirIdx = facing.get3DDataValue();
+        VoxelShape cached = SHAPE_CACHE[dirIdx][thickness];
+        if (cached == null) {
+            cached = buildShape(facing, thickness);
+            SHAPE_CACHE[dirIdx][thickness] = cached;
+        }
+        return cached;
     }
 
     @Override
