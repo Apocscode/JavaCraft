@@ -1,23 +1,7 @@
 {
   "parent": "minecraft:block/block",
   "textures": {
-    "frame": "minecraft:block/gray_concrete",
-    "screen": "minecraft:block/black_concrete",
     "particle": "minecraft:block/gray_concrete"
   },
-  "elements": [
-    {
-      "comment": "Thin panel — mass hugs far side of cell (against mounting block). Screen on player-facing (north) face.",
-      "from": [0, 0, 12],
-      "to": [16, 16, 16],
-      "faces": {
-        "north": {"uv": [0, 0, 16, 16], "texture": "#screen"},
-        "south": {"uv": [0, 0, 16, 16], "texture": "#frame"},
-        "east":  {"uv": [0, 0, 4, 16],  "texture": "#frame"},
-        "west":  {"uv": [12, 0, 16, 16], "texture": "#frame"},
-        "up":    {"uv": [0, 0, 16, 4],  "texture": "#frame"},
-        "down":  {"uv": [0, 12, 16, 16], "texture": "#frame"}
-      }
-    }
-  ]
+  "elements": []
 }

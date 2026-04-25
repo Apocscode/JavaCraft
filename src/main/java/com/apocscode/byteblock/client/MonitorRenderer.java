@@ -39,6 +39,13 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
     private static final int FB_H = PixelBuffer.SCREEN_H; // 400
     private static final int FULLBRIGHT = 15728880;
 
+    /** Frame/bezel texture — solid gray block from vanilla resources. */
+    private static final ResourceLocation FRAME_TEXTURE =
+            ResourceLocation.fromNamespaceAndPath("minecraft", "textures/block/gray_concrete.png");
+    /** Tiny inner-bezel border texture — black. */
+    private static final ResourceLocation BEZEL_TEXTURE =
+            ResourceLocation.fromNamespaceAndPath("minecraft", "textures/block/black_concrete.png");
+
     // Texture cache keyed by formation origin position
     private static final Map<BlockPos, ScreenTexture> TEXTURE_CACHE = new HashMap<>();
     private static long lastCleanupTick = 0;
@@ -402,9 +409,10 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
 
         // Slab thickness (per-BE) defines where the screen face sits. The slab back is at z=1,
         // front face is at z = 1 - (thickness/16). Place the screen quad just barely in front
-        // of that surface (inset by 0.005 to avoid z-fighting with the block model).
+        // of that surface (inset by 0.005 to avoid z-fighting with the bezel).
         int thickness = Math.max(1, Math.min(6, origin.getThicknessPx()));
         float screenZ = 1.0f - (thickness / 16.0f) - 0.005f;
+        float frontZ  = 1.0f - (thickness / 16.0f);   // bezel front plane
         float m = 0.01f;    // tiny margin to prevent edge artifacts
 
         // Apply per-BE tilt (X axis) and yaw (Y axis) around the screen face center.
@@ -423,6 +431,59 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         }
 
         Matrix4f mat = pose.last().pose();
+
+        // ---- FRAME GEOMETRY (Nuclear-Control style) -----------------------------
+        // Draw the slab itself — back plane + 4 thin side strips + front bezel ring —
+        // so the visible block reflects the configured thickness/tilt/yaw. The screen
+        // quad is drawn last on top of the bezel.
+        int multiWf = multiW;
+        int multiHf = multiH;
+        boolean hasLeft   = offX > 0;
+        boolean hasRight  = offX < multiWf - 1;
+        boolean hasBottom = offY > 0;
+        boolean hasTop    = offY < multiHf - 1;
+        VertexConsumer frame = buffers.getBuffer(RenderType.entitySolid(FRAME_TEXTURE));
+
+        // Back face (z=1) — facing +Z (away from screen)
+        addQuad(frame, mat, pose,
+                0, 0, 1f,   1, 0, 1f,   1, 1, 1f,   0, 1, 1f,
+                0, 0, 1, 1, 0, 0, 1);
+
+        // Top side (y=1) — only if this block is at the top edge
+        if (!hasTop) {
+            addQuad(frame, mat, pose,
+                    0, 1, frontZ,   1, 1, frontZ,   1, 1, 1f,   0, 1, 1f,
+                    0, 0, 1, 1, 0, 1, 0);
+        }
+        // Bottom side (y=0)
+        if (!hasBottom) {
+            addQuad(frame, mat, pose,
+                    0, 0, 1f,   1, 0, 1f,   1, 0, frontZ,   0, 0, frontZ,
+                    0, 0, 1, 1, 0, -1, 0);
+        }
+        // Left side (x=0)
+        if (!hasLeft) {
+            addQuad(frame, mat, pose,
+                    0, 0, 1f,   0, 0, frontZ,   0, 1, frontZ,   0, 1, 1f,
+                    0, 0, 1, 1, -1, 0, 0);
+        }
+        // Right side (x=1)
+        if (!hasRight) {
+            addQuad(frame, mat, pose,
+                    1, 0, frontZ,   1, 0, 1f,   1, 1, 1f,   1, 1, frontZ,
+                    0, 0, 1, 1, 1, 0, 0);
+        }
+
+        // Front bezel — thin black ring around the screen quad. Drawn slightly behind the
+        // screen (frontZ vs screenZ which is frontZ - 0.005) using BEZEL_TEXTURE.
+        VertexConsumer bezel = buffers.getBuffer(RenderType.entitySolid(BEZEL_TEXTURE));
+        // Draw the entire front face — the screen quad will cover the inner area, leaving
+        // an `m`-wide black border (since screen quad is inset by `m`).
+        addQuad(bezel, mat, pose,
+                0, 0, frontZ,   1, 0, frontZ,   1, 1, frontZ,   0, 1, frontZ,
+                0, 0, 1, 1, 0, 0, -1);
+        // -------------------------------------------------------------------------
+
         VertexConsumer vc = buffers.getBuffer(RenderType.entityCutoutNoCull(st.location));
 
         // Quad: CCW winding when viewed from -Z (front of the screen)
@@ -441,6 +502,32 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
                 .setNormal(pose.last(), 0, 0, -1);
 
         pose.popPose();
+    }
+
+    /**
+     * Emit a textured quad with given 4 corner positions, UV rectangle (u0,v0,u1,v1)
+     * applied as TL/TR/BR/BL, and a normal vector. Vertices are wound CCW from the
+     * normal direction. Uses fullbright lighting.
+     */
+    private static void addQuad(VertexConsumer vc, Matrix4f mat, PoseStack pose,
+                                float x1, float y1, float z1,
+                                float x2, float y2, float z2,
+                                float x3, float y3, float z3,
+                                float x4, float y4, float z4,
+                                float u0, float v0, float u1, float v1,
+                                float nx, float ny, float nz) {
+        vc.addVertex(mat, x1, y1, z1).setColor(255, 255, 255, 255).setUv(u0, v1)
+                .setOverlay(OverlayTexture.NO_OVERLAY).setLight(FULLBRIGHT)
+                .setNormal(pose.last(), nx, ny, nz);
+        vc.addVertex(mat, x2, y2, z2).setColor(255, 255, 255, 255).setUv(u1, v1)
+                .setOverlay(OverlayTexture.NO_OVERLAY).setLight(FULLBRIGHT)
+                .setNormal(pose.last(), nx, ny, nz);
+        vc.addVertex(mat, x3, y3, z3).setColor(255, 255, 255, 255).setUv(u1, v0)
+                .setOverlay(OverlayTexture.NO_OVERLAY).setLight(FULLBRIGHT)
+                .setNormal(pose.last(), nx, ny, nz);
+        vc.addVertex(mat, x4, y4, z4).setColor(255, 255, 255, 255).setUv(u0, v0)
+                .setOverlay(OverlayTexture.NO_OVERLAY).setLight(FULLBRIGHT)
+                .setNormal(pose.last(), nx, ny, nz);
     }
 
     private static void cleanupTextures(long currentTick) {
