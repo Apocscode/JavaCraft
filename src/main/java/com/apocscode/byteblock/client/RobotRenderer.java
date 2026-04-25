@@ -46,67 +46,67 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
         PoseStack.Pose last = pose.last();
         Matrix4f mat = last.pose();
 
-        // === TANK TRACKS (bottom) ===
+        // === TANK TRACKS (bottom) — dark contrast against white chassis ===
         // Left track pod
         drawBox(vc, mat, last, -0.45f, 0f, -0.4f, -0.25f, 0.2f, 0.4f,
-                50, 50, 55, packedLight);
+                70, 72, 78, packedLight);
         // Right track pod
         drawBox(vc, mat, last, 0.25f, 0f, -0.4f, 0.45f, 0.2f, 0.4f,
-                50, 50, 55, packedLight);
+                70, 72, 78, packedLight);
         // Tread strips (darker)
         drawBox(vc, mat, last, -0.46f, 0f, -0.4f, -0.24f, 0.03f, 0.4f,
-                30, 30, 30, packedLight);
+                40, 42, 46, packedLight);
         drawBox(vc, mat, last, 0.24f, 0f, -0.4f, 0.46f, 0.03f, 0.4f,
-                30, 30, 30, packedLight);
-        // Axle between tracks
+                40, 42, 46, packedLight);
+        // Axle between tracks (light gray)
         drawBox(vc, mat, last, -0.25f, 0.05f, -0.1f, 0.25f, 0.15f, 0.1f,
-                40, 40, 45, packedLight);
+                190, 192, 198, packedLight);
 
-        // === BODY ===
+        // === BODY (clean white chassis, slight cool tint) ===
         drawBox(vc, mat, last, -0.35f, 0.2f, -0.3f, 0.35f, 0.65f, 0.3f,
-                100, 100, 110, packedLight);
-        // Front chest plate
+                232, 234, 240, packedLight);
+        // Front chest plate (cyan accent — matches ByteBlock theme)
         drawBox(vc, mat, last, -0.25f, 0.3f, -0.31f, 0.25f, 0.58f, -0.30f,
-                80, 85, 95, packedLight);
+                210, 232, 240, packedLight);
         // Green power LED
         drawBox(vc, mat, last, -0.05f, 0.48f, -0.32f, 0.05f, 0.55f, -0.31f,
-                30, 200, 50, packedLight);
-        // Rear vent
+                30, 220, 80, packedLight);
+        // Rear vent (mid-gray)
         drawBox(vc, mat, last, -0.2f, 0.35f, 0.30f, 0.2f, 0.55f, 0.31f,
-                60, 60, 65, packedLight);
+                170, 172, 178, packedLight);
 
-        // === LEFT ARM ===
+        // === LEFT ARM (white with cyan joint accents) ===
         drawBox(vc, mat, last, -0.5f, 0.48f, -0.1f, -0.35f, 0.63f, 0.1f,
-                85, 85, 90, packedLight); // shoulder
+                40, 200, 230, packedLight); // shoulder (cyan joint)
         drawBox(vc, mat, last, -0.5f, 0.25f, -0.08f, -0.38f, 0.48f, 0.08f,
-                90, 90, 100, packedLight); // upper arm
+                235, 237, 242, packedLight); // upper arm
         drawBox(vc, mat, last, -0.48f, 0.15f, -0.06f, -0.40f, 0.25f, 0.06f,
-                110, 110, 120, packedLight); // forearm
-        // Gripper fingers
+                225, 227, 232, packedLight); // forearm
+        // Gripper fingers (mid gray)
         drawBox(vc, mat, last, -0.49f, 0.10f, -0.05f, -0.46f, 0.15f, 0.0f,
-                70, 70, 75, packedLight);
+                160, 162, 168, packedLight);
         drawBox(vc, mat, last, -0.42f, 0.10f, 0.0f, -0.39f, 0.15f, 0.05f,
-                70, 70, 75, packedLight);
+                160, 162, 168, packedLight);
 
         // === RIGHT ARM ===
         drawBox(vc, mat, last, 0.35f, 0.48f, -0.1f, 0.5f, 0.63f, 0.1f,
-                85, 85, 90, packedLight);
+                40, 200, 230, packedLight);
         drawBox(vc, mat, last, 0.38f, 0.25f, -0.08f, 0.5f, 0.48f, 0.08f,
-                90, 90, 100, packedLight);
+                235, 237, 242, packedLight);
         drawBox(vc, mat, last, 0.40f, 0.15f, -0.06f, 0.48f, 0.25f, 0.06f,
-                110, 110, 120, packedLight);
+                225, 227, 232, packedLight);
         drawBox(vc, mat, last, 0.46f, 0.10f, -0.05f, 0.49f, 0.15f, 0.0f,
-                70, 70, 75, packedLight);
+                160, 162, 168, packedLight);
         drawBox(vc, mat, last, 0.39f, 0.10f, 0.0f, 0.42f, 0.15f, 0.05f,
-                70, 70, 75, packedLight);
+                160, 162, 168, packedLight);
 
-        // === NECK ===
+        // === NECK (cyan accent) ===
         drawBox(vc, mat, last, -0.08f, 0.65f, -0.08f, 0.08f, 0.72f, 0.08f,
-                75, 75, 80, packedLight);
+                40, 200, 230, packedLight);
 
-        // === HEAD ===
+        // === HEAD (bright white) ===
         drawBox(vc, mat, last, -0.22f, 0.72f, -0.2f, 0.22f, 1.0f, 0.2f,
-                115, 115, 125, packedLight);
+                240, 242, 248, packedLight);
 
         // === FACE ===
         // Cyan eyes

@@ -1413,6 +1413,40 @@ public class LuaRuntime {
             }
         });
 
+        // robot.findCharger() -> x,y,z (or nil) — locates nearest Charging Station via Bluetooth.
+        robot.set("findCharger", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null || r.level() == null) return LuaValue.NIL;
+                net.minecraft.core.BlockPos pad = com.apocscode.byteblock.network.BluetoothNetwork
+                        .findNearestDevice(r.level(), r.blockPosition(),
+                                com.apocscode.byteblock.network.BluetoothNetwork.DeviceType.CHARGING_STATION);
+                if (pad == null) return LuaValue.NIL;
+                return LuaValue.varargsOf(new LuaValue[] {
+                        LuaValue.valueOf(pad.getX()),
+                        LuaValue.valueOf(pad.getY()),
+                        LuaValue.valueOf(pad.getZ()) });
+            }
+        });
+
+        // robot.goHome() — find nearest Charging Station and queue a goto: command to it.
+        // Returns true if a charger was found and the command queued, false otherwise.
+        robot.set("goHome", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null || r.level() == null) return LuaValue.FALSE;
+                net.minecraft.core.BlockPos pad = com.apocscode.byteblock.network.BluetoothNetwork
+                        .findNearestDevice(r.level(), r.blockPosition(),
+                                com.apocscode.byteblock.network.BluetoothNetwork.DeviceType.CHARGING_STATION);
+                if (pad == null) return LuaValue.FALSE;
+                // Stand on top of the pad so the station's AABB.inflate(3) covers us.
+                r.queueCommand("goto:" + pad.getX() + ":" + (pad.getY() + 1) + ":" + pad.getZ());
+                return LuaValue.TRUE;
+            }
+        });
+
         globals.set("robot", robot);
     }
 
@@ -1610,6 +1644,43 @@ public class LuaRuntime {
                 int radius = args.narg() >= 1 ? args.checkint(1) : 8;
                 int ch = args.narg() >= 2 ? args.checkint(2) : os.getBluetoothChannel();
                 return LuaValue.valueOf(sendDrone(ch, "drone:scan:" + radius));
+            }
+        });
+
+        // drone.findCharger() -> x,y,z (or nil) — locates nearest Charging Station via Bluetooth.
+        drone.set("findCharger", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                net.minecraft.core.BlockPos here = os.getBlockPos();
+                if (lvl == null || here == null) return LuaValue.NIL;
+                net.minecraft.core.BlockPos pad = com.apocscode.byteblock.network.BluetoothNetwork
+                        .findNearestDevice(lvl, here,
+                                com.apocscode.byteblock.network.BluetoothNetwork.DeviceType.CHARGING_STATION);
+                if (pad == null) return LuaValue.NIL;
+                return LuaValue.varargsOf(new LuaValue[] {
+                        LuaValue.valueOf(pad.getX()),
+                        LuaValue.valueOf(pad.getY()),
+                        LuaValue.valueOf(pad.getZ()) });
+            }
+        });
+
+        // drone.goHome([channel]) — find nearest Charging Station and broadcast a
+        // drone:waypoint to it. Returns true if a charger was found.
+        drone.set("goHome", new VarArgFunction() {
+            @Override
+            public Varargs invoke(Varargs args) {
+                net.minecraft.world.level.Level lvl = os.getLevel();
+                net.minecraft.core.BlockPos here = os.getBlockPos();
+                if (lvl == null || here == null) return LuaValue.FALSE;
+                net.minecraft.core.BlockPos pad = com.apocscode.byteblock.network.BluetoothNetwork
+                        .findNearestDevice(lvl, here,
+                                com.apocscode.byteblock.network.BluetoothNetwork.DeviceType.CHARGING_STATION);
+                if (pad == null) return LuaValue.FALSE;
+                int ch = args.narg() >= 1 ? args.checkint(1) : os.getBluetoothChannel();
+                // Hover one block above the pad so the station's AABB.inflate(3) covers it.
+                String msg = "drone:waypoint:" + pad.getX() + ":" + (pad.getY() + 1) + ":" + pad.getZ();
+                return LuaValue.valueOf(sendDrone(ch, msg));
             }
         });
 

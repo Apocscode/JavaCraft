@@ -304,9 +304,9 @@ These have no CC counterpart and expose ByteBlock's hardware:
 | `buttons`   | Read 12-button **Button Panel** state, configure per-button labels & colors. |
 | `gps`       | Locate via **GPS Tool** waypoints/routes/areas/paths, or query nearby GPS beacons. |
 | `scanner`   | World-data scan (block IDs, biome, light, heightmap) within a radius using a **Scanner** block. |
-| `robot`     | Drive a robot entity: `forward`, `dig`, `place`, `select`, `refuel`, inventory inspection, `getFuel`, `getFacing`, etc. |
+| `robot`     | Drive a robot entity: `forward`, `dig`, `place`, `select`, `refuel`, inventory inspection, `getFuel`, `getFacing`, `findCharger`, `goHome`, etc. |
 | `turtle`    | Alias of `robot` plus CC-compatible shims (`attack*`, `place*`, `compare*`, `inspect*`, `transferTo`, `getItemSpace`). |
-| `drone`     | Issue commands to a linked drone entity (route, hover, follow, return). |
+| `drone`     | Issue commands to a linked drone entity (route, hover, follow, return) plus `findCharger` / `goHome` to auto-dock at the nearest **Charging Station**. |
 | `glasses`   | Build a HUD widget list (`text`, `box`, `progress`, `image`) and `flush()` to all wearers in BT range on the current channel. |
 | `disk`      | CC-compatible API surface backed by adjacent **Drive** blocks (mount path, label, eject). |
 
