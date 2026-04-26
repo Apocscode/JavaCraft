@@ -38,7 +38,7 @@ import java.util.UUID;
  * Can move, dig, place blocks, and interact with inventories.
  * Has a 16-slot internal inventory, FE-powered, with built-in computer terminal.
  */
-public class RobotEntity extends PathfinderMob {
+public class RobotEntity extends PathfinderMob implements net.minecraft.world.MenuProvider {
     private static final int MAX_ENERGY = 10000;
     private static final int MAX_RECEIVE = 200;
     public static final int ENERGY_PER_ACTION = 10;
@@ -51,6 +51,7 @@ public class RobotEntity extends PathfinderMob {
     private final SimpleContainer inventory = new SimpleContainer(16);
     private ItemStack equippedTool = ItemStack.EMPTY;       // LEFT hand (legacy field name kept for NBT back-compat)
     private ItemStack equippedToolRight = ItemStack.EMPTY;  // RIGHT hand (Phase 3)
+    private ItemStack batteryStack = ItemStack.EMPTY;       // Battery / FE-storage upgrade slot
     // dedicated tool slot (pick/axe/shovel/sword/shears)
     private final Queue<String> commandQueue = new LinkedList<>();
     private EnergyStorage energyStorage;
@@ -119,8 +120,29 @@ public class RobotEntity extends PathfinderMob {
         // R2D2-style chirps — random short note bursts every 4..12s.
         tickChirps();
 
+        // Pull FE from any installed battery item (any FE-capable item from any mod).
+        tickBatteryDrain();
+
         // Register on Bluetooth
         BluetoothNetwork.register(level(), computerId, blockPosition(), bluetoothChannel);
+    }
+
+    /**
+     * If a battery item is installed in the accessory slot, pull energy out of its
+     * {@link net.neoforged.neoforge.capabilities.Capabilities.EnergyStorage#ITEM}
+     * capability and feed it into the robot's internal buffer (up to MAX_RECEIVE per tick).
+     * Works with any mod's FE batteries (Mekanism, Powah, Thermal, etc.).
+     */
+    private void tickBatteryDrain() {
+        if (batteryStack.isEmpty()) return;
+        if (energyStorage.getEnergyStored() >= energyStorage.getMaxEnergyStored()) return;
+        var cap = batteryStack.getCapability(net.neoforged.neoforge.capabilities.Capabilities.EnergyStorage.ITEM);
+        if (cap == null || !cap.canExtract()) return;
+        int needed = energyStorage.getMaxEnergyStored() - energyStorage.getEnergyStored();
+        int available = cap.extractEnergy(Math.min(needed, MAX_RECEIVE), true);
+        if (available <= 0) return;
+        int actuallyTaken = cap.extractEnergy(available, false);
+        if (actuallyTaken > 0) energyStorage.receiveEnergy(actuallyTaken, false);
     }
 
     /**
@@ -596,6 +618,14 @@ public class RobotEntity extends PathfinderMob {
 
     @Override
     protected InteractionResult mobInteract(Player player, InteractionHand hand) {
+        // Sneak + right-click → open inventory GUI (server side opens a menu).
+        if (player.isShiftKeyDown()) {
+            if (!level().isClientSide() && player instanceof net.minecraft.server.level.ServerPlayer sp) {
+                if (ownerId == null) ownerId = player.getUUID();
+                sp.openMenu(this, buf -> buf.writeInt(this.getId()));
+            }
+            return InteractionResult.sidedSuccess(level().isClientSide());
+        }
         if (level().isClientSide()) {
             // Reopening after a previous SHUTDOWN (e.g. ESC out of the desktop) needs a reboot,
             // otherwise ComputerScreen.render() immediately calls onClose() because the OS is
@@ -665,6 +695,11 @@ public class RobotEntity extends PathfinderMob {
     public ItemStack getEquippedTool() { return equippedTool; }
     public ItemStack getEquippedToolLeft() { return equippedTool; }
     public ItemStack getEquippedToolRight() { return equippedToolRight; }
+
+    public ItemStack getBatteryStack() { return batteryStack; }
+    public void setEquippedToolLeft(ItemStack stack) { this.equippedTool = stack; }
+    public void setEquippedToolRight(ItemStack stack) { this.equippedToolRight = stack; }
+    public void setBatteryStack(ItemStack stack) { this.batteryStack = stack; }
 
     /**
      * Pick the better mining tool for {@code state} from either hand. Empty hand if neither
@@ -787,6 +822,9 @@ public class RobotEntity extends PathfinderMob {
         if (!equippedToolRight.isEmpty()) {
             tag.put("EquippedToolRight", equippedToolRight.save(level().registryAccess()));
         }
+        if (!batteryStack.isEmpty()) {
+            tag.put("Battery", batteryStack.save(level().registryAccess()));
+        }
     }
 
     @Override
@@ -825,5 +863,23 @@ public class RobotEntity extends PathfinderMob {
             equippedToolRight = ItemStack.parse(level().registryAccess(), tag.getCompound("EquippedToolRight"))
                     .orElse(ItemStack.EMPTY);
         }
+        if (tag.contains("Battery")) {
+            batteryStack = ItemStack.parse(level().registryAccess(), tag.getCompound("Battery"))
+                    .orElse(ItemStack.EMPTY);
+        }
+    }
+
+    // --- MenuProvider ---
+
+    @Override
+    public Component getDisplayName() {
+        Component name = getCustomName();
+        return name != null ? name : Component.literal("Robot");
+    }
+
+    @Override
+    public net.minecraft.world.inventory.AbstractContainerMenu createMenu(int containerId,
+            net.minecraft.world.entity.player.Inventory playerInv, Player player) {
+        return new com.apocscode.byteblock.menu.RobotMenu(containerId, playerInv, this);
     }
 }

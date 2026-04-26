@@ -41,7 +41,7 @@ import java.util.UUID;
  *   "drone:hover:true|false" — toggle hover
  *   "drone:refuel:<ticks>"   — add fuel
  */
-public class DroneEntity extends PathfinderMob {
+public class DroneEntity extends PathfinderMob implements net.minecraft.world.MenuProvider {
     private static final int MAX_FUEL = 72000;
     private static final int HOVER_DRAIN_PERIOD = 20; // 1 fuel per second while hovering
     private static final int LOW_FUEL_THRESHOLD = 400; // ~20s — auto-return-home trigger
@@ -55,6 +55,7 @@ public class DroneEntity extends PathfinderMob {
     private int fuelTicks = 6000; // 5 minutes of flight
     private int hoverDrainCounter = 0;
     private final SimpleContainer inventory = new SimpleContainer(9);
+    private ItemStack batteryStack = ItemStack.EMPTY;
     private BlockPos homePos = null;
     private boolean defender = false;  // attack nearby hostiles if true
     private int attackCooldown = 0;
@@ -90,6 +91,9 @@ public class DroneEntity extends PathfinderMob {
         if (level().isClientSide()) return;
 
         if (homePos == null) homePos = blockPosition();
+
+        // Convert FE from a battery upgrade into fuel ticks (1 fuel tick per 10 FE).
+        tickBatteryDrain();
 
         // Auto-return-home when fuel is low and we're idle
         if (fuelTicks > 0 && fuelTicks < LOW_FUEL_THRESHOLD && waypoints.isEmpty() && homePos != null) {
@@ -406,6 +410,14 @@ public class DroneEntity extends PathfinderMob {
 
     @Override
     protected InteractionResult mobInteract(Player player, InteractionHand hand) {
+        // Sneak + right-click → open inventory GUI.
+        if (player.isShiftKeyDown()) {
+            if (!level().isClientSide() && player instanceof net.minecraft.server.level.ServerPlayer sp) {
+                if (ownerId == null) ownerId = player.getUUID();
+                sp.openMenu(this, buf -> buf.writeInt(this.getId()));
+            }
+            return InteractionResult.sidedSuccess(level().isClientSide());
+        }
         if (!level().isClientSide()) {
             ItemStack held = player.getItemInHand(hand);
             int fuelValue = fuelValueFor(held);
@@ -455,6 +467,22 @@ public class DroneEntity extends PathfinderMob {
     public int getFuelTicks() { return fuelTicks; }
     public int getFuel() { return fuelTicks; } // alias — matches docs naming
     public void addFuel(int ticks) { this.fuelTicks = Math.min(fuelTicks + ticks, MAX_FUEL); }
+    public ItemStack getBatteryStack() { return batteryStack; }
+    public void setBatteryStack(ItemStack stack) { this.batteryStack = stack; }
+
+    /** Pull FE from any battery item in the upgrade slot, converting it into fuel ticks (10 FE = 1 tick). */
+    private void tickBatteryDrain() {
+        if (batteryStack.isEmpty()) return;
+        if (fuelTicks >= MAX_FUEL) return;
+        var cap = batteryStack.getCapability(net.neoforged.neoforge.capabilities.Capabilities.EnergyStorage.ITEM);
+        if (cap == null || !cap.canExtract()) return;
+        int spaceTicks = MAX_FUEL - fuelTicks;
+        int wantFE = Math.min(spaceTicks * 10, 200); // cap at 200 FE/tick
+        int feAvail = cap.extractEnergy(wantFE, true);
+        if (feAvail <= 0) return;
+        int feTaken = cap.extractEnergy(feAvail, false);
+        if (feTaken > 0) fuelTicks = Math.min(MAX_FUEL, fuelTicks + feTaken / 10);
+    }
     public void linkComputer(UUID computerId) { this.linkedComputerId = computerId; }
     public UUID getDroneId() { return droneId; }
     public int getBluetoothChannel() { return bluetoothChannel; }
@@ -605,6 +633,9 @@ public class DroneEntity extends PathfinderMob {
             }
         }
         tag.put("Inventory", invTag);
+        if (!batteryStack.isEmpty()) {
+            tag.put("Battery", batteryStack.save(level().registryAccess()));
+        }
     }
 
     @Override
@@ -634,5 +665,23 @@ public class DroneEntity extends PathfinderMob {
                 }
             }
         }
+        if (tag.contains("Battery")) {
+            batteryStack = ItemStack.parse(level().registryAccess(), tag.getCompound("Battery"))
+                    .orElse(ItemStack.EMPTY);
+        }
+    }
+
+    // --- MenuProvider ---
+
+    @Override
+    public Component getDisplayName() {
+        Component name = getCustomName();
+        return name != null ? name : Component.literal("Drone");
+    }
+
+    @Override
+    public net.minecraft.world.inventory.AbstractContainerMenu createMenu(int containerId,
+            net.minecraft.world.entity.player.Inventory playerInv, Player player) {
+        return new com.apocscode.byteblock.menu.DroneMenu(containerId, playerInv, this);
     }
 }

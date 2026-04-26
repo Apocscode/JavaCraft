@@ -108,6 +108,11 @@ public class ByteBlock {
             com.apocscode.byteblock.network.GlassesHudPayload.STREAM_CODEC,
             com.apocscode.byteblock.network.GlassesHudPayload::handle
         );
+        registrar.playToServer(
+            com.apocscode.byteblock.network.SetEntityLabelPayload.TYPE,
+            com.apocscode.byteblock.network.SetEntityLabelPayload.STREAM_CODEC,
+            com.apocscode.byteblock.network.SetEntityLabelPayload::handle
+        );
     }
     private void registerEntityAttributes(EntityAttributeCreationEvent event) {
         event.put(ModEntities.DRONE.get(), DroneEntity.createAttributes().build());
@@ -172,6 +177,10 @@ public class ByteBlock {
                     com.apocscode.byteblock.client.PrinterScreen::new);
             event.register(ModMenuTypes.DRIVE.get(),
                     com.apocscode.byteblock.client.DriveScreen::new);
+            event.register(ModMenuTypes.ROBOT.get(),
+                    com.apocscode.byteblock.client.RobotScreen::new);
+            event.register(ModMenuTypes.DRONE.get(),
+                    com.apocscode.byteblock.client.DroneScreen::new);
         }
 
         @SubscribeEvent
