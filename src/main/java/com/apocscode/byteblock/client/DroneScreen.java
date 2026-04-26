@@ -96,8 +96,13 @@ public class DroneScreen extends AbstractContainerScreen<DroneMenu> {
         int fuel = menu.getDrone().getFuelTicks();
         int maxFuel = 72000;
         int pct = fuel * barH / maxFuel;
-        int fillColor = pct < barH / 5 ? 0xFFFF4040 : pct < barH / 2 ? 0xFFFFC040 : 0xFF60E060;
-        gui.fill(barX + 1, barY + barH - pct, barX + barW - 1, barY + barH - 1, fillColor);
+        // Gradient: red < 10% → orange → yellow → light green → green at full.
+        for (int i = 0; i < pct; i++) {
+            float frac = i / (float) barH;
+            int color = RobotScreen.chargeColor(frac);
+            int yRow = barY + barH - 1 - i;
+            gui.fill(barX + 1, yRow, barX + barW - 1, yRow + 1, color);
+        }
 
         gui.fill(x + 7, y + 89, x + imageWidth - 7, y + 90, 0xFF999999);
 

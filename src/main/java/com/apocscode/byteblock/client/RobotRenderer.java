@@ -186,18 +186,26 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
                 240, 242, 248, packedLight);
 
         // === FACE ===
-        // Eyes: blue idle, green while a user program is running.
+        // Eyes: blue idle, green while a user program is running, lightning bolt while charging.
         boolean programRunning = entity.getOS() != null && entity.getOS().isProgramRunning();
-        int eyeR = programRunning ?  60 :  40;
-        int eyeG = programRunning ? 255 : 220;
-        int eyeB = programRunning ? 100 : 255;
-        drawBox(vc, mat, last, -0.15f, 0.82f, -0.21f, -0.06f, 0.92f, -0.20f,
-                eyeR, eyeG, eyeB, packedLight);
-        drawBox(vc, mat, last, 0.06f, 0.82f, -0.21f, 0.15f, 0.92f, -0.20f,
-                eyeR, eyeG, eyeB, packedLight);
-        // Mouth grille
-        drawBox(vc, mat, last, -0.12f, 0.75f, -0.21f, 0.12f, 0.79f, -0.20f,
-                50, 50, 55, packedLight);
+        boolean charging = entity.isCharging();
+        if (charging) {
+            // Replace eyes/mouth with lightning bolt face on the head's front plane.
+            float t = entity.tickCount + partialTick;
+            renderLightningBoltFace(vc, mat, last, packedLight,
+                    -0.20f, 0.74f, 0.20f, 0.98f, -0.205f, t);
+        } else {
+            int eyeR = programRunning ?  60 :  40;
+            int eyeG = programRunning ? 255 : 220;
+            int eyeB = programRunning ? 100 : 255;
+            drawBox(vc, mat, last, -0.15f, 0.82f, -0.21f, -0.06f, 0.92f, -0.20f,
+                    eyeR, eyeG, eyeB, packedLight);
+            drawBox(vc, mat, last, 0.06f, 0.82f, -0.21f, 0.15f, 0.92f, -0.20f,
+                    eyeR, eyeG, eyeB, packedLight);
+            // Mouth grille
+            drawBox(vc, mat, last, -0.12f, 0.75f, -0.21f, 0.12f, 0.79f, -0.20f,
+                    50, 50, 55, packedLight);
+        }
 
         // === ANTENNA ===
         drawBox(vc, mat, last, -0.02f, 1.0f, -0.02f, 0.02f, 1.12f, 0.02f,
@@ -229,20 +237,40 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
         // Mouth phase: toggles every 8 ticks while moving, frozen while idle.
         boolean moving = entity.getDeltaMovement().horizontalDistanceSqr() > 0.001;
         boolean mouthOpen = moving && ((entity.tickCount / 8) % 2 == 0);
-        // Eye horizontal jitter when moving (gives a "scanning" look).
-        float jitter = moving ? (float) Math.sin(t * 0.3) * 0.012f : 0f;
+        boolean programRunning = entity.getOS() != null && entity.getOS().isProgramRunning();
+        boolean charging = entity.isCharging();
+        boolean busy = moving || programRunning || charging;
+
+        // Charging face: lightning bolt instead of normal eyes/mouth.
+        if (charging) {
+            renderLightningBoltFace(vc, mat, last, light, x0, y0, x1, y1, screenZ, t);
+            return;
+        }
+
+        // Eye look-at: when idle and not running a program, eyes track the local player.
+        // When busy, fall back to a small "scanning" jitter so the bot looks active.
+        float lookX = 0f, lookY = 0f;
+        if (!busy) {
+            float[] off = computeLookOffset(entity);
+            lookX = off[0];
+            lookY = off[1];
+        } else if (moving) {
+            lookX = (float) Math.sin(t * 0.3) * 0.012f;
+        }
 
         float w = x1 - x0;
         float h = y1 - y0;
         // Eye geometry as a fraction of the screen.
         float eyeW = w * 0.18f, eyeH = h * 0.28f;
-        float eyeY0 = y0 + h * 0.45f;
+        // Look offsets are unit-vector style; scale to a visible portion of one eye.
+        float eyeDx = lookX * (eyeW * 0.6f);
+        float eyeDy = lookY * (eyeH * 0.5f);
+        float eyeY0 = y0 + h * 0.45f + eyeDy;
         float eyeY1 = eyeY0 + (blinking ? eyeH * 0.10f : eyeH);
-        float lEyeCx = x0 + w * 0.30f + jitter;
-        float rEyeCx = x0 + w * 0.70f + jitter;
+        float lEyeCx = x0 + w * 0.30f + eyeDx;
+        float rEyeCx = x0 + w * 0.70f + eyeDx;
         // Cyan eyes (bright when open, near-flat line when blinking).
         // Green tint while a user program is running.
-        boolean programRunning = entity.getOS() != null && entity.getOS().isProgramRunning();
         int er, eg, eb;
         if (programRunning) {
             er = blinking ?  40 :  60;
@@ -267,6 +295,90 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
         drawBox(vc, mat, last, mX0, mY0, screenZ,
                 mX1, mY1, screenZ + 0.001f,
                 40, 220, 255, light);
+    }
+
+    /**
+     * Compute eye look-at offset (-1..+1 on each axis) targeting the local player.
+     * Returns {x, y} in renderer-local face space (positive x = right, positive y = up).
+     */
+    private static float[] computeLookOffset(com.apocscode.byteblock.entity.RobotEntity entity) {
+        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        if (mc.player == null) return new float[]{0f, 0f};
+        Vec3 toPlayer = mc.player.getEyePosition().subtract(entity.position().add(0, 1.4, 0));
+        double dist = toPlayer.length();
+        if (dist < 0.1 || dist > 24.0) return new float[]{0f, 0f};
+        // Project toPlayer into entity's local face plane using its facing yaw.
+        float yaw = switch (entity.getRobotFacing()) {
+            case SOUTH -> 0f;
+            case WEST  -> 90f;
+            case EAST  -> -90f;
+            default    -> 180f; // NORTH
+        };
+        float yawRad = (float) Math.toRadians(yaw);
+        // Face is on the -Z side of body (after the +180° flip in render). Local right axis
+        // in world is rotate(+X) by -yaw; horizontal look = dot(toPlayer, rightAxis).
+        double rx = -Math.cos(yawRad);
+        double rz = -Math.sin(yawRad);
+        double horiz = toPlayer.x * rx + toPlayer.z * rz;
+        double horizDist = Math.hypot(toPlayer.x, toPlayer.z);
+        float lx = (float) Math.max(-1.0, Math.min(1.0, horiz / Math.max(0.5, horizDist)));
+        float ly = (float) Math.max(-1.0, Math.min(1.0, toPlayer.y / Math.max(0.5, dist)));
+        return new float[]{lx, ly};
+    }
+
+    /**
+     * Draw an animated lightning-bolt face (Z-shape) instead of eyes/mouth.
+     * Bolt flickers brightness with a sine wave so it reads as "actively charging".
+     */
+    private static void renderLightningBoltFace(VertexConsumer vc, Matrix4f mat, PoseStack.Pose last,
+                                                 int light,
+                                                 float x0, float y0, float x1, float y1,
+                                                 float screenZ, float t) {
+        float w = x1 - x0, h = y1 - y0;
+        float cx = (x0 + x1) * 0.5f, cy = (y0 + y1) * 0.5f;
+        // Flicker 60 → 100% brightness.
+        float flicker = 0.7f + 0.3f * (float) Math.sin(t * 0.6);
+        int br = (int) (90 * flicker);
+        int bg = (int) (255 * flicker);
+        int bb = (int) (255 * flicker);
+        int yr = (int) (255 * flicker);
+        int yg = (int) (240 * flicker);
+        int yb = (int) (60 * flicker);
+        // Top diagonal stroke (top-right → middle).
+        float tw = w * 0.18f;
+        // Three stacked bars, offset horizontally to suggest a Z/lightning shape.
+        float zPlane = screenZ;
+        float zPlane2 = screenZ + 0.001f;
+        // Top bar
+        drawBox(vc, mat, last,
+                cx + w * 0.05f, cy + h * 0.22f, zPlane,
+                cx + w * 0.30f, cy + h * 0.35f, zPlane2,
+                yr, yg, yb, light);
+        // Top-mid bar (slightly down/left)
+        drawBox(vc, mat, last,
+                cx - w * 0.12f, cy + h * 0.05f, zPlane,
+                cx + w * 0.22f, cy + h * 0.18f, zPlane2,
+                yr, yg, yb, light);
+        // Mid bar (center, longer — the kink)
+        drawBox(vc, mat, last,
+                cx - w * 0.22f, cy - h * 0.05f, zPlane,
+                cx + w * 0.10f, cy + h * 0.07f, zPlane2,
+                br, bg, bb, light);
+        // Mid-bottom bar
+        drawBox(vc, mat, last,
+                cx - w * 0.30f, cy - h * 0.18f, zPlane,
+                cx + w * 0.02f, cy - h * 0.05f, zPlane2,
+                yr, yg, yb, light);
+        // Bottom bar (left tip)
+        drawBox(vc, mat, last,
+                cx - w * 0.30f, cy - h * 0.35f, zPlane,
+                cx - w * 0.05f, cy - h * 0.20f, zPlane2,
+                yr, yg, yb, light);
+        // Cyan glow dot at the kink
+        drawBox(vc, mat, last,
+                cx - w * 0.05f, cy - h * 0.02f, zPlane - 0.001f,
+                cx + w * 0.05f, cy + h * 0.05f, zPlane,
+                br, bg, bb, light);
     }
 
     /**

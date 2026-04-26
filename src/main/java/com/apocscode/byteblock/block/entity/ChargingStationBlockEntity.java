@@ -23,7 +23,7 @@ import java.util.List;
  * Robots receive FE directly into their EnergyStorage.
  * Drones receive fuel ticks (1 FE = 1 fuel tick conversion).
  */
-public class ChargingStationBlockEntity extends BlockEntity {
+public class ChargingStationBlockEntity extends BlockEntity implements net.minecraft.world.MenuProvider {
     private java.util.UUID deviceId = java.util.UUID.randomUUID();
     private static final int MAX_ENERGY = 100_000;
     private static final int MAX_RECEIVE = 1000;  // RF/t input from pipes/cables
@@ -60,6 +60,7 @@ public class ChargingStationBlockEntity extends BlockEntity {
                 int toTransfer = Math.min(CHARGE_RATE, Math.min(space, energyStorage.getEnergyStored()));
                 robotEnergy.receiveEnergy(toTransfer, false);
                 energyStorage.extractEnergy(toTransfer, false);
+                robot.markCharging();
                 setChanged();
             }
         }
@@ -75,6 +76,7 @@ public class ChargingStationBlockEntity extends BlockEntity {
                 int fuelToAdd = feToUse * FUEL_PER_FE;
                 drone.addFuel(fuelToAdd);
                 energyStorage.extractEnergy(feToUse, false);
+                drone.markCharging();
                 setChanged();
             }
         }
@@ -83,6 +85,18 @@ public class ChargingStationBlockEntity extends BlockEntity {
     public EnergyStorage getEnergyStorage() { return energyStorage; }
     public int getEnergyStored() { return energyStorage.getEnergyStored(); }
     public int getMaxEnergy() { return MAX_ENERGY; }
+
+    @Override
+    public net.minecraft.network.chat.Component getDisplayName() {
+        return net.minecraft.network.chat.Component.literal("Charging Station");
+    }
+
+    @Override
+    public net.minecraft.world.inventory.AbstractContainerMenu createMenu(int containerId,
+            net.minecraft.world.entity.player.Inventory inv,
+            net.minecraft.world.entity.player.Player player) {
+        return new com.apocscode.byteblock.menu.ChargingStationMenu(containerId, inv, this);
+    }
 
     @Override
     protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {

@@ -106,8 +106,15 @@ public class RobotScreen extends AbstractContainerScreen<RobotMenu> {
         var energy = menu.getRobot().getEnergyStorage();
         int max = Math.max(1, energy.getMaxEnergyStored());
         int pct = energy.getEnergyStored() * barH / max;
-        int fillColor = pct < barH / 5 ? 0xFFFF4040 : pct < barH / 2 ? 0xFFFFC040 : 0xFF40D0FF;
-        gui.fill(barX + 1, barY + barH - pct, barX + barW - 1, barY + barH - 1, fillColor);
+        // Draw the bar with a vertical 5-stop gradient: red < 10% → orange → yellow →
+        // light green → green at full. The fill is clipped to the current charge level.
+        for (int i = 0; i < pct; i++) {
+            // Charge fraction at this row (bottom of bar = row 0).
+            float frac = i / (float) barH;
+            int color = chargeColor(frac);
+            int yRow = barY + barH - 1 - i;
+            gui.fill(barX + 1, yRow, barX + barW - 1, yRow + 1, color);
+        }
 
         // Separator above player inventory
         gui.fill(x + 7, y + 89, x + imageWidth - 7, y + 90, 0xFF999999);
@@ -164,4 +171,31 @@ public class RobotScreen extends AbstractContainerScreen<RobotMenu> {
     // Provide an unused dummy reference to silence warnings if needed.
     @SuppressWarnings("unused")
     private static void touch(ItemStack s) {}
+
+    /**
+     * Map a charge fraction in [0..1] to a color along the gradient
+     * red (&lt; 10%) → orange → yellow → light green → green (full).
+     */
+    public static int chargeColor(float frac) {
+        frac = Math.max(0f, Math.min(1f, frac));
+        // Stops: 0.0 red, 0.10 orange, 0.30 yellow, 0.60 light green, 1.0 green.
+        int[][] stops = {
+            {0xFF, 0x40, 0x40}, // red
+            {0xFF, 0x90, 0x30}, // orange
+            {0xFF, 0xE0, 0x30}, // yellow
+            {0x90, 0xE0, 0x40}, // light green
+            {0x30, 0xC0, 0x40}, // green
+        };
+        float[] stopAt = {0f, 0.10f, 0.30f, 0.60f, 1.0f};
+        for (int i = 0; i < stops.length - 1; i++) {
+            if (frac <= stopAt[i + 1]) {
+                float t = (frac - stopAt[i]) / Math.max(1e-5f, stopAt[i + 1] - stopAt[i]);
+                int r = (int) (stops[i][0] + (stops[i + 1][0] - stops[i][0]) * t);
+                int g = (int) (stops[i][1] + (stops[i + 1][1] - stops[i][1]) * t);
+                int b = (int) (stops[i][2] + (stops[i + 1][2] - stops[i][2]) * t);
+                return 0xFF000000 | (r << 16) | (g << 8) | b;
+            }
+        }
+        return 0xFF30C040;
+    }
 }

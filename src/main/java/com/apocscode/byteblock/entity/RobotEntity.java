@@ -6,6 +6,9 @@ import com.apocscode.byteblock.network.BluetoothNetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.network.syncher.EntityDataSerializers;
+import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -43,6 +46,9 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
     private static final int MAX_RECEIVE = 200;
     public static final int ENERGY_PER_ACTION = 10;
 
+    private static final EntityDataAccessor<Boolean> DATA_CHARGING =
+            SynchedEntityData.defineId(RobotEntity.class, EntityDataSerializers.BOOLEAN);
+
     private UUID ownerId = null;
     private UUID computerId;
     private int bluetoothChannel = 2;
@@ -76,6 +82,14 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
     private int chirpBurstRemaining = 0;
     private int chirpBurstNextTick = 0;
 
+    // Charging state — incremented by ChargingStationBlockEntity each tick of contact;
+    // counts down here, so isCharging() returns true for ~1s after last contact.
+    private int chargingTicks = 0;
+    private boolean wasChargingLastTick = false;
+    // Low-battery homing — when energy < 5%, robot pathfinds to nearest charging pad.
+    private BlockPos cachedChargingPad = null;
+    private int chargingPadScanCooldown = 0;
+
     public RobotEntity(EntityType<? extends RobotEntity> type, Level level) {
         super(type, level);
         this.computerId = UUID.randomUUID();
@@ -88,6 +102,12 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
                 .add(Attributes.MAX_HEALTH, 30.0)
                 .add(Attributes.MOVEMENT_SPEED, 0.2)
                 .add(Attributes.ATTACK_DAMAGE, 3.0);
+    }
+
+    @Override
+    protected void defineSynchedData(SynchedEntityData.Builder builder) {
+        super.defineSynchedData(builder);
+        builder.define(DATA_CHARGING, false);
     }
 
     @Override
@@ -123,6 +143,10 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
         // Pull FE from any installed battery item (any FE-capable item from any mod).
         tickBatteryDrain();
 
+        // Charging state countdown + low-battery homing toward nearest charging station.
+        tickChargingState();
+        tickLowBatteryHoming();
+
         // Register on Bluetooth
         BluetoothNetwork.register(level(), computerId, blockPosition(), bluetoothChannel);
     }
@@ -143,6 +167,105 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
         if (available <= 0) return;
         int actuallyTaken = cap.extractEnergy(available, false);
         if (actuallyTaken > 0) energyStorage.receiveEnergy(actuallyTaken, false);
+    }
+
+    /** Called by {@link com.apocscode.byteblock.block.entity.ChargingStationBlockEntity} every tick of contact. */
+    public void markCharging() {
+        this.chargingTicks = 30; // ~1.5s grace so flickering pads still read as "charging"
+    }
+
+    /** True while currently being charged by a nearby charging station. */
+    public boolean isCharging() { return entityData.get(DATA_CHARGING); }
+
+    /**
+     * Tick down the charging-grace counter, play sci-fi sound at start, and emit
+     * sparkle particles while charging. Server emits sound; client emits particles.
+     */
+    private void tickChargingState() {
+        boolean charging = chargingTicks > 0;
+        if (chargingTicks > 0) chargingTicks--;
+        // Sync charging flag to clients for renderer (lightning-bolt face).
+        if (entityData.get(DATA_CHARGING) != charging) entityData.set(DATA_CHARGING, charging);
+        if (charging && level() instanceof ServerLevel sl) {
+            if (!wasChargingLastTick) {
+                level().playSound(null, blockPosition(),
+                        SoundEvents.BEACON_ACTIVATE, SoundSource.NEUTRAL, 0.4f, 1.6f);
+            }
+            if (sl.getGameTime() % 12 == 0) {
+                level().playSound(null, blockPosition(),
+                        SoundEvents.AMETHYST_BLOCK_CHIME, SoundSource.NEUTRAL, 0.3f, 1.4f);
+            }
+            if (sl.getGameTime() % 28 == 0) {
+                level().playSound(null, blockPosition(),
+                        SoundEvents.BEACON_AMBIENT, SoundSource.NEUTRAL, 0.25f, 1.8f);
+            }
+            // Sparkle particles around the body, broadcast to all nearby clients.
+            sl.sendParticles(net.minecraft.core.particles.ParticleTypes.ELECTRIC_SPARK,
+                    getX(), getY() + 0.8, getZ(), 3, 0.35, 0.6, 0.35, 0.05);
+            if (sl.getGameTime() % 4 == 0) {
+                sl.sendParticles(net.minecraft.core.particles.ParticleTypes.END_ROD,
+                        getX(), getY() + 1.0, getZ(), 1, 0.2, 0.4, 0.2, 0.02);
+            }
+        }
+        wasChargingLastTick = charging;
+    }
+
+    /**
+     * When energy drops below 5% and we have no command queue, find the nearest
+     * charging station within 32 blocks and pathfind to it. Cache the location so
+     * we don't rescan every tick. Pathing is via vanilla {@link net.minecraft.world.entity.PathfinderMob#getNavigation}.
+     */
+    private void tickLowBatteryHoming() {
+        int e = energyStorage.getEnergyStored();
+        int em = energyStorage.getMaxEnergyStored();
+        boolean low = em > 0 && (e * 100 / em) < 5;
+        if (!low) {
+            cachedChargingPad = null;
+            return;
+        }
+        // Don't override active scripted nav.
+        if (!commandQueue.isEmpty() || routeActive || patrolActive || navTarget != null) return;
+
+        if (chargingPadScanCooldown > 0) chargingPadScanCooldown--;
+        // Validate cached pad still exists and is in range.
+        if (cachedChargingPad != null) {
+            BlockState st = level().getBlockState(cachedChargingPad);
+            if (!(st.getBlock() instanceof com.apocscode.byteblock.block.ChargingStationBlock)) {
+                cachedChargingPad = null;
+            } else if (cachedChargingPad.distSqr(blockPosition()) > 80 * 80) {
+                cachedChargingPad = null;
+            }
+        }
+        if (cachedChargingPad == null && chargingPadScanCooldown <= 0) {
+            cachedChargingPad = findNearestChargingPad(32);
+            chargingPadScanCooldown = 100; // 5s between scans when nothing found
+        }
+        if (cachedChargingPad != null) {
+            // Path to the pad each second so we recover from getting stuck.
+            if (level().getGameTime() % 20 == 0) {
+                getNavigation().moveTo(cachedChargingPad.getX() + 0.5,
+                        cachedChargingPad.getY() + 0.2,
+                        cachedChargingPad.getZ() + 0.5, 1.0);
+            }
+        }
+    }
+
+    private BlockPos findNearestChargingPad(int radius) {
+        BlockPos origin = blockPosition();
+        BlockPos best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (int dx = -radius; dx <= radius; dx += 2) {
+            for (int dz = -radius; dz <= radius; dz += 2) {
+                for (int dy = -8; dy <= 8; dy += 2) {
+                    BlockPos p = origin.offset(dx, dy, dz);
+                    if (level().getBlockState(p).getBlock() instanceof com.apocscode.byteblock.block.ChargingStationBlock) {
+                        double d = p.distSqr(origin);
+                        if (d < bestDist) { bestDist = d; best = p.immutable(); }
+                    }
+                }
+            }
+        }
+        return best;
     }
 
     /**
@@ -595,23 +718,6 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
         if (selected.isEmpty()) return state.isAir();
         Block selectedBlock = Block.byItem(selected.getItem());
         return selectedBlock != Blocks.AIR && state.is(selectedBlock);
-    }
-
-    /** True if a ChargingStation is actively charging this robot. */
-    public boolean isCharging() {
-        if (level() == null) return false;
-        net.minecraft.world.phys.AABB area =
-                new net.minecraft.world.phys.AABB(blockPosition()).inflate(3.0);
-        for (BlockPos p : BlockPos.betweenClosed(
-                BlockPos.containing(area.minX, area.minY, area.minZ),
-                BlockPos.containing(area.maxX, area.maxY, area.maxZ))) {
-            net.minecraft.world.level.block.entity.BlockEntity be = level().getBlockEntity(p);
-            if (be instanceof com.apocscode.byteblock.block.entity.ChargingStationBlockEntity cs
-                    && cs.getEnergyStored() > 0) {
-                return true;
-            }
-        }
-        return false;
     }
 
     // --- Interaction ---

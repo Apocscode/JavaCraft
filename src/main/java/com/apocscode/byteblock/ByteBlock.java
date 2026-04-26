@@ -132,6 +132,12 @@ public class ByteBlock {
                 ModEntities.UNICYCLE_ROBOT.get(),
                 (entity, direction) -> entity.getEnergyStorage()
         );
+        // Charging station accepts FE input from any side via pipes/cables/wires.
+        event.registerBlockEntity(
+                Capabilities.EnergyStorage.BLOCK,
+                com.apocscode.byteblock.init.ModBlockEntities.CHARGING_STATION.get(),
+                (be, direction) -> be.getEnergyStorage()
+        );
     }
 
     @SubscribeEvent
@@ -181,6 +187,8 @@ public class ByteBlock {
                     com.apocscode.byteblock.client.RobotScreen::new);
             event.register(ModMenuTypes.DRONE.get(),
                     com.apocscode.byteblock.client.DroneScreen::new);
+            event.register(ModMenuTypes.CHARGING_STATION.get(),
+                    com.apocscode.byteblock.client.ChargingStationScreen::new);
         }
 
         @SubscribeEvent

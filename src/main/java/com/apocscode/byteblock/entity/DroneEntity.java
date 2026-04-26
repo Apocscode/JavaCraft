@@ -5,6 +5,9 @@ import com.apocscode.byteblock.network.BluetoothNetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.network.syncher.EntityDataSerializers;
+import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -46,6 +49,9 @@ public class DroneEntity extends PathfinderMob implements net.minecraft.world.Me
     private static final int HOVER_DRAIN_PERIOD = 20; // 1 fuel per second while hovering
     private static final int LOW_FUEL_THRESHOLD = 400; // ~20s — auto-return-home trigger
 
+    private static final EntityDataAccessor<Boolean> DATA_CHARGING =
+            SynchedEntityData.defineId(DroneEntity.class, EntityDataSerializers.BOOLEAN);
+
     private UUID ownerId = null;
     private UUID droneId;
     private UUID linkedComputerId = null;
@@ -86,6 +92,17 @@ public class DroneEntity extends PathfinderMob implements net.minecraft.world.Me
     }
 
     @Override
+    protected void defineSynchedData(SynchedEntityData.Builder builder) {
+        super.defineSynchedData(builder);
+        builder.define(DATA_CHARGING, false);
+    }
+
+    private int chargingTicks = 0;
+    private boolean wasChargingLastTick = false;
+    public void markCharging() { this.chargingTicks = 30; }
+    public boolean isCharging() { return entityData.get(DATA_CHARGING); }
+
+    @Override
     public void tick() {
         super.tick();
         if (level().isClientSide()) return;
@@ -94,6 +111,26 @@ public class DroneEntity extends PathfinderMob implements net.minecraft.world.Me
 
         // Convert FE from a battery upgrade into fuel ticks (1 fuel tick per 10 FE).
         tickBatteryDrain();
+
+        // Charging state countdown + sync flag, particles, sound.
+        boolean charging = chargingTicks > 0;
+        if (chargingTicks > 0) chargingTicks--;
+        if (entityData.get(DATA_CHARGING) != charging) entityData.set(DATA_CHARGING, charging);
+        if (charging && level() instanceof net.minecraft.server.level.ServerLevel sl) {
+            if (!wasChargingLastTick) {
+                level().playSound(null, blockPosition(),
+                        net.minecraft.sounds.SoundEvents.BEACON_ACTIVATE,
+                        net.minecraft.sounds.SoundSource.NEUTRAL, 0.4f, 1.7f);
+            }
+            if (sl.getGameTime() % 14 == 0) {
+                level().playSound(null, blockPosition(),
+                        net.minecraft.sounds.SoundEvents.AMETHYST_BLOCK_CHIME,
+                        net.minecraft.sounds.SoundSource.NEUTRAL, 0.3f, 1.5f);
+            }
+            sl.sendParticles(net.minecraft.core.particles.ParticleTypes.ELECTRIC_SPARK,
+                    getX(), getY() + 0.3, getZ(), 3, 0.3, 0.2, 0.3, 0.05);
+        }
+        wasChargingLastTick = charging;
 
         // Auto-return-home when fuel is low and we're idle
         if (fuelTicks > 0 && fuelTicks < LOW_FUEL_THRESHOLD && waypoints.isEmpty() && homePos != null) {
@@ -508,23 +545,6 @@ public class DroneEntity extends PathfinderMob implements net.minecraft.world.Me
     public void setDefender(boolean d) { this.defender = d; }
     public String getSwarmGroup() { return swarmGroup; }
     public void setSwarmGroup(String g) { this.swarmGroup = g == null ? "" : g; }
-
-    /** True if a ChargingStation is actively charging this drone (AABB overlap, within 3 blocks). */
-    public boolean isCharging() {
-        if (level() == null) return false;
-        net.minecraft.world.phys.AABB area =
-                new net.minecraft.world.phys.AABB(blockPosition()).inflate(3.0);
-        for (BlockPos p : BlockPos.betweenClosed(
-                BlockPos.containing(area.minX, area.minY, area.minZ),
-                BlockPos.containing(area.maxX, area.maxY, area.maxZ))) {
-            BlockEntity be = level().getBlockEntity(p);
-            if (be instanceof com.apocscode.byteblock.block.entity.ChargingStationBlockEntity cs
-                    && cs.getEnergyStored() > 0) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     /**
      * Pull up to `max` items from the container at target into this drone's inventory.

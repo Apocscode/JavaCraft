@@ -63,11 +63,9 @@ public class ChargingStationBlock extends Block implements EntityBlock {
     protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hitResult) {
         if (!level.isClientSide()) {
             BlockEntity be = level.getBlockEntity(pos);
-            if (be instanceof ChargingStationBlockEntity station) {
-                int stored = station.getEnergyStored();
-                int max = station.getMaxEnergy();
-                player.sendSystemMessage(Component.literal(
-                        "[Charging Station] Energy: " + stored + " / " + max + " FE"));
+            if (be instanceof ChargingStationBlockEntity station
+                    && player instanceof net.minecraft.server.level.ServerPlayer sp) {
+                sp.openMenu(station, buf -> buf.writeBlockPos(pos));
             }
         }
         return InteractionResult.sidedSuccess(level.isClientSide());

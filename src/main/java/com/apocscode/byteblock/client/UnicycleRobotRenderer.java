@@ -98,104 +98,104 @@ public class UnicycleRobotRenderer extends EntityRenderer<UnicycleRobotEntity> {
         VertexConsumer vc = buffers.getBuffer(RenderType.entityCutoutNoCull(TEXTURE));
 
         // ---- TIRE (single big wheel below body, rolls along forward axis) ----
-        // The tire group sits at y≈0.0 → 0.32 (radius ~0.16 from y=0.16).
+        // The tire group sits at y≈0.0 → 0.56 (radius ~0.28 from y=0.28).
         // Push a sub-pose that rotates around the wheel center for spoke animation.
         pose.pushPose();
-        pose.translate(0f, 0.16f, 0f);
+        pose.translate(0f, 0.28f, 0f);
         pose.mulPose(Axis.XP.rotationDegrees(wheelAngle));
         {
             PoseStack.Pose wp = pose.last();
             Matrix4f wm = wp.pose();
-            // Black tire ring — 8 thin boxes around a hub forms an octagon.
-            for (int i = 0; i < 8; i++) {
-                float a = (float) Math.toRadians(i * 45);
-                float r = 0.16f, rin = 0.10f;
+            // Black tire ring — 12 thicker boxes around a hub form a chunkier tread.
+            for (int i = 0; i < 12; i++) {
+                float a = (float) Math.toRadians(i * 30);
+                float r = 0.28f, rin = 0.18f;
                 float y0 =  (float) Math.sin(a) * rin;
                 float y1 =  (float) Math.sin(a) * r;
                 float z0 =  (float) Math.cos(a) * rin;
                 float z1 =  (float) Math.cos(a) * r;
-                float yMin = Math.min(y0, y1) - 0.02f;
-                float yMax = Math.max(y0, y1) + 0.02f;
-                float zMin = Math.min(z0, z1) - 0.02f;
-                float zMax = Math.max(z0, z1) + 0.02f;
+                float yMin = Math.min(y0, y1) - 0.03f;
+                float yMax = Math.max(y0, y1) + 0.03f;
+                float zMin = Math.min(z0, z1) - 0.03f;
+                float zMax = Math.max(z0, z1) + 0.03f;
                 RobotRenderer.drawBox(vc, wm, wp,
-                        -0.10f, yMin, zMin,
-                         0.10f, yMax, zMax,
+                        -0.13f, yMin, zMin,
+                         0.13f, yMax, zMax,
                         20, 20, 24, packedLight);
             }
             // Hub (white center)
             RobotRenderer.drawBox(vc, wm, wp,
-                    -0.12f, -0.05f, -0.05f, 0.12f, 0.05f, 0.05f,
+                    -0.15f, -0.07f, -0.07f, 0.15f, 0.07f, 0.07f,
                     230, 232, 238, packedLight);
             // Two cyan spokes (form an X with rotation)
             RobotRenderer.drawBox(vc, wm, wp,
-                    -0.115f, -0.14f, -0.02f, 0.115f, 0.14f, 0.02f,
+                    -0.145f, -0.24f, -0.03f, 0.145f, 0.24f, 0.03f,
                     40, 200, 230, packedLight);
             RobotRenderer.drawBox(vc, wm, wp,
-                    -0.115f, -0.02f, -0.14f, 0.115f, 0.02f, 0.14f,
+                    -0.145f, -0.03f, -0.24f, 0.145f, 0.03f, 0.24f,
                     40, 200, 230, packedLight);
         }
         pose.popPose();
 
         // ---- BALANCE LEAN — everything above the wheel pivots forward/back ----
-        // Pivot around the wheel center (y=0.16) so feet stay grounded.
-        pose.translate(0f, 0.16f, 0f);
+        // Pivot around the wheel center (y=0.28) so feet stay grounded.
+        pose.translate(0f, 0.28f, 0f);
         pose.mulPose(Axis.XP.rotationDegrees(leanAngle));
-        pose.translate(0f, -0.16f, 0f);
+        pose.translate(0f, -0.28f, 0f);
 
         PoseStack.Pose last = pose.last();
         Matrix4f mat = last.pose();
 
         // ---- LEG STRUT (fork from body down to wheel hub) ----
         RobotRenderer.drawBox(vc, mat, last,
-                -0.06f, 0.16f, -0.04f, 0.06f, 0.55f, 0.04f,
+                -0.06f, 0.32f, -0.04f, 0.06f, 0.65f, 0.04f,
                 210, 212, 220, packedLight);
         // Ankle joint (cyan accent)
         RobotRenderer.drawBox(vc, mat, last,
-                -0.08f, 0.50f, -0.06f, 0.08f, 0.58f, 0.06f,
+                -0.08f, 0.60f, -0.06f, 0.08f, 0.68f, 0.06f,
                 40, 200, 230, packedLight);
 
-        // ---- TORSO (white player-sized body, ~y 0.55..1.55) ----
+        // ---- TORSO (white player-sized body, ~y 0.65..1.65) ----
         // Lower torso (slightly tapered)
         RobotRenderer.drawBox(vc, mat, last,
-                -0.22f, 0.55f, -0.16f, 0.22f, 0.95f, 0.16f,
+                -0.22f, 0.65f, -0.16f, 0.22f, 1.05f, 0.16f,
                 232, 234, 240, packedLight);
         // Upper torso (chest housing)
         RobotRenderer.drawBox(vc, mat, last,
-                -0.26f, 0.95f, -0.18f, 0.26f, 1.55f, 0.18f,
+                -0.26f, 1.05f, -0.18f, 0.26f, 1.65f, 0.18f,
                 240, 242, 248, packedLight);
 
         // ---- CHEST COMPUTER SCREEN (face goes here — no head) ----
         // Bezel
         RobotRenderer.drawBox(vc, mat, last,
-                -0.22f, 1.05f, -0.19f, 0.22f, 1.45f, -0.181f,
+                -0.22f, 1.15f, -0.19f, 0.22f, 1.55f, -0.181f,
                 25, 28, 34, packedLight);
         // Inner screen surface
         RobotRenderer.drawBox(vc, mat, last,
-                -0.19f, 1.08f, -0.193f, 0.19f, 1.42f, -0.184f,
+                -0.19f, 1.18f, -0.193f, 0.19f, 1.52f, -0.184f,
                 12, 16, 22, packedLight);
         // Animated face (shared helper from RobotRenderer)
         RobotRenderer.renderFace(vc, mat, last, packedLight, entity, partialTick,
-                -0.19f, 1.08f, 0.19f, 1.42f, -0.194f);
+                -0.19f, 1.18f, 0.19f, 1.52f, -0.194f);
 
         // Side cyan accent stripes
         RobotRenderer.drawBox(vc, mat, last,
-                -0.265f, 1.10f, -0.05f, -0.255f, 1.40f, 0.05f,
+                -0.265f, 1.20f, -0.05f, -0.255f, 1.50f, 0.05f,
                 40, 200, 230, packedLight);
         RobotRenderer.drawBox(vc, mat, last,
-                 0.255f, 1.10f, -0.05f,  0.265f, 1.40f, 0.05f,
+                 0.255f, 1.20f, -0.05f,  0.265f, 1.50f, 0.05f,
                 40, 200, 230, packedLight);
         // Top cap (small dome where a head would be — power LED)
         RobotRenderer.drawBox(vc, mat, last,
-                -0.10f, 1.55f, -0.10f, 0.10f, 1.62f, 0.10f,
+                -0.10f, 1.65f, -0.10f, 0.10f, 1.72f, 0.10f,
                 220, 222, 230, packedLight);
         RobotRenderer.drawBox(vc, mat, last,
-                -0.025f, 1.62f, -0.025f, 0.025f, 1.65f, 0.025f,
+                -0.025f, 1.72f, -0.025f, 0.025f, 1.75f, 0.025f,
                 40, 220, 80, packedLight);
 
         // ---- LONG ARMS (swing from shoulders, reach to ground for inventories) ----
-        renderArm(vc, mat, last, packedLight,  0.30f, 1.42f,  armSwing); // right
-        renderArm(vc, mat, last, packedLight, -0.30f, 1.42f, -armSwing); // left
+        renderArm(vc, mat, last, packedLight,  0.30f, 1.52f,  armSwing); // right
+        renderArm(vc, mat, last, packedLight, -0.30f, 1.52f, -armSwing); // left
 
         pose.popPose();
         super.render(entity, yaw, partialTick, pose, buffers, packedLight);

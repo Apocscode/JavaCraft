@@ -5,6 +5,7 @@ import com.apocscode.byteblock.menu.DriveMenu;
 import com.apocscode.byteblock.menu.DroneMenu;
 import com.apocscode.byteblock.menu.PrinterMenu;
 import com.apocscode.byteblock.menu.RobotMenu;
+import com.apocscode.byteblock.menu.ChargingStationMenu;
 
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.inventory.MenuType;
@@ -27,4 +28,7 @@ public class ModMenuTypes {
 
     public static final DeferredHolder<MenuType<?>, MenuType<DroneMenu>> DRONE =
             MENUS.register("drone", () -> IMenuTypeExtension.create(DroneMenu::fromNetwork));
+
+    public static final DeferredHolder<MenuType<?>, MenuType<ChargingStationMenu>> CHARGING_STATION =
+            MENUS.register("charging_station", () -> IMenuTypeExtension.create(ChargingStationMenu::fromNetwork));
 }
