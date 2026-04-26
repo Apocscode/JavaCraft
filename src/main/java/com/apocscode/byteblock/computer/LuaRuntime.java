@@ -2065,20 +2065,57 @@ public class LuaRuntime {
             }
         });
 
-        // equipLeft/equipRight — both currently route to the single tool slot.
-        // (Phase 3 will add a real left/right hand split.)
-        robot.set("equipLeft", new ZeroArgFunction() {
-            @Override public LuaValue call() {
+        // equipLeft(slot)/equipRight(slot) — equip a specific inventory slot into the
+        // chosen tool bay. Slot is 1-indexed; if omitted, uses the currently selected slot.
+        // The previously equipped tool (if any) is swapped back into that slot.
+        robot.set("equipLeft", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
                 com.apocscode.byteblock.entity.RobotEntity r = asRobot();
                 if (r == null) return LuaValue.FALSE;
-                return LuaValue.valueOf(r.equipTool(r.getSelectedSlot()));
+                int s = args.narg() >= 1 ? args.checkint(1) - 1 : r.getSelectedSlot();
+                return LuaValue.valueOf(r.equipToolLeft(s));
             }
         });
-        robot.set("equipRight", new ZeroArgFunction() {
+        robot.set("equipRight", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                int s = args.narg() >= 1 ? args.checkint(1) - 1 : r.getSelectedSlot();
+                return LuaValue.valueOf(r.equipToolRight(s));
+            }
+        });
+        robot.set("unequipLeft", new ZeroArgFunction() {
             @Override public LuaValue call() {
                 com.apocscode.byteblock.entity.RobotEntity r = asRobot();
                 if (r == null) return LuaValue.FALSE;
-                return LuaValue.valueOf(r.equipTool(r.getSelectedSlot()));
+                return LuaValue.valueOf(r.unequipToolLeft());
+            }
+        });
+        robot.set("unequipRight", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                return LuaValue.valueOf(r.unequipToolRight());
+            }
+        });
+        robot.set("getToolLeft", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.NIL;
+                net.minecraft.world.item.ItemStack t = r.getEquippedToolLeft();
+                if (t.isEmpty()) return LuaValue.NIL;
+                return LuaValue.valueOf(net.minecraft.core.registries.BuiltInRegistries.ITEM
+                        .getKey(t.getItem()).toString());
+            }
+        });
+        robot.set("getToolRight", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.NIL;
+                net.minecraft.world.item.ItemStack t = r.getEquippedToolRight();
+                if (t.isEmpty()) return LuaValue.NIL;
+                return LuaValue.valueOf(net.minecraft.core.registries.BuiltInRegistries.ITEM
+                        .getKey(t.getItem()).toString());
             }
         });
 

@@ -45,7 +45,9 @@ public class RobotEntity extends PathfinderMob {
     private Direction facing = Direction.NORTH;
     private int selectedSlot = 0;
     private final SimpleContainer inventory = new SimpleContainer(16);
-    private ItemStack equippedTool = ItemStack.EMPTY; // dedicated tool slot (pick/axe/shovel/sword/shears)
+    private ItemStack equippedTool = ItemStack.EMPTY;       // LEFT hand (legacy field name kept for NBT back-compat)
+    private ItemStack equippedToolRight = ItemStack.EMPTY;  // RIGHT hand (Phase 3)
+    // dedicated tool slot (pick/axe/shovel/sword/shears)
     private final Queue<String> commandQueue = new LinkedList<>();
     private EnergyStorage energyStorage;
     private JavaOS os;
@@ -317,7 +319,8 @@ public class RobotEntity extends PathfinderMob {
 
         // Collect drops (with enchantments from equipped tool) and deposit into the robot's inventory.
         if (level() instanceof ServerLevel server) {
-            ItemStack tool = equippedTool.isEmpty() ? ItemStack.EMPTY : equippedTool;
+            // Pick the better mining tool from either hand by destroy-speed against this block.
+            ItemStack tool = pickMiningTool(state);
             List<ItemStack> drops = Block.getDrops(state, server, pos, null, this, tool);
             for (ItemStack drop : drops) {
                 ItemStack leftover = inventory.addItem(drop);
@@ -325,9 +328,12 @@ public class RobotEntity extends PathfinderMob {
                     Block.popResource(level(), pos, leftover);
                 }
             }
-            // Damage the tool (if damageable) once per dig
-            if (!equippedTool.isEmpty() && equippedTool.isDamageableItem()) {
-                equippedTool.hurtAndBreak(1, server, null, it -> equippedTool = ItemStack.EMPTY);
+            // Damage whichever tool was used (once per dig)
+            if (!tool.isEmpty() && tool.isDamageableItem()) {
+                tool.hurtAndBreak(1, server, null, it -> {
+                    if (tool == equippedTool) equippedTool = ItemStack.EMPTY;
+                    else if (tool == equippedToolRight) equippedToolRight = ItemStack.EMPTY;
+                });
             }
         } else {
             Block.dropResources(state, level(), pos);
@@ -370,15 +376,20 @@ public class RobotEntity extends PathfinderMob {
                         e -> e != this && e.isAlive());
         if (targets.isEmpty()) return;
         net.minecraft.world.entity.LivingEntity victim = targets.get(0);
+        // Prefer a sword from either hand, else any digger, else fists.
+        ItemStack weapon = pickWeapon();
         float damage = 1.0f;
-        if (!equippedTool.isEmpty()) {
-            net.minecraft.world.item.Item it = equippedTool.getItem();
+        if (!weapon.isEmpty()) {
+            net.minecraft.world.item.Item it = weapon.getItem();
             if (it instanceof net.minecraft.world.item.SwordItem) damage = 4.0f;
             else if (it instanceof net.minecraft.world.item.DiggerItem) damage = 2.5f;
         }
         victim.hurt(server.damageSources().mobAttack(this), damage);
-        if (!equippedTool.isEmpty() && equippedTool.isDamageableItem()) {
-            equippedTool.hurtAndBreak(1, server, null, it -> equippedTool = ItemStack.EMPTY);
+        if (!weapon.isEmpty() && weapon.isDamageableItem()) {
+            weapon.hurtAndBreak(1, server, null, it -> {
+                if (weapon == equippedTool) equippedTool = ItemStack.EMPTY;
+                else if (weapon == equippedToolRight) equippedToolRight = ItemStack.EMPTY;
+            });
         }
     }
 
@@ -605,24 +616,64 @@ public class RobotEntity extends PathfinderMob {
     public void setSelectedSlot(int slot) { this.selectedSlot = Math.clamp(slot, 0, 15); }
     public Direction getRobotFacing() { return facing; }
     public ItemStack getEquippedTool() { return equippedTool; }
+    public ItemStack getEquippedToolLeft() { return equippedTool; }
+    public ItemStack getEquippedToolRight() { return equippedToolRight; }
+
+    /**
+     * Pick the better mining tool for {@code state} from either hand. Empty hand if neither
+     * is set. Higher destroy speed wins; ties favor the LEFT slot.
+     */
+    private ItemStack pickMiningTool(BlockState state) {
+        float lSpeed = equippedTool.isEmpty() ? 0f : equippedTool.getDestroySpeed(state);
+        float rSpeed = equippedToolRight.isEmpty() ? 0f : equippedToolRight.getDestroySpeed(state);
+        if (lSpeed <= 0f && rSpeed <= 0f) return ItemStack.EMPTY;
+        return rSpeed > lSpeed ? equippedToolRight : equippedTool;
+    }
+
+    /** Pick the best weapon: sword preferred over digger preferred over empty. Ties favor LEFT. */
+    private ItemStack pickWeapon() {
+        int lScore = weaponScore(equippedTool);
+        int rScore = weaponScore(equippedToolRight);
+        if (lScore == 0 && rScore == 0) return ItemStack.EMPTY;
+        return rScore > lScore ? equippedToolRight : equippedTool;
+    }
+
+    private static int weaponScore(ItemStack s) {
+        if (s.isEmpty()) return 0;
+        if (s.getItem() instanceof net.minecraft.world.item.SwordItem) return 3;
+        if (s.getItem() instanceof net.minecraft.world.item.DiggerItem) return 2;
+        return 1;
+    }
 
     /**
      * Move the item from inventory[slot] into the dedicated tool slot.
      * The currently equipped tool (if any) is swapped back into that slot.
-     * Returns true on success.
+     * Returns true on success. (Legacy single-hand entry; equips LEFT.)
      */
-    public boolean equipTool(int slot) {
+    public boolean equipTool(int slot) { return equipToolLeft(slot); }
+
+    public boolean equipToolLeft(int slot) {
         if (slot < 0 || slot >= inventory.getContainerSize()) return false;
         ItemStack fromInv = inventory.getItem(slot);
-        // Accept any damageable item (tools are all damageable) or empty-to-unequip
         ItemStack prev = equippedTool;
         equippedTool = fromInv.isEmpty() ? ItemStack.EMPTY : fromInv.copy();
         inventory.setItem(slot, prev);
         return true;
     }
 
+    public boolean equipToolRight(int slot) {
+        if (slot < 0 || slot >= inventory.getContainerSize()) return false;
+        ItemStack fromInv = inventory.getItem(slot);
+        ItemStack prev = equippedToolRight;
+        equippedToolRight = fromInv.isEmpty() ? ItemStack.EMPTY : fromInv.copy();
+        inventory.setItem(slot, prev);
+        return true;
+    }
+
     /** Move the equipped tool back into the first empty inventory slot (or drops if full). */
-    public boolean unequipTool() {
+    public boolean unequipTool() { return unequipToolLeft(); }
+
+    public boolean unequipToolLeft() {
         if (equippedTool.isEmpty()) return false;
         ItemStack leftover = inventory.addItem(equippedTool);
         if (!leftover.isEmpty()) {
@@ -631,6 +682,17 @@ public class RobotEntity extends PathfinderMob {
         equippedTool = ItemStack.EMPTY;
         return true;
     }
+
+    public boolean unequipToolRight() {
+        if (equippedToolRight.isEmpty()) return false;
+        ItemStack leftover = inventory.addItem(equippedToolRight);
+        if (!leftover.isEmpty()) {
+            Block.popResource(level(), blockPosition(), leftover);
+        }
+        equippedToolRight = ItemStack.EMPTY;
+        return true;
+    }
+
     public EnergyStorage getEnergyStorage() { return energyStorage; }
     public JavaOS getOS() { return os; }
     public UUID getComputerId() { return computerId; }
@@ -659,6 +721,9 @@ public class RobotEntity extends PathfinderMob {
         tag.put("Inventory", invTag);
         if (!equippedTool.isEmpty()) {
             tag.put("EquippedTool", equippedTool.save(level().registryAccess()));
+        }
+        if (!equippedToolRight.isEmpty()) {
+            tag.put("EquippedToolRight", equippedToolRight.save(level().registryAccess()));
         }
     }
 
@@ -692,6 +757,10 @@ public class RobotEntity extends PathfinderMob {
         }
         if (tag.contains("EquippedTool")) {
             equippedTool = ItemStack.parse(level().registryAccess(), tag.getCompound("EquippedTool"))
+                    .orElse(ItemStack.EMPTY);
+        }
+        if (tag.contains("EquippedToolRight")) {
+            equippedToolRight = ItemStack.parse(level().registryAccess(), tag.getCompound("EquippedToolRight"))
                     .orElse(ItemStack.EMPTY);
         }
     }
