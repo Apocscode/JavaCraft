@@ -42,11 +42,11 @@ public class DroneScreen extends AbstractContainerScreen<DroneMenu> {
             labelSynced = true;
         }
 
-        // Customize tab — opens paint picker for this drone
+        // Customize tab — opens paint picker for this drone (in floating header above frame)
         addRenderableWidget(Button.builder(Component.literal("Paint"),
                 b -> this.minecraft.setScreen(new DroneCustomizeScreen(menu.getDrone())))
-            .pos(leftPos + imageWidth - 44, topPos + 2)
-            .size(40, 14)
+            .pos(leftPos + 6, topPos - 22)
+            .size(60, 18)
             .build());
     }
 
@@ -79,6 +79,13 @@ public class DroneScreen extends AbstractContainerScreen<DroneMenu> {
     protected void renderBg(GuiGraphics gui, float partialTick, int mouseX, int mouseY) {
         int x = leftPos;
         int y = topPos;
+
+        // Floating header panel for the Paint button.
+        int hY = y - 24;
+        gui.fill(x, hY, x + imageWidth, hY + 22, 0xFFC6C6C6);
+        gui.fill(x, hY, x + imageWidth, hY + 1, 0xFFFFFFFF);
+        gui.fill(x, hY, x + 1, hY + 22, 0xFFFFFFFF);
+        gui.fill(x + imageWidth - 1, hY, x + imageWidth, hY + 22, 0xFF555555);
 
         gui.fill(x, y, x + imageWidth, y + imageHeight, 0xFFC6C6C6);
         gui.fill(x, y, x + imageWidth, y + 1, 0xFFFFFFFF);

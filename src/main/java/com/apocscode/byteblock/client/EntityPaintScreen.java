@@ -33,9 +33,9 @@ import java.util.Map;
  * full paint to factory defaults.
  */
 public abstract class EntityPaintScreen extends Screen {
-    private static final int W = 280, H = 200;
-    private static final int SWATCH = 14;
-    private static final int SWATCH_GAP = 2;
+    private static final int W = 360, H = 240;
+    private static final int SWATCH = 18;
+    private static final int SWATCH_GAP = 3;
 
     /** Generated 12-hue × 4-brightness palette. */
     private static final int[] PALETTE = buildPalette();
@@ -69,11 +69,11 @@ public abstract class EntityPaintScreen extends Screen {
             addRenderableWidget(Button.builder(Component.literal("Paint"), b -> {
                 facesTab = false;
                 this.rebuildWidgets();
-            }).pos(leftX + 120, topY + 4).size(40, 14).build());
+            }).pos(leftX + 140, topY + 4).size(50, 16).build());
             addRenderableWidget(Button.builder(Component.literal("Face"), b -> {
                 facesTab = true;
                 this.rebuildWidgets();
-            }).pos(leftX + 162, topY + 4).size(40, 14).build());
+            }).pos(leftX + 194, topY + 4).size(50, 16).build());
         }
 
         if (!facesTab) {
@@ -82,8 +82,8 @@ public abstract class EntityPaintScreen extends Screen {
                 String slot = slots[i];
                 addRenderableWidget(Button.builder(Component.literal(slot),
                         b -> selected = slot)
-                    .pos(leftX + 8, topY + 24 + i * 18)
-                    .size(70, 16)
+                    .pos(leftX + 8, topY + 28 + i * 22)
+                    .size(90, 20)
                     .build());
             }
         }
@@ -96,15 +96,15 @@ public abstract class EntityPaintScreen extends Screen {
             } else {
                 for (String s : slots) working.set(s, null);
             }
-        }).pos(leftX + W - 78, topY + 24).size(70, 18).build());
+        }).pos(leftX + W - 88, topY + 28).size(80, 22).build());
 
         addRenderableWidget(Button.builder(Component.literal("Apply"), b -> {
             PacketDistributor.sendToServer(new SetEntityPaintPayload(entity.getId(), working.save()));
             this.onClose();
-        }).pos(leftX + W - 78, topY + 46).size(70, 18).build());
+        }).pos(leftX + W - 88, topY + 54).size(80, 22).build());
 
         addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> this.onClose())
-            .pos(leftX + W - 78, topY + 68).size(70, 18).build());
+            .pos(leftX + W - 88, topY + 80).size(80, 22).build());
     }
 
     @Override
@@ -126,18 +126,18 @@ public abstract class EntityPaintScreen extends Screen {
         // Selected indicator next to active part button
         for (int i = 0; i < slots.length; i++) {
             if (slots[i].equals(selected)) {
-                gui.drawString(this.font, "*", leftX + 80, topY + 28 + i * 18, 0xFFE05030, false);
+                gui.drawString(this.font, "▶", leftX + 100, topY + 34 + i * 22, 0xFFE05030, false);
                 // Show current color preview
                 int cur = working.get(selected, 0xFFFFFF);
-                gui.fill(leftX + 90, topY + 26 + i * 18, leftX + 110, topY + 38 + i * 18, 0xFF000000 | cur);
+                gui.fill(leftX + 112, topY + 30 + i * 22, leftX + 136, topY + 46 + i * 22, 0xFF000000 | cur);
             }
         }
 
-        // Swatch grid
-        int gridX = leftX + 95;
-        int gridY = topY + 100;
-        gui.drawString(this.font, "Palette (click swatch to apply to '" + selected + "')",
-                gridX, gridY - 12, 0xFF303038, false);
+        // Swatch grid — left edge well clear of part-list + color preview
+        int gridX = leftX + 145;
+        int gridY = topY + 130;
+        gui.drawString(this.font, "Palette — click swatch to apply to '" + selected + "'",
+                gridX, gridY - 14, 0xFF303038, false);
         int cols = 12;
         for (int i = 0; i < PALETTE.length; i++) {
             int col = i % cols;
@@ -149,7 +149,7 @@ public abstract class EntityPaintScreen extends Screen {
 
         // Help text
         gui.drawString(this.font, "Pick a part on the left, then a color below.",
-                leftX + 8, topY + H - 16, 0xFF505058, false);
+                leftX + 8, topY + H - 14, 0xFF505058, false);
     }
 
     private void renderFacesTab(GuiGraphics gui) {
@@ -211,8 +211,8 @@ public abstract class EntityPaintScreen extends Screen {
                     }
                 }
             } else {
-                int gridX = leftX + 95;
-                int gridY = topY + 100;
+                int gridX = leftX + 145;
+                int gridY = topY + 130;
                 int cols = 12;
                 for (int i = 0; i < PALETTE.length; i++) {
                     int col = i % cols;

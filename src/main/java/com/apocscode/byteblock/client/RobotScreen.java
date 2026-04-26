@@ -6,7 +6,6 @@ import com.apocscode.byteblock.network.SetEntityMutePayload;
 
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.Checkbox;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
@@ -45,21 +44,32 @@ public class RobotScreen extends AbstractContainerScreen<RobotMenu> {
             labelSynced = true;
         }
 
+        // Header buttons live in a floating bar 22 px above the inventory frame so they
+        // don't crowd the Name field or overlap the slot grid.
+        int headerY = topPos - 22;
+
         // Customize tab — opens paint picker for this robot
         addRenderableWidget(Button.builder(Component.literal("Paint"),
                 b -> this.minecraft.setScreen(new RobotCustomizeScreen(menu.getRobot())))
-            .pos(leftPos + imageWidth - 44, topPos + 2)
-            .size(40, 14)
+            .pos(leftPos + 6, headerY)
+            .size(60, 18)
             .build());
 
-        // Mute toggle — sends C2S each time the box flips state.
-        Checkbox mute = Checkbox.builder(Component.literal("Mute"), this.font)
-            .pos(leftPos + 4, topPos + imageHeight - 14)
-            .selected(menu.getRobot().isMuted())
-            .onValueChange((cb, sel) -> PacketDistributor.sendToServer(
-                new SetEntityMutePayload(menu.getRobot().getId(), sel)))
+        // Mute toggle — single Button with label that reflects current state. Bigger
+        // hit-box than a Checkbox and not crammed into a corner.
+        Button muteBtn = Button.builder(
+                Component.literal(menu.getRobot().isMuted() ? "Sound: OFF" : "Sound: ON"),
+                b -> {
+                    boolean newState = !menu.getRobot().isMuted();
+                    menu.getRobot().setMuted(newState);
+                    b.setMessage(Component.literal(newState ? "Sound: OFF" : "Sound: ON"));
+                    PacketDistributor.sendToServer(
+                        new SetEntityMutePayload(menu.getRobot().getId(), newState));
+                })
+            .pos(leftPos + 70, headerY)
+            .size(80, 18)
             .build();
-        addRenderableWidget(mute);
+        addRenderableWidget(muteBtn);
     }
 
     @Override
@@ -91,6 +101,13 @@ public class RobotScreen extends AbstractContainerScreen<RobotMenu> {
     protected void renderBg(GuiGraphics gui, float partialTick, int mouseX, int mouseY) {
         int x = leftPos;
         int y = topPos;
+
+        // Floating header panel (Paint / Sound buttons live here, drawn above main frame)
+        int hY = y - 24;
+        gui.fill(x, hY, x + imageWidth, hY + 22, 0xFFC6C6C6);
+        gui.fill(x, hY, x + imageWidth, hY + 1, 0xFFFFFFFF);
+        gui.fill(x, hY, x + 1, hY + 22, 0xFFFFFFFF);
+        gui.fill(x + imageWidth - 1, hY, x + imageWidth, hY + 22, 0xFF555555);
 
         // Background
         gui.fill(x, y, x + imageWidth, y + imageHeight, 0xFFC6C6C6);
