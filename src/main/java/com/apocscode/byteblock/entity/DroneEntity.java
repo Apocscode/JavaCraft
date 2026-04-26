@@ -63,6 +63,7 @@ public class DroneEntity extends PathfinderMob implements net.minecraft.world.Me
     private final SimpleContainer inventory = new SimpleContainer(9);
     private ItemStack batteryStack = ItemStack.EMPTY;
     private ItemStack gpsToolStack = ItemStack.EMPTY;
+    private com.apocscode.byteblock.entity.EntityPaint paint = new com.apocscode.byteblock.entity.EntityPaint();
     private BlockPos homePos = null;
     private boolean defender = false;  // attack nearby hostiles if true
     private int attackCooldown = 0;
@@ -509,6 +510,9 @@ public class DroneEntity extends PathfinderMob implements net.minecraft.world.Me
     public void setBatteryStack(ItemStack stack) { this.batteryStack = stack; }
     public ItemStack getGpsToolStack() { return gpsToolStack; }
     public void setGpsToolStack(ItemStack stack) { this.gpsToolStack = stack == null ? ItemStack.EMPTY : stack; }
+    public java.util.UUID getOwnerId() { return ownerId; }
+    public com.apocscode.byteblock.entity.EntityPaint getPaint() { return paint; }
+    public void setPaint(com.apocscode.byteblock.entity.EntityPaint p) { this.paint = p == null ? new com.apocscode.byteblock.entity.EntityPaint() : p; }
 
     /** Pull FE from any battery item in the upgrade slot, converting it into fuel ticks (10 FE = 1 tick). */
     private void tickBatteryDrain() {
@@ -662,6 +666,7 @@ public class DroneEntity extends PathfinderMob implements net.minecraft.world.Me
         if (!gpsToolStack.isEmpty()) {
             tag.put("GpsTool", gpsToolStack.save(level().registryAccess()));
         }
+        if (!paint.isEmpty()) tag.put("Paint", paint.save());
     }
 
     @Override
@@ -699,6 +704,7 @@ public class DroneEntity extends PathfinderMob implements net.minecraft.world.Me
             gpsToolStack = ItemStack.parse(level().registryAccess(), tag.getCompound("GpsTool"))
                     .orElse(ItemStack.EMPTY);
         }
+        if (tag.contains("Paint")) paint = com.apocscode.byteblock.entity.EntityPaint.load(tag.getCompound("Paint"));
     }
 
     // --- MenuProvider ---

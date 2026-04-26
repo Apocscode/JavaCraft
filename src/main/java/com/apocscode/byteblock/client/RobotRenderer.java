@@ -52,6 +52,15 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
     @Override
     public void render(RobotEntity entity, float yaw, float partialTick, PoseStack pose,
                        MultiBufferSource buffers, int packedLight) {
+        // Resolve paint slots — defaults match the original hard-coded look.
+        com.apocscode.byteblock.entity.EntityPaint paint = entity.getPaint();
+        int[] cBody    = unpack(paint.get("body",    rgb(232, 234, 240)));
+        int[] cTrim    = unpack(paint.get("trim",    rgb(40,  200, 230)));
+        int[] cArms    = unpack(paint.get("arms",    rgb(235, 237, 242)));
+        int[] cHead    = unpack(paint.get("head",    rgb(240, 242, 248)));
+        int[] cEye     = unpack(paint.get("eye",     rgb(40,  220, 255)));
+        int[] cAntenna = unpack(paint.get("antenna", rgb(80,  80,  85)));
+        int[] cTracks  = unpack(paint.get("tracks",  rgb(70,  72,  78)));
         // ---- Compute tread animation (per-entity phase) ----
         Vec3 vel = entity.getDeltaMovement();
         double speed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
@@ -99,10 +108,10 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
         // === TANK TRACKS (bottom) — dark contrast against white chassis ===
         // Left track pod
         drawBox(vc, mat, last, -0.45f, 0f, -0.4f, -0.25f, 0.2f, 0.4f,
-                70, 72, 78, packedLight);
+                cTracks[0], cTracks[1], cTracks[2], packedLight);
         // Right track pod
         drawBox(vc, mat, last, 0.25f, 0f, -0.4f, 0.45f, 0.2f, 0.4f,
-                70, 72, 78, packedLight);
+                cTracks[0], cTracks[1], cTracks[2], packedLight);
         // Tread base strips (continuous dark belt)
         drawBox(vc, mat, last, -0.46f, 0f, -0.4f, -0.24f, 0.03f, 0.4f,
                 40, 42, 46, packedLight);
@@ -141,10 +150,10 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
 
         // === BODY (clean white chassis, slight cool tint) ===
         drawBox(vc, mat, last, -0.35f, 0.2f, -0.3f, 0.35f, 0.65f, 0.3f,
-                232, 234, 240, packedLight);
-        // Front chest plate (cyan accent — matches ByteBlock theme)
+                cBody[0], cBody[1], cBody[2], packedLight);
+        // Front chest plate (trim accent)
         drawBox(vc, mat, last, -0.25f, 0.3f, -0.31f, 0.25f, 0.58f, -0.30f,
-                210, 232, 240, packedLight);
+                cTrim[0], cTrim[1], cTrim[2], packedLight);
         // Green power LED
         drawBox(vc, mat, last, -0.05f, 0.48f, -0.32f, 0.05f, 0.55f, -0.31f,
                 30, 220, 80, packedLight);
@@ -154,11 +163,11 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
 
         // === LEFT ARM (white with cyan joint accents) ===
         drawBox(vc, mat, last, -0.5f, 0.48f, -0.1f, -0.35f, 0.63f, 0.1f,
-                40, 200, 230, packedLight); // shoulder (cyan joint)
+                cTrim[0], cTrim[1], cTrim[2], packedLight); // shoulder (trim joint)
         drawBox(vc, mat, last, -0.5f, 0.25f, -0.08f, -0.38f, 0.48f, 0.08f,
-                235, 237, 242, packedLight); // upper arm
+                cArms[0], cArms[1], cArms[2], packedLight); // upper arm
         drawBox(vc, mat, last, -0.48f, 0.15f, -0.06f, -0.40f, 0.25f, 0.06f,
-                225, 227, 232, packedLight); // forearm
+                cArms[0], cArms[1], cArms[2], packedLight); // forearm
         // Gripper fingers (mid gray)
         drawBox(vc, mat, last, -0.49f, 0.10f, -0.05f, -0.46f, 0.15f, 0.0f,
                 160, 162, 168, packedLight);
@@ -167,23 +176,23 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
 
         // === RIGHT ARM ===
         drawBox(vc, mat, last, 0.35f, 0.48f, -0.1f, 0.5f, 0.63f, 0.1f,
-                40, 200, 230, packedLight);
+                cTrim[0], cTrim[1], cTrim[2], packedLight);
         drawBox(vc, mat, last, 0.38f, 0.25f, -0.08f, 0.5f, 0.48f, 0.08f,
-                235, 237, 242, packedLight);
+                cArms[0], cArms[1], cArms[2], packedLight);
         drawBox(vc, mat, last, 0.40f, 0.15f, -0.06f, 0.48f, 0.25f, 0.06f,
-                225, 227, 232, packedLight);
+                cArms[0], cArms[1], cArms[2], packedLight);
         drawBox(vc, mat, last, 0.46f, 0.10f, -0.05f, 0.49f, 0.15f, 0.0f,
                 160, 162, 168, packedLight);
         drawBox(vc, mat, last, 0.39f, 0.10f, 0.0f, 0.42f, 0.15f, 0.05f,
                 160, 162, 168, packedLight);
 
-        // === NECK (cyan accent) ===
+        // === NECK (trim accent) ===
         drawBox(vc, mat, last, -0.08f, 0.65f, -0.08f, 0.08f, 0.72f, 0.08f,
-                40, 200, 230, packedLight);
+                cTrim[0], cTrim[1], cTrim[2], packedLight);
 
-        // === HEAD (bright white) ===
+        // === HEAD ===
         drawBox(vc, mat, last, -0.22f, 0.72f, -0.2f, 0.22f, 1.0f, 0.2f,
-                240, 242, 248, packedLight);
+                cHead[0], cHead[1], cHead[2], packedLight);
 
         // === FACE ===
         // Eyes: blue idle, green while a user program is running, lightning bolt while charging.
@@ -195,9 +204,9 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
             renderLightningBoltFace(vc, mat, last, packedLight,
                     -0.20f, 0.74f, 0.20f, 0.98f, -0.205f, t);
         } else {
-            int eyeR = programRunning ?  60 :  40;
-            int eyeG = programRunning ? 255 : 220;
-            int eyeB = programRunning ? 100 : 255;
+            int eyeR = programRunning ?  60 : cEye[0];
+            int eyeG = programRunning ? 255 : cEye[1];
+            int eyeB = programRunning ? 100 : cEye[2];
             drawBox(vc, mat, last, -0.15f, 0.82f, -0.21f, -0.06f, 0.92f, -0.20f,
                     eyeR, eyeG, eyeB, packedLight);
             drawBox(vc, mat, last, 0.06f, 0.82f, -0.21f, 0.15f, 0.92f, -0.20f,
@@ -209,7 +218,7 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
 
         // === ANTENNA ===
         drawBox(vc, mat, last, -0.02f, 1.0f, -0.02f, 0.02f, 1.12f, 0.02f,
-                80, 80, 85, packedLight);
+                cAntenna[0], cAntenna[1], cAntenna[2], packedLight);
         // Red LED tip
         drawBox(vc, mat, last, -0.03f, 1.12f, -0.03f, 0.03f, 1.15f, 0.03f,
                 220, 30, 30, packedLight);
@@ -470,4 +479,7 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
         super.renderNameTag(entity, entity.getStatsLine(), poseStack, buffer, packedLight, partialTick);
         poseStack.popPose();
     }
+
+    private static int rgb(int r, int g, int b) { return ((r & 0xFF) << 16) | ((g & 0xFF) << 8) | (b & 0xFF); }
+    private static int[] unpack(int rgb) { return new int[]{(rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF}; }
 }

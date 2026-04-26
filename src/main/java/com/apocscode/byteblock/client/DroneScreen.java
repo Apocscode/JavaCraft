@@ -4,6 +4,7 @@ import com.apocscode.byteblock.menu.DroneMenu;
 import com.apocscode.byteblock.network.SetEntityLabelPayload;
 
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
@@ -40,6 +41,13 @@ public class DroneScreen extends AbstractContainerScreen<DroneMenu> {
             labelField.setValue(name != null ? name.getString() : "");
             labelSynced = true;
         }
+
+        // Customize tab — opens paint picker for this drone
+        addRenderableWidget(Button.builder(Component.literal("Paint"),
+                b -> this.minecraft.setScreen(new DroneCustomizeScreen(menu.getDrone())))
+            .pos(leftPos + imageWidth - 44, topPos + 2)
+            .size(40, 14)
+            .build());
     }
 
     @Override

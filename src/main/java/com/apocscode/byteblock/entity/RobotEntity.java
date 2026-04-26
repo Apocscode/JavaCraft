@@ -51,6 +51,7 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
 
     private UUID ownerId = null;
     private UUID computerId;
+    private com.apocscode.byteblock.entity.EntityPaint paint = new com.apocscode.byteblock.entity.EntityPaint();
     private int bluetoothChannel = 2;
     private Direction facing = Direction.NORTH;
     private int selectedSlot = 0;
@@ -970,6 +971,10 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
     public ItemStack getGpsToolStack() { return gpsToolStack; }
     public void setGpsToolStack(ItemStack stack) { this.gpsToolStack = stack == null ? ItemStack.EMPTY : stack; }
 
+    public java.util.UUID getOwnerId() { return ownerId; }
+    public com.apocscode.byteblock.entity.EntityPaint getPaint() { return paint; }
+    public void setPaint(com.apocscode.byteblock.entity.EntityPaint p) { this.paint = p == null ? new com.apocscode.byteblock.entity.EntityPaint() : p; }
+
     /**
      * Pick the better mining tool for {@code state} from either hand. Empty hand if neither
      * is set. Higher destroy speed wins; ties favor the LEFT slot.
@@ -1097,6 +1102,7 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
         if (!gpsToolStack.isEmpty()) {
             tag.put("GpsTool", gpsToolStack.save(level().registryAccess()));
         }
+        if (!paint.isEmpty()) tag.put("Paint", paint.save());
     }
 
     @Override
@@ -1143,6 +1149,7 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
             gpsToolStack = ItemStack.parse(level().registryAccess(), tag.getCompound("GpsTool"))
                     .orElse(ItemStack.EMPTY);
         }
+        if (tag.contains("Paint")) paint = com.apocscode.byteblock.entity.EntityPaint.load(tag.getCompound("Paint"));
     }
 
     // --- MenuProvider ---

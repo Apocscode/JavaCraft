@@ -61,10 +61,18 @@ public class DroneRenderer extends EntityRenderer<DroneEntity> {
         PoseStack.Pose last = pose.last();
         Matrix4f mat = last.pose();
 
-        // White body colors
-        int bw = 230, bg = 230, bb = 235; // body white
-        int dw = 180, dg = 180, db = 185; // accent gray
-        int rw = 60, rg = 60, rb = 65;    // rotor dark
+        // Resolve paint slots — defaults match the original hard-coded look.
+        com.apocscode.byteblock.entity.EntityPaint paint = entity.getPaint();
+        int[] cBody   = unpack(paint.get("body",   rgb(230, 230, 235)));
+        int[] cTrim   = unpack(paint.get("trim",   rgb(180, 180, 185)));
+        int[] cArms   = unpack(paint.get("arms",   rgb(215, 215, 225)));
+        int[] cBlades = unpack(paint.get("blades", rgb(60,  60,  65)));
+
+        // White body colors (legacy locals — kept for any downstream code, but
+        // primary cubes now use the paint-resolved slots above).
+        int bw = cBody[0], bg = cBody[1], bb = cBody[2];
+        int dw = cTrim[0], dg = cTrim[1], db = cTrim[2];
+        int rw = cBlades[0], rg = cBlades[1], rb = cBlades[2];
 
         // === CENTRAL BODY ===
         // Main hull — rounded-ish square
@@ -90,16 +98,16 @@ public class DroneRenderer extends EntityRenderer<DroneEntity> {
         // === FOUR ARMS extending diagonally ===
         // Front-Left arm
         drawArm(vc, mat, last, -0.12f, 0.12f, -0.12f, -0.35f, 0.12f, -0.35f,
-                bw - 15, bg - 15, bb - 10, packedLight);
+                cArms[0], cArms[1], cArms[2], packedLight);
         // Front-Right arm
         drawArm(vc, mat, last, 0.12f, 0.12f, -0.12f, 0.35f, 0.12f, -0.35f,
-                bw - 15, bg - 15, bb - 10, packedLight);
+                cArms[0], cArms[1], cArms[2], packedLight);
         // Back-Left arm
         drawArm(vc, mat, last, -0.12f, 0.12f, 0.12f, -0.35f, 0.12f, 0.35f,
-                bw - 15, bg - 15, bb - 10, packedLight);
+                cArms[0], cArms[1], cArms[2], packedLight);
         // Back-Right arm
         drawArm(vc, mat, last, 0.12f, 0.12f, 0.12f, 0.35f, 0.12f, 0.35f,
-                bw - 15, bg - 15, bb - 10, packedLight);
+                cArms[0], cArms[1], cArms[2], packedLight);
 
         // === FOUR ROTOR MOTORS (cylindrical hubs) ===
         drawBox(vc, mat, last, -0.39f, 0.12f, -0.39f, -0.31f, 0.17f, -0.31f,
@@ -235,4 +243,7 @@ public class DroneRenderer extends EntityRenderer<DroneEntity> {
         super.renderNameTag(entity, entity.getStatsLine(), poseStack, buffer, packedLight, partialTick);
         poseStack.popPose();
     }
+
+    private static int rgb(int r, int g, int b) { return ((r & 0xFF) << 16) | ((g & 0xFF) << 8) | (b & 0xFF); }
+    private static int[] unpack(int rgb) { return new int[]{(rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF}; }
 }

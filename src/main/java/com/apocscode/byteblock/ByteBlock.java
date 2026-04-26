@@ -123,6 +123,16 @@ public class ByteBlock {
             com.apocscode.byteblock.network.UploadGpsToComputerPayload.STREAM_CODEC,
             com.apocscode.byteblock.network.UploadGpsToComputerPayload::handle
         );
+        registrar.playToServer(
+            com.apocscode.byteblock.network.SetEntityPaintPayload.TYPE,
+            com.apocscode.byteblock.network.SetEntityPaintPayload.STREAM_CODEC,
+            com.apocscode.byteblock.network.SetEntityPaintPayload::handle
+        );
+        registrar.playToClient(
+            com.apocscode.byteblock.network.EntityPaintSyncPayload.TYPE,
+            com.apocscode.byteblock.network.EntityPaintSyncPayload.STREAM_CODEC,
+            com.apocscode.byteblock.network.EntityPaintSyncPayload::handle
+        );
     }
     private void registerEntityAttributes(EntityAttributeCreationEvent event) {
         event.put(ModEntities.DRONE.get(), DroneEntity.createAttributes().build());
