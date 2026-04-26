@@ -11,17 +11,36 @@ import net.minecraft.client.renderer.entity.EntityRenderer;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.phys.Vec3;
 
 import org.joml.Matrix4f;
+
+import java.util.WeakHashMap;
 
 /**
  * Block-sized robot renderer — tank tracks, boxy body, arms, head with face.
  * All geometry is hand-built quads using vanilla iron_block texture for shading.
+ *
+ * Tank tracks animate when the robot moves: a row of dark "lugs" scrolls along each
+ * tread, and small sprocket wheels at the front/back of each pod rotate. Phase is
+ * accumulated per-entity (driven by horizontal speed × direction) so each robot
+ * animates independently and the tracks freeze when the robot stops.
  */
 public class RobotRenderer extends EntityRenderer<RobotEntity> {
 
     private static final ResourceLocation TEXTURE =
             ResourceLocation.withDefaultNamespace("textures/block/iron_block.png");
+
+    /** Per-entity tread phase (in lug-spacings). Persists between frames so motion is smooth. */
+    private static final WeakHashMap<RobotEntity, float[]> PHASE = new WeakHashMap<>();
+    /** Number of lugs visible along each tread strip. */
+    private static final int LUG_COUNT = 6;
+    /** Spacing between lugs (world units), along the Z axis (robot's forward). */
+    private static final float LUG_SPACING = 0.8f / LUG_COUNT;
+    /** Half-length of one lug (Z extent / 2). */
+    private static final float LUG_HALF = LUG_SPACING * 0.30f;
+    /** Tread length scaling: how many lug-spacings of motion per block of horizontal travel. */
+    private static final float TREAD_SCROLL_RATE = 1.0f / LUG_SPACING;
 
     public RobotRenderer(EntityRendererProvider.Context context) {
         super(context);
@@ -31,6 +50,35 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
     @Override
     public void render(RobotEntity entity, float yaw, float partialTick, PoseStack pose,
                        MultiBufferSource buffers, int packedLight) {
+        // ---- Compute tread animation (per-entity phase) ----
+        Vec3 vel = entity.getDeltaMovement();
+        double speed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
+        // Forward unit vector in world space (matches entity facing).
+        float facingYawRad = (float) Math.toRadians(switch (entity.getRobotFacing()) {
+            case SOUTH -> 0f;
+            case WEST -> 90f;
+            case EAST -> -90f;
+            default -> 180f; // NORTH
+        });
+        double fx = -Math.sin(facingYawRad);
+        double fz =  Math.cos(facingYawRad);
+        double dot = vel.x * fx + vel.z * fz;       // + forward, − backward
+        float dir = (speed > 0.001) ? (float) Math.signum(dot) : 0f;
+
+        float[] phaseHolder = PHASE.computeIfAbsent(entity, e -> new float[]{0f, -1f});
+        float lastPhase = phaseHolder[0];
+        // Advance phase by (speed * dir) every render frame, scaled so 1 block of travel = 1 spacing.
+        // We use raw render-frame deltas via partialTick mismatch detection so motion looks smooth.
+        float phaseDelta = (float) (speed * dir * TREAD_SCROLL_RATE);
+        // Smooth: integrate as if 1 tick passes per render, capped to avoid huge jumps on lag spikes.
+        if (Math.abs(phaseDelta) > 1.0f) phaseDelta = Math.signum(phaseDelta);
+        float treadPhase = lastPhase + phaseDelta;
+        phaseHolder[0] = treadPhase;
+        // Lug offset in world units (positive = lugs shift toward +Z, i.e. backward when moving fwd).
+        float lugOffset = ((treadPhase * LUG_SPACING) % LUG_SPACING + LUG_SPACING) % LUG_SPACING;
+        // Sprocket rotation in degrees (one full revolution per LUG_COUNT spacings).
+        float sprocketAngle = -treadPhase * (360f / LUG_COUNT);
+
         pose.pushPose();
 
         // Rotate to face robot direction
@@ -53,11 +101,38 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
         // Right track pod
         drawBox(vc, mat, last, 0.25f, 0f, -0.4f, 0.45f, 0.2f, 0.4f,
                 70, 72, 78, packedLight);
-        // Tread strips (darker)
+        // Tread base strips (continuous dark belt)
         drawBox(vc, mat, last, -0.46f, 0f, -0.4f, -0.24f, 0.03f, 0.4f,
                 40, 42, 46, packedLight);
         drawBox(vc, mat, last, 0.24f, 0f, -0.4f, 0.46f, 0.03f, 0.4f,
                 40, 42, 46, packedLight);
+        // ---- Animated lugs on top of each tread (left + right) ----
+        // Lugs are small raised cleats spaced LUG_SPACING apart that scroll with motion.
+        // Anchor: leftmost edge of tread is at z = -0.4. Draw LUG_COUNT+1 lugs and clip
+        // those that fall outside [-0.4, +0.4].
+        for (int i = -1; i <= LUG_COUNT; i++) {
+            float lugZ = -0.4f + i * LUG_SPACING + lugOffset;
+            float z0 = lugZ - LUG_HALF;
+            float z1 = lugZ + LUG_HALF;
+            if (z1 <= -0.4f || z0 >= 0.4f) continue;
+            // Clip to tread length so lugs don't poke out of the pods.
+            float cz0 = Math.max(z0, -0.4f);
+            float cz1 = Math.min(z1,  0.4f);
+            // Left tread
+            drawBox(vc, mat, last, -0.47f, 0.025f, cz0, -0.23f, 0.06f, cz1,
+                    25, 26, 30, packedLight);
+            // Right tread
+            drawBox(vc, mat, last,  0.23f, 0.025f, cz0,  0.47f, 0.06f, cz1,
+                    25, 26, 30, packedLight);
+        }
+        // ---- Sprocket wheels at front and back of each pod (rotate with motion) ----
+        renderSprocket(vc, mat, pose, packedLight, -0.35f, 0.10f, -0.38f, sprocketAngle);
+        renderSprocket(vc, mat, pose, packedLight, -0.35f, 0.10f,  0.38f, sprocketAngle);
+        renderSprocket(vc, mat, pose, packedLight,  0.35f, 0.10f, -0.38f, sprocketAngle);
+        renderSprocket(vc, mat, pose, packedLight,  0.35f, 0.10f,  0.38f, sprocketAngle);
+        // Re-fetch matrix in case sprockets changed pose state (they pushPose internally).
+        last = pose.last();
+        mat = last.pose();
         // Axle between tracks (light gray)
         drawBox(vc, mat, last, -0.25f, 0.05f, -0.1f, 0.25f, 0.15f, 0.1f,
                 190, 192, 198, packedLight);
@@ -127,6 +202,35 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
 
         pose.popPose();
         super.render(entity, yaw, partialTick, pose, buffers, packedLight);
+    }
+
+    /**
+     * Draw a sprocket wheel (small spoked disc) at (cx, cy, cz) in renderer-local space,
+     * rotated by {@code angleDeg} around the world X axis (so the wheel rolls along Z).
+     * Built from 4 thin spoke boxes arranged as an asterisk for a clear "spinning" read.
+     */
+    private static void renderSprocket(VertexConsumer vc, Matrix4f mat0, PoseStack pose,
+                                        int light, float cx, float cy, float cz, float angleDeg) {
+        pose.pushPose();
+        pose.translate(cx, cy, cz);
+        pose.mulPose(Axis.XP.rotationDegrees(angleDeg));
+        PoseStack.Pose last = pose.last();
+        Matrix4f mat = last.pose();
+        // Hub (small box) — slightly lighter so center is visible.
+        drawBox(vc, mat, last, -0.06f, -0.025f, -0.025f, 0.06f, 0.025f, 0.025f,
+                160, 162, 168, light);
+        // Four spokes at 0/45/90/135 degrees (will visually rotate with pose).
+        for (int i = 0; i < 4; i++) {
+            pose.pushPose();
+            pose.mulPose(Axis.XP.rotationDegrees(i * 45f));
+            PoseStack.Pose sl = pose.last();
+            Matrix4f sm = sl.pose();
+            // Long thin spoke along the Y axis (post-rotation it sweeps Y/Z plane).
+            drawBox(vc, sm, sl, -0.05f, -0.085f, -0.012f, 0.05f, 0.085f, 0.012f,
+                    90, 92, 98, light);
+            pose.popPose();
+        }
+        pose.popPose();
     }
 
     /** Draw an axis-aligned box with 6 shaded faces. */
