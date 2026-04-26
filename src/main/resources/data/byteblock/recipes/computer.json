@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "IGI",
+    "RDR",
+    "III"
+  ],
+  "key": {
+    "I": {"item": "minecraft:iron_ingot"},
+    "G": {"item": "minecraft:glass"},
+    "R": {"item": "minecraft:redstone"},
+    "D": {"item": "minecraft:repeater"}
+  },
+  "result": {
+    "id": "byteblock:computer",
+    "count": 1
+  }
+}

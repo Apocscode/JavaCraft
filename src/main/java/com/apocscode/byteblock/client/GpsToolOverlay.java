@@ -2,7 +2,11 @@ package com.apocscode.byteblock.client;
 
 import java.util.List;
 
+import org.joml.Matrix4f;
+import org.joml.Vector4f;
+
 import com.apocscode.byteblock.ByteBlock;
+import com.apocscode.byteblock.block.entity.ByteChestBlockEntity;
 import com.apocscode.byteblock.init.ModItems;
 import com.apocscode.byteblock.item.GpsToolItem;
 import com.apocscode.byteblock.network.GpsModeCyclePayload;
@@ -11,6 +15,7 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
@@ -22,6 +27,7 @@ import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.InputEvent;
+import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
@@ -35,9 +41,16 @@ public final class GpsToolOverlay {
 
     private GpsToolOverlay() {}
 
+    /** Captured each frame in the level render so the HUD pass can re-project. */
+    private static Matrix4f lastProjection = new Matrix4f();
+    private static Matrix4f lastView = new Matrix4f();
+
     @SubscribeEvent
     public static void onRenderLevel(RenderLevelStageEvent event) {
-        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS) return;
+        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_PARTICLES) return;
+        // Stash the projection + view matrices for the GUI overlay pass.
+        lastProjection = new Matrix4f(event.getProjectionMatrix());
+        lastView = new Matrix4f(event.getModelViewMatrix());
 
         Minecraft mc = Minecraft.getInstance();
         Player player = mc.player;
@@ -93,7 +106,109 @@ public final class GpsToolOverlay {
 
         pose.popPose();
         buffers.endBatch(RenderType.lines());
+
+        // Bonus while holding the GPS tool: highlight every loaded ByteChest within ~32
+        // blocks with a wireframe + floating label, so chest networks are easy to scan.
+        renderChestOverlay(player, cam, pose, buffers);
     }
+
+    /** Wire-frame + nameplate for nearby ByteChests when GPS tool is in hand. */
+    private static void renderChestOverlay(Player player, Vec3 cam, PoseStack pose,
+                                            MultiBufferSource.BufferSource buffers) {
+        if (ByteChestBlockEntity.CLIENT_LOADED.isEmpty()) return;
+        Minecraft mc = Minecraft.getInstance();
+        VertexConsumer lines = buffers.getBuffer(RenderType.lines());
+        Vec3 playerPos = player.position();
+        final double maxSqr = 32 * 32;
+
+        pose.pushPose();
+        pose.translate(-cam.x, -cam.y, -cam.z);
+        for (ByteChestBlockEntity chest : ByteChestBlockEntity.CLIENT_LOADED) {
+            if (chest.isRemoved() || chest.getLevel() != mc.level) continue;
+            BlockPos p = chest.getBlockPos();
+            double dsq = playerPos.distanceToSqr(Vec3.atCenterOf(p));
+            if (dsq > maxSqr) continue;
+            int tint = chest.getTint();
+            float r = ((tint >> 16) & 0xFF) / 255f;
+            float g = ((tint >> 8) & 0xFF) / 255f;
+            float bl = (tint & 0xFF) / 255f;
+            // Avoid invisible white-on-white by clamping minimum brightness.
+            if (r + g + bl > 2.7f) { r = 0.2f; g = 0.85f; bl = 1.0f; }
+            drawBox(pose, lines, p, r, g, bl, 0.85f);
+        }
+        pose.popPose();
+        buffers.endBatch(RenderType.lines());
+
+        // Labels are now drawn in onRenderGui (HUD overlay) via screen-space projection.
+    }
+
+    /**
+     * Draws chest labels as HUD text. World-to-screen projection uses the same
+     * view + projection matrices the game renderer just used for the level pass,
+     * so labels track the chests perfectly while sidestepping the 3D-text render
+     * state issues (depth, blend, render-stage ordering).
+     */
+    @SubscribeEvent
+    public static void onRenderGui(RenderGuiEvent.Post event) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.options.hideGui || mc.level == null || mc.player == null) return;
+        if (findGpsTool(mc.player) == null) return;
+        if (ByteChestBlockEntity.CLIENT_LOADED.isEmpty()) return;
+
+        GuiGraphics g = event.getGuiGraphics();
+        var window = mc.getWindow();
+        int sw = window.getGuiScaledWidth();
+        int sh = window.getGuiScaledHeight();
+        double scale = window.getGuiScale();
+        int fbW = window.getWidth();
+        int fbH = window.getHeight();
+
+        Camera camera = mc.gameRenderer.getMainCamera();
+        Vec3 cam = camera.getPosition();
+        Matrix4f view = lastView;
+        Matrix4f proj = lastProjection;
+
+        Vec3 playerPos = mc.player.position();
+        final double maxSqr = 32 * 32;
+
+        for (ByteChestBlockEntity chest : ByteChestBlockEntity.CLIENT_LOADED) {
+            if (chest.isRemoved() || chest.getLevel() != mc.level) continue;
+            BlockPos p = chest.getBlockPos();
+            double dsq = playerPos.distanceToSqr(Vec3.atCenterOf(p));
+            if (dsq > maxSqr) continue;
+
+            // World position one block above chest top, relative to camera.
+            float wx = (float) (p.getX() + 0.5 - cam.x);
+            float wy = (float) (p.getY() + 1.4 - cam.y);
+            float wz = (float) (p.getZ() + 0.5 - cam.z);
+
+            Vector4f v = new Vector4f(wx, wy, wz, 1f);
+            view.transform(v);
+            if (v.z >= 0) continue; // behind camera (-Z is forward)
+            proj.transform(v);
+            if (v.w <= 0) continue;
+            float ndcX = v.x / v.w;
+            float ndcY = v.y / v.w;
+            if (ndcX < -1f || ndcX > 1f || ndcY < -1f || ndcY > 1f) continue;
+
+            // NDC -> framebuffer pixels -> GUI-scaled coords.
+            float pxX = (ndcX * 0.5f + 0.5f) * fbW;
+            float pxY = (1f - (ndcY * 0.5f + 0.5f)) * fbH;
+            int gx = (int) (pxX / scale);
+            int gy = (int) (pxY / scale);
+            if (gx < 0 || gx > sw || gy < 0 || gy > sh) continue;
+
+            String label = chest.getLabel();
+            String text = label.isEmpty() ? "ByteChest" : label;
+            int w = mc.font.width(text);
+            int x0 = gx - w / 2 - 2;
+            int y0 = gy - 5;
+            g.fill(x0, y0, x0 + w + 4, y0 + 11, 0xA0000000);
+            g.drawString(mc.font, text, gx - w / 2, gy - 4, 0xFFFFFFFF, false);
+        }
+    }
+
+
 
     @SubscribeEvent
     public static void onMouseScroll(InputEvent.MouseScrollingEvent event) {

@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "GIG",
+    "S S",
+    "   "
+  ],
+  "key": {
+    "G": {"item": "minecraft:glass_pane"},
+    "I": {"item": "minecraft:iron_ingot"},
+    "S": {"item": "minecraft:string"}
+  },
+  "result": {
+    "id": "byteblock:glasses",
+    "count": 1
+  }
+}

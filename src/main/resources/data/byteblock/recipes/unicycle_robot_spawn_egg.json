@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    " I ",
+    "ICI",
+    " W "
+  ],
+  "key": {
+    "I": {"item": "minecraft:iron_ingot"},
+    "C": {"item": "byteblock:computer"},
+    "W": {"item": "minecraft:wheat"}
+  },
+  "result": {
+    "id": "byteblock:unicycle_robot_spawn_egg",
+    "count": 1
+  }
+}

@@ -139,6 +139,11 @@ public class ByteBlock {
             com.apocscode.byteblock.network.SetEntityMutePayload.STREAM_CODEC,
             com.apocscode.byteblock.network.SetEntityMutePayload::handle
         );
+        registrar.playToServer(
+            com.apocscode.byteblock.network.PaintByteChestPayload.TYPE,
+            com.apocscode.byteblock.network.PaintByteChestPayload.STREAM_CODEC,
+            com.apocscode.byteblock.network.PaintByteChestPayload::handle
+        );
     }
     private void registerEntityAttributes(EntityAttributeCreationEvent event) {
         event.put(ModEntities.DRONE.get(), DroneEntity.createAttributes().build());
@@ -231,6 +236,18 @@ public class ByteBlock {
                     com.apocscode.byteblock.client.ButtonPanelRenderer::new);
             event.registerBlockEntityRenderer(ModBlockEntities.REDSTONE_RELAY.get(),
                     com.apocscode.byteblock.client.RedstoneRelayRenderer::new);
+        }
+
+        @SubscribeEvent
+        public static void onRegisterBlockColors(net.neoforged.neoforge.client.event.RegisterColorHandlersEvent.Block event) {
+            event.register((state, level, pos, tintIndex) -> {
+                if (tintIndex != 1 || level == null || pos == null) return 0xFFFFFF;
+                var be = level.getBlockEntity(pos);
+                if (be instanceof com.apocscode.byteblock.block.entity.ByteChestBlockEntity chest) {
+                    return chest.getTint();
+                }
+                return 0xFFFFFF;
+            }, com.apocscode.byteblock.init.ModBlocks.BYTE_CHEST.get());
         }
     }
 }

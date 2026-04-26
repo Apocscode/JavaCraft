@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "IPI",
+    "PCP",
+    "IRI"
+  ],
+  "key": {
+    "I": {"item": "minecraft:iron_ingot"},
+    "P": {"item": "minecraft:paper"},
+    "R": {"item": "minecraft:redstone"},
+    "C": {"item": "byteblock:computer"}
+  },
+  "result": {
+    "id": "byteblock:printer",
+    "count": 1
+  }
+}

@@ -56,9 +56,24 @@ public class UnicycleRobotRenderer extends EntityRenderer<UnicycleRobotEntity> {
         poseStack.popPose();
     }
 
+    private static int[] unpack(int rgb) {
+        return new int[]{ (rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF };
+    }
+    private static int rgb(int r, int g, int b) {
+        return ((r & 0xFF) << 16) | ((g & 0xFF) << 8) | (b & 0xFF);
+    }
+
     @Override
     public void render(UnicycleRobotEntity entity, float yaw, float partialTick,
                        PoseStack pose, MultiBufferSource buffers, int packedLight) {
+        // ---- Resolve paint slots (defaults match original hard-coded look) ----
+        com.apocscode.byteblock.entity.EntityPaint paint = entity.getPaint();
+        int[] cBody    = unpack(paint.get("body",    rgb(232, 234, 240)));
+        int[] cTrim    = unpack(paint.get("trim",    rgb(40,  200, 230)));
+        int[] cArms    = unpack(paint.get("arms",    rgb(235, 237, 242)));
+        int[] cHead    = unpack(paint.get("head",    rgb(220, 222, 230)));
+        int[] cTracks  = unpack(paint.get("tracks",  rgb(20,  20,  24)));
+
         // ---- Compute movement-driven values ----
         Vec3 vel = entity.getDeltaMovement();
         double speed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
@@ -121,19 +136,19 @@ public class UnicycleRobotRenderer extends EntityRenderer<UnicycleRobotEntity> {
                 RobotRenderer.drawBox(vc, wm, wp,
                         -0.13f, yMin, zMin,
                          0.13f, yMax, zMax,
-                        20, 20, 24, packedLight);
+                        cTracks[0], cTracks[1], cTracks[2], packedLight);
             }
-            // Hub (white center)
+            // Hub (trim)
             RobotRenderer.drawBox(vc, wm, wp,
                     -0.15f, -0.07f, -0.07f, 0.15f, 0.07f, 0.07f,
-                    230, 232, 238, packedLight);
-            // Two cyan spokes (form an X with rotation)
+                    cTrim[0], cTrim[1], cTrim[2], packedLight);
+            // Two trim spokes (form an X with rotation)
             RobotRenderer.drawBox(vc, wm, wp,
                     -0.145f, -0.24f, -0.03f, 0.145f, 0.24f, 0.03f,
-                    40, 200, 230, packedLight);
+                    cTrim[0], cTrim[1], cTrim[2], packedLight);
             RobotRenderer.drawBox(vc, wm, wp,
                     -0.145f, -0.03f, -0.24f, 0.145f, 0.03f, 0.24f,
-                    40, 200, 230, packedLight);
+                    cTrim[0], cTrim[1], cTrim[2], packedLight);
         }
         pose.popPose();
 
@@ -149,21 +164,21 @@ public class UnicycleRobotRenderer extends EntityRenderer<UnicycleRobotEntity> {
         // ---- LEG STRUT (fork from body down to wheel hub) ----
         RobotRenderer.drawBox(vc, mat, last,
                 -0.06f, 0.32f, -0.04f, 0.06f, 0.65f, 0.04f,
-                210, 212, 220, packedLight);
-        // Ankle joint (cyan accent)
+                cBody[0], cBody[1], cBody[2], packedLight);
+        // Ankle joint (trim)
         RobotRenderer.drawBox(vc, mat, last,
                 -0.08f, 0.60f, -0.06f, 0.08f, 0.68f, 0.06f,
-                40, 200, 230, packedLight);
+                cTrim[0], cTrim[1], cTrim[2], packedLight);
 
-        // ---- TORSO (white player-sized body, ~y 0.65..1.65) ----
+        // ---- TORSO (player-sized body, ~y 0.65..1.65) ----
         // Lower torso (slightly tapered)
         RobotRenderer.drawBox(vc, mat, last,
                 -0.22f, 0.65f, -0.16f, 0.22f, 1.05f, 0.16f,
-                232, 234, 240, packedLight);
+                cBody[0], cBody[1], cBody[2], packedLight);
         // Upper torso (chest housing)
         RobotRenderer.drawBox(vc, mat, last,
                 -0.26f, 1.05f, -0.18f, 0.26f, 1.65f, 0.18f,
-                240, 242, 248, packedLight);
+                cBody[0], cBody[1], cBody[2], packedLight);
 
         // ---- CHEST COMPUTER SCREEN (face goes here — no head) ----
         // Bezel
@@ -174,28 +189,38 @@ public class UnicycleRobotRenderer extends EntityRenderer<UnicycleRobotEntity> {
         RobotRenderer.drawBox(vc, mat, last,
                 -0.19f, 1.18f, -0.193f, 0.19f, 1.52f, -0.184f,
                 12, 16, 22, packedLight);
-        // Animated face (shared helper from RobotRenderer)
-        RobotRenderer.renderFace(vc, mat, last, packedLight, entity, partialTick,
-                -0.19f, 1.18f, 0.19f, 1.52f, -0.194f);
+        // Animated face (use paint face preset/custom if set, else fall back to shared animated helper)
+        String fid = paint.getFaceId();
+        if (fid != null && !"classic".equals(fid)) {
+            long bits = "custom".equals(fid) ? paint.getFaceBits()
+                    : com.apocscode.byteblock.client.FacePresets.get(fid);
+            int[] cEye = unpack(paint.get("eye", rgb(40, 220, 255)));
+            RobotRenderer.renderFaceBitmap(vc, mat, last, packedLight,
+                    -0.19f, 1.18f, 0.19f, 1.52f, -0.194f,
+                    bits, cEye[0], cEye[1], cEye[2]);
+        } else {
+            RobotRenderer.renderFace(vc, mat, last, packedLight, entity, partialTick,
+                    -0.19f, 1.18f, 0.19f, 1.52f, -0.194f);
+        }
 
-        // Side cyan accent stripes
+        // Side trim accent stripes
         RobotRenderer.drawBox(vc, mat, last,
                 -0.265f, 1.20f, -0.05f, -0.255f, 1.50f, 0.05f,
-                40, 200, 230, packedLight);
+                cTrim[0], cTrim[1], cTrim[2], packedLight);
         RobotRenderer.drawBox(vc, mat, last,
                  0.255f, 1.20f, -0.05f,  0.265f, 1.50f, 0.05f,
-                40, 200, 230, packedLight);
+                cTrim[0], cTrim[1], cTrim[2], packedLight);
         // Top cap (small dome where a head would be — power LED)
         RobotRenderer.drawBox(vc, mat, last,
                 -0.10f, 1.65f, -0.10f, 0.10f, 1.72f, 0.10f,
-                220, 222, 230, packedLight);
+                cHead[0], cHead[1], cHead[2], packedLight);
         RobotRenderer.drawBox(vc, mat, last,
                 -0.025f, 1.72f, -0.025f, 0.025f, 1.75f, 0.025f,
                 40, 220, 80, packedLight);
 
         // ---- LONG ARMS (swing from shoulders, reach to ground for inventories) ----
-        renderArm(vc, mat, last, packedLight,  0.30f, 1.52f,  armSwing); // right
-        renderArm(vc, mat, last, packedLight, -0.30f, 1.52f, -armSwing); // left
+        renderArm(vc, mat, last, packedLight,  0.30f, 1.52f,  armSwing, cArms, cTrim); // right
+        renderArm(vc, mat, last, packedLight, -0.30f, 1.52f, -armSwing, cArms, cTrim); // left
 
         pose.popPose();
         super.render(entity, yaw, partialTick, pose, buffers, packedLight);
@@ -208,7 +233,8 @@ public class UnicycleRobotRenderer extends EntityRenderer<UnicycleRobotEntity> {
      * an adjacent block from a player-sized chassis.
      */
     private static void renderArm(VertexConsumer vc, Matrix4f mat0, PoseStack.Pose last0,
-                                   int light, float sx, float sy, float swingDeg) {
+                                   int light, float sx, float sy, float swingDeg,
+                                   int[] cArms, int[] cTrim) {
         // We need a sub-pose for the swing; reconstruct via a temporary PoseStack.
         // Since drawBox needs Matrix4f + Pose, and we're already mid-render, simulate the
         // shoulder rotation by computing each box's vertices in arm-local space and then
@@ -219,10 +245,10 @@ public class UnicycleRobotRenderer extends EntityRenderer<UnicycleRobotEntity> {
         float sin = (float) Math.sin(Math.toRadians(swingDeg));
         float cos = (float) Math.cos(Math.toRadians(swingDeg));
 
-        // Shoulder ball joint (cyan)
+        // Shoulder ball joint (trim)
         RobotRenderer.drawBox(vc, mat0, last0,
                 sx - 0.06f, sy - 0.06f, -0.06f, sx + 0.06f, sy + 0.06f, 0.06f,
-                40, 200, 230, light);
+                cTrim[0], cTrim[1], cTrim[2], light);
 
         // Upper arm: 0.05 wide × 0.45 long, hanging from shoulder. Bake swing as Z offset
         // of the bottom end relative to top (top stays at sy).
@@ -243,18 +269,20 @@ public class UnicycleRobotRenderer extends EntityRenderer<UnicycleRobotEntity> {
             float yMax = Math.max(y0, y1) + 0.025f;
             float zMin = Math.min(z0, z1) - 0.04f;
             float zMax = Math.max(z0, z1) + 0.04f;
-            // Alternate two whites for a subtle segmented look.
-            int v = (i % 2 == 0) ? 235 : 225;
+            // Alternate two arm shades for a subtle segmented look.
+            int shade = (i % 2 == 0) ? 0 : -10;
             RobotRenderer.drawBox(vc, mat0, last0,
                     sx - 0.05f, yMin, zMin, sx + 0.05f, yMax, zMax,
-                    v, v + 2, v + 8, light);
+                    Math.max(0, Math.min(255, cArms[0] + shade)),
+                    Math.max(0, Math.min(255, cArms[1] + shade)),
+                    Math.max(0, Math.min(255, cArms[2] + shade)), light);
         }
 
-        // Elbow joint (cyan)
+        // Elbow joint (trim)
         RobotRenderer.drawBox(vc, mat0, last0,
                 sx - 0.06f, bottomY - 0.06f, bottomZ - 0.06f,
                 sx + 0.06f, bottomY,         bottomZ + 0.06f,
-                40, 200, 230, light);
+                cTrim[0], cTrim[1], cTrim[2], light);
 
         // Forearm: drops straight down 0.45 from elbow (no swing baked in — keeps gripper level).
         float forearmTop = bottomY - 0.06f;
@@ -262,16 +290,19 @@ public class UnicycleRobotRenderer extends EntityRenderer<UnicycleRobotEntity> {
         RobotRenderer.drawBox(vc, mat0, last0,
                 sx - 0.045f, forearmBot, bottomZ - 0.045f,
                 sx + 0.045f, forearmTop, bottomZ + 0.045f,
-                225, 227, 232, light);
+                cArms[0], cArms[1], cArms[2], light);
 
-        // Gripper (two small pincer fingers in mid-gray)
+        // Gripper (two small pincer fingers — darker arm shade)
+        int gr = Math.max(0, cArms[0] - 70);
+        int gg = Math.max(0, cArms[1] - 70);
+        int gb = Math.max(0, cArms[2] - 70);
         RobotRenderer.drawBox(vc, mat0, last0,
                 sx - 0.055f, forearmBot - 0.06f, bottomZ - 0.04f,
                 sx - 0.020f, forearmBot,         bottomZ + 0.04f,
-                160, 162, 168, light);
+                gr, gg, gb, light);
         RobotRenderer.drawBox(vc, mat0, last0,
                 sx + 0.020f, forearmBot - 0.06f, bottomZ - 0.04f,
                 sx + 0.055f, forearmBot,         bottomZ + 0.04f,
-                160, 162, 168, light);
+                gr, gg, gb, light);
     }
 }

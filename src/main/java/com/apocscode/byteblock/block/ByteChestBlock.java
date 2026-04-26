@@ -70,8 +70,9 @@ public class ByteChestBlock extends Block implements EntityBlock {
             if (level.isClientSide()) {
                 BlockEntity be = level.getBlockEntity(pos);
                 String current = (be instanceof ByteChestBlockEntity chest) ? chest.getLabel() : "";
+                int tint = (be instanceof ByteChestBlockEntity chest2) ? chest2.getTint() : 0xFFFFFF;
                 net.minecraft.client.Minecraft.getInstance().setScreen(
-                        new com.apocscode.byteblock.client.ByteChestRenameScreen(pos, current));
+                        new com.apocscode.byteblock.client.ByteChestConfigScreen(pos, current, tint));
             }
             return InteractionResult.sidedSuccess(level.isClientSide());
         }

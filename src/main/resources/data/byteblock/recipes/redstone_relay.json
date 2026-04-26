@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "ITI",
+    "RDR",
+    "ITI"
+  ],
+  "key": {
+    "I": {"item": "minecraft:iron_ingot"},
+    "T": {"item": "minecraft:redstone_torch"},
+    "R": {"item": "minecraft:redstone"},
+    "D": {"item": "minecraft:repeater"}
+  },
+  "result": {
+    "id": "byteblock:redstone_relay",
+    "count": 1
+  }
+}

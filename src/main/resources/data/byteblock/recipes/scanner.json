@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "GEG",
+    "RCR",
+    "III"
+  ],
+  "key": {
+    "I": {"item": "minecraft:iron_ingot"},
+    "G": {"item": "minecraft:glass"},
+    "E": {"item": "minecraft:ender_eye"},
+    "R": {"item": "minecraft:redstone"},
+    "C": {"item": "byteblock:computer"}
+  },
+  "result": {
+    "id": "byteblock:scanner",
+    "count": 1
+  }
+}

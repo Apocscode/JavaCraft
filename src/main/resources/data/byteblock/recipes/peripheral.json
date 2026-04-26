@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "IRI",
+    "RCR",
+    "ITI"
+  ],
+  "key": {
+    "I": {"item": "minecraft:iron_ingot"},
+    "R": {"item": "minecraft:redstone"},
+    "T": {"item": "minecraft:redstone_torch"},
+    "C": {"item": "byteblock:computer"}
+  },
+  "result": {
+    "id": "byteblock:peripheral",
+    "count": 1
+  }
+}

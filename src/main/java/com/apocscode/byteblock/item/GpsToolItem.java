@@ -473,5 +473,6 @@ public class GpsToolItem extends Item {
         tooltip.add(Component.literal("Shift + R-click drone/robot: apply").withStyle(ChatFormatting.DARK_GRAY));
         tooltip.add(Component.literal("Shift + R-click air: clear").withStyle(ChatFormatting.DARK_GRAY));
         tooltip.add(Component.literal("Broadcast on BT ch 9100").withStyle(ChatFormatting.DARK_AQUA));
+        tooltip.add(Component.literal("Holding: shows ByteChest labels & wireframes (32 blk)").withStyle(ChatFormatting.DARK_AQUA));
     }
 }

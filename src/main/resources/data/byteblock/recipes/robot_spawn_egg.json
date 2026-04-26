@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "III",
+    "ICI",
+    "IPI"
+  ],
+  "key": {
+    "I": {"item": "minecraft:iron_ingot"},
+    "C": {"item": "byteblock:computer"},
+    "P": {"item": "minecraft:piston"}
+  },
+  "result": {
+    "id": "byteblock:robot_spawn_egg",
+    "count": 1
+  }
+}

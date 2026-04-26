@@ -487,7 +487,7 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
      * {@code bits} = 1 means the pixel at column x, row y is lit (y=0 = bottom).
      * The plane is bounded in head-local space by [x0..x1] × [y0..y1] at z=zFront.
      */
-    private static void renderFaceBitmap(VertexConsumer vc, Matrix4f mat, PoseStack.Pose last,
+    static void renderFaceBitmap(VertexConsumer vc, Matrix4f mat, PoseStack.Pose last,
                                           int packedLight,
                                           float x0, float y0, float x1, float y1, float zFront,
                                           long bits, int r, int g, int b) {

@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    " G ",
+    " R ",
+    " S "
+  ],
+  "key": {
+    "G": {"item": "byteblock:gps"},
+    "R": {"item": "minecraft:redstone"},
+    "S": {"item": "minecraft:stick"}
+  },
+  "result": {
+    "id": "byteblock:gps_tool",
+    "count": 1
+  }
+}

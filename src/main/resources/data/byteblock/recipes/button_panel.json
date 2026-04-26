@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "BBB",
+    "IRI",
+    "III"
+  ],
+  "key": {
+    "B": {"item": "minecraft:stone_button"},
+    "I": {"item": "minecraft:iron_ingot"},
+    "R": {"item": "minecraft:redstone"}
+  },
+  "result": {
+    "id": "byteblock:button_panel",
+    "count": 1
+  }
+}

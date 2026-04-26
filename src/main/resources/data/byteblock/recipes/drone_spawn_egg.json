@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "FIF",
+    "ICI",
+    " R "
+  ],
+  "key": {
+    "F": {"item": "minecraft:feather"},
+    "I": {"item": "minecraft:iron_ingot"},
+    "C": {"item": "byteblock:computer"},
+    "R": {"item": "minecraft:redstone"}
+  },
+  "result": {
+    "id": "byteblock:drone_spawn_egg",
+    "count": 1
+  }
+}

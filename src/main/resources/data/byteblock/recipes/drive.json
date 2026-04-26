@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "III",
+    "RCR",
+    "III"
+  ],
+  "key": {
+    "I": {"item": "minecraft:iron_ingot"},
+    "R": {"item": "minecraft:redstone"},
+    "C": {"item": "minecraft:chest"}
+  },
+  "result": {
+    "id": "byteblock:drive",
+    "count": 1
+  }
+}

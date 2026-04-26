@@ -38,6 +38,12 @@ public class ByteChestBlockEntity extends RandomizableContainerBlockEntity {
     private UUID deviceId = UUID.randomUUID();
     /** Player-defined label. Empty string = use default name. */
     private String label = "";
+    /** Paint tint as 0xRRGGBB. White (0xFFFFFF) = no visible tint. */
+    private int tint = 0xFFFFFF;
+
+    /** Client-side set of loaded ByteChests — used by GpsToolOverlay to draw labels/wireframes. */
+    public static final java.util.Set<ByteChestBlockEntity> CLIENT_LOADED =
+            java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
 
     public ByteChestBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.BYTE_CHEST.get(), pos, state);
@@ -78,6 +84,22 @@ public class ByteChestBlockEntity extends RandomizableContainerBlockEntity {
         }
     }
 
+    public int getTint() { return tint; }
+
+    public void setTint(int newTint) {
+        this.tint = newTint & 0xFFFFFF;
+        setChanged();
+        if (level != null && !level.isClientSide()) {
+            BlockState st = level.getBlockState(worldPosition);
+            level.sendBlockUpdated(worldPosition, st, st, Block.UPDATE_CLIENTS);
+        } else if (level != null && level.isClientSide()) {
+            // Force model re-tint immediately on client.
+            net.minecraft.client.Minecraft.getInstance().levelRenderer
+                .blockChanged(level, worldPosition, level.getBlockState(worldPosition),
+                              level.getBlockState(worldPosition), 0);
+        }
+    }
+
     // ── RandomizableContainerBlockEntity implementation ───────────────────────
 
     @Override
@@ -114,6 +136,7 @@ public class ByteChestBlockEntity extends RandomizableContainerBlockEntity {
         }
         tag.putString("deviceId", deviceId.toString());
         if (!label.isEmpty()) tag.putString("Label", label);
+        if (tint != 0xFFFFFF) tag.putInt("Tint", tint);
     }
 
     @Override
@@ -129,6 +152,7 @@ public class ByteChestBlockEntity extends RandomizableContainerBlockEntity {
             } catch (IllegalArgumentException ignored) {}
         }
         label = tag.contains("Label") ? tag.getString("Label") : "";
+        tint = tag.contains("Tint") ? (tag.getInt("Tint") & 0xFFFFFF) : 0xFFFFFF;
     }
 
     // ── Client sync (label needs to render on the chest popup HUD) ────────────
@@ -138,6 +162,7 @@ public class ByteChestBlockEntity extends RandomizableContainerBlockEntity {
         CompoundTag tag = super.getUpdateTag(registries);
         tag.putString("Label", label);
         tag.putString("deviceId", deviceId.toString());
+        tag.putInt("Tint", tint);
         return tag;
     }
 
@@ -145,10 +170,44 @@ public class ByteChestBlockEntity extends RandomizableContainerBlockEntity {
     public void handleUpdateTag(CompoundTag tag, HolderLookup.Provider registries) {
         super.handleUpdateTag(tag, registries);
         if (tag.contains("Label")) label = tag.getString("Label");
+        if (tag.contains("Tint")) tint = tag.getInt("Tint") & 0xFFFFFF;
+    }
+
+    @Override
+    public void onDataPacket(net.minecraft.network.Connection connection,
+                              ClientboundBlockEntityDataPacket pkt,
+                              HolderLookup.Provider registries) {
+        super.onDataPacket(connection, pkt, registries);
+        // Force chunk re-tint after server pushes a tint change.
+        if (level != null && level.isClientSide()) {
+            BlockState st = level.getBlockState(worldPosition);
+            net.minecraft.client.Minecraft.getInstance().levelRenderer
+                .blockChanged(level, worldPosition, st, st, 0);
+        }
     }
 
     @Override
     public Packet<ClientGamePacketListener> getUpdatePacket() {
         return ClientboundBlockEntityDataPacket.create(this);
+    }
+
+    // ── Client-side load tracking (for GpsToolOverlay) ──────────────────────────
+
+    @Override
+    public void onLoad() {
+        super.onLoad();
+        if (level != null && level.isClientSide()) CLIENT_LOADED.add(this);
+    }
+
+    @Override
+    public void onChunkUnloaded() {
+        super.onChunkUnloaded();
+        if (level != null && level.isClientSide()) CLIENT_LOADED.remove(this);
+    }
+
+    @Override
+    public void setRemoved() {
+        super.setRemoved();
+        if (level != null && level.isClientSide()) CLIENT_LOADED.remove(this);
     }
 }

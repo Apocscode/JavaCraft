@@ -33,9 +33,13 @@ import java.util.Map;
  * full paint to factory defaults.
  */
 public abstract class EntityPaintScreen extends Screen {
-    private static final int W = 360, H = 240;
-    private static final int SWATCH = 18;
-    private static final int SWATCH_GAP = 3;
+    private static final int W = 560, H = 280;
+    private static final int SWATCH = 22;
+    private static final int SWATCH_GAP = 4;
+    private static final int FACE_THUMB = 40;
+    private static final int FACE_GAP_X = 14;
+    private static final int FACE_LABEL_PAD = 14;
+    private static final int FACE_COLS = 5;
 
     /** Generated 12-hue × 4-brightness palette. */
     private static final int[] PALETTE = buildPalette();
@@ -69,11 +73,11 @@ public abstract class EntityPaintScreen extends Screen {
             addRenderableWidget(Button.builder(Component.literal("Paint"), b -> {
                 facesTab = false;
                 this.rebuildWidgets();
-            }).pos(leftX + 140, topY + 4).size(50, 16).build());
+            }).pos(leftX + 220, topY + 4).size(70, 18).build());
             addRenderableWidget(Button.builder(Component.literal("Face"), b -> {
                 facesTab = true;
                 this.rebuildWidgets();
-            }).pos(leftX + 194, topY + 4).size(50, 16).build());
+            }).pos(leftX + 296, topY + 4).size(70, 18).build());
         }
 
         if (!facesTab) {
@@ -83,7 +87,7 @@ public abstract class EntityPaintScreen extends Screen {
                 addRenderableWidget(Button.builder(Component.literal(slot),
                         b -> selected = slot)
                     .pos(leftX + 8, topY + 28 + i * 22)
-                    .size(90, 20)
+                    .size(110, 20)
                     .build());
             }
         }
@@ -96,15 +100,15 @@ public abstract class EntityPaintScreen extends Screen {
             } else {
                 for (String s : slots) working.set(s, null);
             }
-        }).pos(leftX + W - 88, topY + 28).size(80, 22).build());
+        }).pos(leftX + W - 96, topY + 28).size(88, 22).build());
 
         addRenderableWidget(Button.builder(Component.literal("Apply"), b -> {
             PacketDistributor.sendToServer(new SetEntityPaintPayload(entity.getId(), working.save()));
             this.onClose();
-        }).pos(leftX + W - 88, topY + 54).size(80, 22).build());
+        }).pos(leftX + W - 96, topY + 54).size(88, 22).build());
 
         addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> this.onClose())
-            .pos(leftX + W - 88, topY + 80).size(80, 22).build());
+            .pos(leftX + W - 96, topY + 80).size(88, 22).build());
     }
 
     @Override
@@ -126,16 +130,16 @@ public abstract class EntityPaintScreen extends Screen {
         // Selected indicator next to active part button
         for (int i = 0; i < slots.length; i++) {
             if (slots[i].equals(selected)) {
-                gui.drawString(this.font, "▶", leftX + 100, topY + 34 + i * 22, 0xFFE05030, false);
+                gui.drawString(this.font, "▶", leftX + 122, topY + 34 + i * 22, 0xFFE05030, false);
                 // Show current color preview
                 int cur = working.get(selected, 0xFFFFFF);
-                gui.fill(leftX + 112, topY + 30 + i * 22, leftX + 136, topY + 46 + i * 22, 0xFF000000 | cur);
+                gui.fill(leftX + 134, topY + 30 + i * 22, leftX + 162, topY + 46 + i * 22, 0xFF000000 | cur);
             }
         }
 
         // Swatch grid — left edge well clear of part-list + color preview
-        int gridX = leftX + 145;
-        int gridY = topY + 130;
+        int gridX = leftX + 175;
+        int gridY = topY + 150;
         gui.drawString(this.font, "Palette — click swatch to apply to '" + selected + "'",
                 gridX, gridY - 14, 0xFF303038, false);
         int cols = 12;
@@ -154,38 +158,38 @@ public abstract class EntityPaintScreen extends Screen {
 
     private void renderFacesTab(GuiGraphics gui) {
         gui.drawString(this.font, "Face presets — click to assign  (current: " + working.getFaceId() + ")",
-                leftX + 8, topY + 24, 0xFF303038, false);
-        // 4 columns of preset thumbnails (32x32 each, 8 rows max)
+                leftX + 8, topY + 28, 0xFF303038, false);
         String[] ids = FacePresets.ids();
-        int thumb = 28, gap = 6;
-        int cols = 4;
-        int gridX = leftX + 12;
-        int gridY = topY + 40;
+        int gridX = leftX + 14;
+        int gridY = topY + 46;
         int eyeColor = working.get("eye", 0x28DCFF);
+        int rowH = FACE_THUMB + FACE_LABEL_PAD;
         for (int i = 0; i < ids.length; i++) {
-            int col = i % cols;
-            int row = i / cols;
-            int tx = gridX + col * (thumb + gap);
-            int ty = gridY + row * (thumb + gap + 8);
+            int col = i % FACE_COLS;
+            int row = i / FACE_COLS;
+            int tx = gridX + col * (FACE_THUMB + FACE_GAP_X);
+            int ty = gridY + row * (rowH + 6);
             // Frame
             int border = ids[i].equals(working.getFaceId()) ? 0xFFE05030 : 0xFF303038;
-            gui.fill(tx - 1, ty - 1, tx + thumb + 1, ty + thumb + 1, border);
-            gui.fill(tx, ty, tx + thumb, ty + thumb, 0xFF101015);
-            // Pixel art (8x8 → 28x28 → ~3.5px per cell, use floor)
+            gui.fill(tx - 1, ty - 1, tx + FACE_THUMB + 1, ty + FACE_THUMB + 1, border);
+            gui.fill(tx, ty, tx + FACE_THUMB, ty + FACE_THUMB, 0xFF101015);
+            // Pixel art (8x8 → FACE_THUMB px, 5px per cell when 40)
             long bits = FacePresets.get(ids[i]);
-            int px = thumb / 8;
+            int px = FACE_THUMB / 8;
             for (int y = 0; y < 8; y++) {
                 for (int x = 0; x < 8; x++) {
                     if (((bits >> (y * 8 + x)) & 1L) == 0L) continue;
-                    // Bitmap y=0 is bottom; flip to GUI coords.
                     int gx = tx + x * px;
                     int gy = ty + (7 - y) * px;
                     gui.fill(gx, gy, gx + px, gy + px, 0xFF000000 | eyeColor);
                 }
             }
-            // Label
-            String label = ids[i].length() > 7 ? ids[i].substring(0, 7) : ids[i];
-            gui.drawString(this.font, label, tx, ty + thumb + 1, 0xFF303038, false);
+            // Label — truncate to fit thumb width if needed
+            String label = ids[i];
+            while (this.font.width(label) > FACE_THUMB + FACE_GAP_X - 2 && label.length() > 1) {
+                label = label.substring(0, label.length() - 1);
+            }
+            gui.drawString(this.font, label, tx, ty + FACE_THUMB + 2, 0xFF303038, false);
         }
         gui.drawString(this.font, "Face uses the 'eye' paint color.",
                 leftX + 8, topY + H - 16, 0xFF505058, false);
@@ -196,23 +200,23 @@ public abstract class EntityPaintScreen extends Screen {
         if (button == 0) {
             if (facesTab) {
                 String[] ids = FacePresets.ids();
-                int thumb = 28, gap = 6, cols = 4;
-                int gridX = leftX + 12;
-                int gridY = topY + 40;
+                int gridX = leftX + 14;
+                int gridY = topY + 46;
+                int rowH = FACE_THUMB + FACE_LABEL_PAD;
                 for (int i = 0; i < ids.length; i++) {
-                    int col = i % cols;
-                    int row = i / cols;
-                    int tx = gridX + col * (thumb + gap);
-                    int ty = gridY + row * (thumb + gap + 8);
-                    if (mouseX >= tx && mouseX < tx + thumb && mouseY >= ty && mouseY < ty + thumb) {
+                    int col = i % FACE_COLS;
+                    int row = i / FACE_COLS;
+                    int tx = gridX + col * (FACE_THUMB + FACE_GAP_X);
+                    int ty = gridY + row * (rowH + 6);
+                    if (mouseX >= tx && mouseX < tx + FACE_THUMB && mouseY >= ty && mouseY < ty + FACE_THUMB) {
                         working.setFaceId(ids[i]);
                         working.setFaceBits(0L);
                         return true;
                     }
                 }
             } else {
-                int gridX = leftX + 145;
-                int gridY = topY + 130;
+                int gridX = leftX + 175;
+                int gridY = topY + 150;
                 int cols = 12;
                 for (int i = 0; i < PALETTE.length; i++) {
                     int col = i % cols;
