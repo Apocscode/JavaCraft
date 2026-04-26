@@ -37,7 +37,7 @@ import java.util.UUID;
 public class RobotEntity extends PathfinderMob {
     private static final int MAX_ENERGY = 10000;
     private static final int MAX_RECEIVE = 200;
-    private static final int ENERGY_PER_ACTION = 10;
+    public static final int ENERGY_PER_ACTION = 10;
 
     private UUID ownerId = null;
     private UUID computerId;

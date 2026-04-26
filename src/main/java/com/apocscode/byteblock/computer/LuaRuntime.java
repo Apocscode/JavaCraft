@@ -217,6 +217,7 @@ public class LuaRuntime {
         installRobotAPI();
         installDroneAPI();
         installScannerAPI();
+        installPathfindAPI();
         installPeripheralAPI();
         installSpeakerAPI();
         installGlassesAPI();
@@ -2119,6 +2120,53 @@ public class LuaRuntime {
             }
         });
 
+        // robot.locate() — quick robot-relative position (no GPS satellite required).
+        // Returns (x, y, z, facing). Use gps.locate() if you need real triangulation.
+        robot.set("locate", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.NIL;
+                net.minecraft.core.BlockPos p = r.blockPosition();
+                return LuaValue.varargsOf(new LuaValue[] {
+                        LuaValue.valueOf(p.getX()),
+                        LuaValue.valueOf(p.getY()),
+                        LuaValue.valueOf(p.getZ()),
+                        LuaValue.valueOf(r.getRobotFacing().getName())
+                });
+            }
+        });
+
+        // robot.scanBlocks([radius]) — onboard non-air block scan within a small radius
+        // (clamped 1..8). Returns an array of {name=string, x,y,z=int, distance=int (manhattan)}.
+        robot.set("scanBlocks", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null || r.level() == null) return LuaValue.NIL;
+                int radius = Math.max(1, Math.min(args.optint(1, 4), 8));
+                net.minecraft.core.BlockPos origin = r.blockPosition();
+                LuaTable result = new LuaTable();
+                int idx = 1;
+                for (net.minecraft.core.BlockPos p : net.minecraft.core.BlockPos.betweenClosed(
+                        origin.offset(-radius, -radius, -radius),
+                        origin.offset( radius,  radius,  radius))) {
+                    net.minecraft.world.level.block.state.BlockState s = r.level().getBlockState(p);
+                    if (s.isAir()) continue;
+                    LuaTable row = new LuaTable();
+                    row.set("name", LuaValue.valueOf(net.minecraft.core.registries.BuiltInRegistries.BLOCK
+                            .getKey(s.getBlock()).toString()));
+                    row.set("x", LuaValue.valueOf(p.getX()));
+                    row.set("y", LuaValue.valueOf(p.getY()));
+                    row.set("z", LuaValue.valueOf(p.getZ()));
+                    int dx = p.getX() - origin.getX();
+                    int dy = p.getY() - origin.getY();
+                    int dz = p.getZ() - origin.getZ();
+                    row.set("distance", LuaValue.valueOf(Math.abs(dx) + Math.abs(dy) + Math.abs(dz)));
+                    result.set(idx++, row);
+                }
+                return result;
+            }
+        });
+
         globals.set("robot", robot);
     }
 
@@ -2139,6 +2187,115 @@ public class LuaRuntime {
         t.set("state", state);
         t.set("tags", new LuaTable()); // CC parity: empty tags table
         return LuaValue.varargsOf(LuaValue.TRUE, t);
+    }
+
+    // ------------------------------------------------------------------
+    // pathfind.* — high-level navigation for the host robot. Wraps the
+    // existing string-command navigation engine (goto:/path:/route:/patrol:/stop)
+    // with a friendlier API plus distance/fuel estimators.
+    // ------------------------------------------------------------------
+    private void installPathfindAPI() {
+        LuaTable pf = new LuaTable();
+
+        // pathfind.to(x, y, z) — queue a goto command. Returns true if the host is a robot.
+        pf.set("to", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                int x = args.checkint(1), y = args.checkint(2), z = args.checkint(3);
+                r.queueCommand("goto:" + x + ":" + y + ":" + z);
+                return LuaValue.TRUE;
+            }
+        });
+
+        // pathfind.path(x1,y1,z1, x2,y2,z2, ...) — multi-waypoint path.
+        pf.set("path", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                if (args.narg() < 3 || args.narg() % 3 != 0) return LuaValue.FALSE;
+                StringBuilder sb = new StringBuilder("path");
+                for (int i = 1; i <= args.narg(); i++) sb.append(':').append(args.checkint(i));
+                r.queueCommand(sb.toString());
+                return LuaValue.TRUE;
+            }
+        });
+
+        // pathfind.patrol(x1,y1,z1, x2,y2,z2) — bounding-box patrol.
+        pf.set("patrol", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                if (args.narg() < 6) return LuaValue.FALSE;
+                r.queueCommand("patrol:" + args.checkint(1) + ":" + args.checkint(2) + ":" + args.checkint(3)
+                        + ":" + args.checkint(4) + ":" + args.checkint(5) + ":" + args.checkint(6));
+                return LuaValue.TRUE;
+            }
+        });
+
+        // pathfind.cancel() — stop all active navigation and clear the queue.
+        pf.set("cancel", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                r.queueCommand("stop");
+                r.clearCommands();
+                return LuaValue.TRUE;
+            }
+        });
+
+        // pathfind.distance(x, y, z) — manhattan distance from the host robot to (x,y,z).
+        pf.set("distance", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.NIL;
+                net.minecraft.core.BlockPos p = r.blockPosition();
+                int dx = Math.abs(args.checkint(1) - p.getX());
+                int dy = Math.abs(args.checkint(2) - p.getY());
+                int dz = Math.abs(args.checkint(3) - p.getZ());
+                return LuaValue.valueOf(dx + dy + dz);
+            }
+        });
+
+        // pathfind.estimateFuel(x, y, z) — FE cost estimate to reach (x,y,z) at the
+        // robot's current per-step energy rate (manhattan distance × ENERGY_PER_ACTION).
+        pf.set("estimateFuel", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.NIL;
+                net.minecraft.core.BlockPos p = r.blockPosition();
+                int dx = Math.abs(args.checkint(1) - p.getX());
+                int dy = Math.abs(args.checkint(2) - p.getY());
+                int dz = Math.abs(args.checkint(3) - p.getZ());
+                int steps = dx + dy + dz;
+                return LuaValue.valueOf(steps * com.apocscode.byteblock.entity.RobotEntity.ENERGY_PER_ACTION);
+            }
+        });
+
+        // pathfind.canReach(x, y, z) — true if estimated fuel ≤ current stored energy.
+        pf.set("canReach", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                net.minecraft.core.BlockPos p = r.blockPosition();
+                int dx = Math.abs(args.checkint(1) - p.getX());
+                int dy = Math.abs(args.checkint(2) - p.getY());
+                int dz = Math.abs(args.checkint(3) - p.getZ());
+                int need = (dx + dy + dz) * com.apocscode.byteblock.entity.RobotEntity.ENERGY_PER_ACTION;
+                return LuaValue.valueOf(r.getEnergyStorage().getEnergyStored() >= need);
+            }
+        });
+
+        // pathfind.isBusy() — true if the robot has nav targets or queued commands.
+        pf.set("isBusy", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                return LuaValue.valueOf(r.isBusy());
+            }
+        });
+
+        globals.set("pathfind", pf);
     }
 
 
