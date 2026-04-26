@@ -3,6 +3,7 @@ package com.apocscode.byteblock.init;
 import com.apocscode.byteblock.ByteBlock;
 import com.apocscode.byteblock.entity.DroneEntity;
 import com.apocscode.byteblock.entity.RobotEntity;
+import com.apocscode.byteblock.entity.UnicycleRobotEntity;
 
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.entity.EntityType;
@@ -29,4 +30,12 @@ public class ModEntities {
                             .sized(0.9f, 0.9f)
                             .clientTrackingRange(8)
                             .build(ByteBlock.MODID + ":robot"));
+
+    // Unicycle Robot — player-sized single-tire chassis with chest screen + long arms.
+    public static final DeferredHolder<EntityType<?>, EntityType<UnicycleRobotEntity>> UNICYCLE_ROBOT =
+            ENTITIES.register("unicycle_robot",
+                    () -> EntityType.Builder.<UnicycleRobotEntity>of(UnicycleRobotEntity::new, MobCategory.MISC)
+                            .sized(0.6f, 1.8f)
+                            .clientTrackingRange(8)
+                            .build(ByteBlock.MODID + ":unicycle_robot"));
 }

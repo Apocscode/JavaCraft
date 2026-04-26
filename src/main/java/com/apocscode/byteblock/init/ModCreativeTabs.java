@@ -37,6 +37,7 @@ public class ModCreativeTabs {
                         output.accept(ModItems.GPS_TOOL.get());
                         // Entities
                         output.accept(ModItems.ROBOT_SPAWN_EGG.get());
+                        output.accept(ModItems.UNICYCLE_ROBOT_SPAWN_EGG.get());
                         output.accept(ModItems.DRONE_SPAWN_EGG.get());
                     }).build());
 }

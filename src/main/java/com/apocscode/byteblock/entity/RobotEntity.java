@@ -8,6 +8,9 @@ import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.SimpleContainer;
@@ -65,6 +68,12 @@ public class RobotEntity extends PathfinderMob {
     private boolean patrolActive = false;
     private int patrolCornerIdx = 0;
 
+    // R2D2-style chirp scheduler — picks a random delay 80..240 ticks (4..12s)
+    // and plays a short multi-note burst when it elapses.
+    private int nextChirpTick = 120;
+    private int chirpBurstRemaining = 0;
+    private int chirpBurstNextTick = 0;
+
     public RobotEntity(EntityType<? extends RobotEntity> type, Level level) {
         super(type, level);
         this.computerId = UUID.randomUUID();
@@ -106,8 +115,45 @@ public class RobotEntity extends PathfinderMob {
             }
         }
 
+        // R2D2-style chirps — random short note bursts every 4..12s.
+        tickChirps();
+
         // Register on Bluetooth
         BluetoothNetwork.register(level(), computerId, blockPosition(), bluetoothChannel);
+    }
+
+    /**
+     * Periodically emit a short burst of randomly-pitched note-block sounds to give
+     * the robot an R2D2-like voice. Bursts contain 2..5 notes spaced 3..6 ticks apart.
+     * Only runs server-side; clients hear it via {@link Level#playSound}.
+     */
+    private void tickChirps() {
+        // Currently in a burst — keep emitting notes.
+        if (chirpBurstRemaining > 0) {
+            if (--chirpBurstNextTick <= 0) {
+                playChirp();
+                chirpBurstRemaining--;
+                chirpBurstNextTick = 3 + random.nextInt(4); // 3..6 ticks between notes
+            }
+            return;
+        }
+        // Between bursts — count down to next one.
+        if (--nextChirpTick > 0) return;
+        chirpBurstRemaining = 2 + random.nextInt(4); // 2..5 notes
+        chirpBurstNextTick = 0;
+        nextChirpTick = 80 + random.nextInt(160);     // 4..12s until next burst
+    }
+
+    /** Play one random-pitch note (NOTE_BLOCK_BIT for the digital "beep"). */
+    private void playChirp() {
+        if (level() == null || level().isClientSide()) return;
+        // Pitch range 0.6..2.0 covers the squeaky/grumbly R2 character.
+        float pitch = 0.6f + random.nextFloat() * 1.4f;
+        // Alternate between "BIT" (square) and "PLING" (chime) for variety.
+        SoundEvent voice = random.nextBoolean()
+                ? SoundEvents.NOTE_BLOCK_BIT.value()
+                : SoundEvents.NOTE_BLOCK_PLING.value();
+        level().playSound(null, blockPosition(), voice, SoundSource.NEUTRAL, 0.35f, pitch);
     }
 
     private void executeCommand(String cmd) {

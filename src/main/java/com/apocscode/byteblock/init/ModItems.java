@@ -45,6 +45,9 @@ public class ModItems {
     public static final DeferredItem<SpawnEggItem> ROBOT_SPAWN_EGG = ITEMS.register("robot_spawn_egg",
             () -> new SpawnEggItem(ModEntities.ROBOT.get(), 0x666666, 0xFFAA00, new Item.Properties()));
 
+    public static final DeferredItem<SpawnEggItem> UNICYCLE_ROBOT_SPAWN_EGG = ITEMS.register("unicycle_robot_spawn_egg",
+            () -> new SpawnEggItem(ModEntities.UNICYCLE_ROBOT.get(), 0xEEEEEE, 0x00CCFF, new Item.Properties()));
+
     public static final DeferredItem<SpawnEggItem> DRONE_SPAWN_EGG = ITEMS.register("drone_spawn_egg",
             () -> new SpawnEggItem(ModEntities.DRONE.get(), 0xDDDDDD, 0x00AAFF, new Item.Properties()));
 

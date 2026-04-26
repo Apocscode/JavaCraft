@@ -112,12 +112,19 @@ public class ByteBlock {
     private void registerEntityAttributes(EntityAttributeCreationEvent event) {
         event.put(ModEntities.DRONE.get(), DroneEntity.createAttributes().build());
         event.put(ModEntities.ROBOT.get(), RobotEntity.createAttributes().build());
+        event.put(ModEntities.UNICYCLE_ROBOT.get(),
+                com.apocscode.byteblock.entity.UnicycleRobotEntity.createAttributes().build());
     }
 
     private void registerCapabilities(RegisterCapabilitiesEvent event) {
         event.registerEntity(
                 Capabilities.EnergyStorage.ENTITY,
                 ModEntities.ROBOT.get(),
+                (entity, direction) -> entity.getEnergyStorage()
+        );
+        event.registerEntity(
+                Capabilities.EnergyStorage.ENTITY,
+                ModEntities.UNICYCLE_ROBOT.get(),
                 (entity, direction) -> entity.getEnergyStorage()
         );
     }
@@ -171,6 +178,8 @@ public class ByteBlock {
         public static void onRegisterRenderers(EntityRenderersEvent.RegisterRenderers event) {
             event.registerEntityRenderer(ModEntities.ROBOT.get(),
                     com.apocscode.byteblock.client.RobotRenderer::new);
+            event.registerEntityRenderer(ModEntities.UNICYCLE_ROBOT.get(),
+                    com.apocscode.byteblock.client.UnicycleRobotRenderer::new);
             event.registerEntityRenderer(ModEntities.DRONE.get(),
                     com.apocscode.byteblock.client.DroneRenderer::new);
             event.registerBlockEntityRenderer(ModBlockEntities.MONITOR.get(),

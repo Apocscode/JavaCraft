@@ -140,12 +140,16 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
         // === BODY (clean white chassis, slight cool tint) ===
         drawBox(vc, mat, last, -0.35f, 0.2f, -0.3f, 0.35f, 0.65f, 0.3f,
                 232, 234, 240, packedLight);
-        // Front chest plate (cyan accent — matches ByteBlock theme)
-        drawBox(vc, mat, last, -0.25f, 0.3f, -0.31f, 0.25f, 0.58f, -0.30f,
-                210, 232, 240, packedLight);
-        // Green power LED
-        drawBox(vc, mat, last, -0.05f, 0.48f, -0.32f, 0.05f, 0.55f, -0.31f,
-                30, 220, 80, packedLight);
+        // Chest computer screen — black bezel, dark inner screen, animated face on top.
+        // Bezel (dark gray frame around the screen)
+        drawBox(vc, mat, last, -0.27f, 0.30f, -0.31f, 0.27f, 0.58f, -0.305f,
+                30, 32, 38, packedLight);
+        // Screen surface (slightly lighter — receives the face quads on its front)
+        drawBox(vc, mat, last, -0.24f, 0.32f, -0.315f, 0.24f, 0.56f, -0.310f,
+                12, 16, 22, packedLight);
+        // --- Animated face on the chest screen ---
+        renderFace(vc, mat, last, packedLight, entity, partialTick,
+                   -0.24f, 0.32f, 0.24f, 0.56f, -0.316f);
         // Rear vent (mid-gray)
         drawBox(vc, mat, last, -0.2f, 0.35f, 0.30f, 0.2f, 0.55f, 0.31f,
                 170, 172, 178, packedLight);
@@ -179,29 +183,72 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
         drawBox(vc, mat, last, -0.08f, 0.65f, -0.08f, 0.08f, 0.72f, 0.08f,
                 40, 200, 230, packedLight);
 
-        // === HEAD (bright white) ===
-        drawBox(vc, mat, last, -0.22f, 0.72f, -0.2f, 0.22f, 1.0f, 0.2f,
+        // === HEAD (small camera dome — face is now on the chest screen) ===
+        drawBox(vc, mat, last, -0.18f, 0.72f, -0.18f, 0.18f, 0.92f, 0.18f,
                 240, 242, 248, packedLight);
-
-        // === FACE ===
-        // Cyan eyes
-        drawBox(vc, mat, last, -0.15f, 0.82f, -0.21f, -0.06f, 0.92f, -0.20f,
+        // Camera lens (cyan disc-like front face)
+        drawBox(vc, mat, last, -0.08f, 0.78f, -0.19f, 0.08f, 0.86f, -0.181f,
                 40, 220, 255, packedLight);
-        drawBox(vc, mat, last, 0.06f, 0.82f, -0.21f, 0.15f, 0.92f, -0.20f,
-                40, 220, 255, packedLight);
-        // Mouth grille
-        drawBox(vc, mat, last, -0.12f, 0.75f, -0.21f, 0.12f, 0.79f, -0.20f,
-                50, 50, 55, packedLight);
 
         // === ANTENNA ===
-        drawBox(vc, mat, last, -0.02f, 1.0f, -0.02f, 0.02f, 1.12f, 0.02f,
+        drawBox(vc, mat, last, -0.02f, 0.92f, -0.02f, 0.02f, 1.04f, 0.02f,
                 80, 80, 85, packedLight);
         // Red LED tip
-        drawBox(vc, mat, last, -0.03f, 1.12f, -0.03f, 0.03f, 1.15f, 0.03f,
+        drawBox(vc, mat, last, -0.03f, 1.04f, -0.03f, 0.03f, 1.07f, 0.03f,
                 220, 30, 30, packedLight);
 
         pose.popPose();
         super.render(entity, yaw, partialTick, pose, buffers, packedLight);
+    }
+
+    /**
+     * Draw an animated face on a flat screen surface in renderer-local coordinates.
+     * The screen rectangle is (x0,y0)→(x1,y1) on the {@code screenZ} plane (lower Z = closer
+     * to the player when the robot is facing them, after the body's facing rotation).
+     *
+     * Animation: eyes blink every ~3 seconds (closed for ~3 ticks), and the mouth toggles
+     * between two phases driven by {@code entity.tickCount}. While the robot is moving, the
+     * eyes also wobble slightly side-to-side; while stationary they sit centered.
+     */
+    static void renderFace(VertexConsumer vc, Matrix4f mat, PoseStack.Pose last,
+                                    int light, com.apocscode.byteblock.entity.RobotEntity entity,
+                                    float partialTick,
+                                    float x0, float y0, float x1, float y1, float screenZ) {
+        float t = entity.tickCount + partialTick;
+        // Blink: every 60 ticks, eyes close for ~3 ticks.
+        boolean blinking = (entity.tickCount % 60) < 3;
+        // Mouth phase: toggles every 8 ticks while moving, frozen while idle.
+        boolean moving = entity.getDeltaMovement().horizontalDistanceSqr() > 0.001;
+        boolean mouthOpen = moving && ((entity.tickCount / 8) % 2 == 0);
+        // Eye horizontal jitter when moving (gives a "scanning" look).
+        float jitter = moving ? (float) Math.sin(t * 0.3) * 0.012f : 0f;
+
+        float w = x1 - x0;
+        float h = y1 - y0;
+        // Eye geometry as a fraction of the screen.
+        float eyeW = w * 0.18f, eyeH = h * 0.28f;
+        float eyeY0 = y0 + h * 0.45f;
+        float eyeY1 = eyeY0 + (blinking ? eyeH * 0.10f : eyeH);
+        float lEyeCx = x0 + w * 0.30f + jitter;
+        float rEyeCx = x0 + w * 0.70f + jitter;
+        // Cyan eyes (bright when open, near-flat line when blinking).
+        int er = blinking ? 30 : 80;
+        int eg = blinking ? 200 : 240;
+        int eb = blinking ? 220 : 255;
+        drawBox(vc, mat, last, lEyeCx - eyeW * 0.5f, eyeY0, screenZ,
+                lEyeCx + eyeW * 0.5f, eyeY1, screenZ + 0.001f,
+                er, eg, eb, light);
+        drawBox(vc, mat, last, rEyeCx - eyeW * 0.5f, eyeY0, screenZ,
+                rEyeCx + eyeW * 0.5f, eyeY1, screenZ + 0.001f,
+                er, eg, eb, light);
+        // Mouth — closed = thin horizontal line, open = small rectangle.
+        float mY0 = y0 + h * 0.18f;
+        float mY1 = mY0 + h * (mouthOpen ? 0.18f : 0.05f);
+        float mX0 = x0 + w * 0.32f;
+        float mX1 = x0 + w * 0.68f;
+        drawBox(vc, mat, last, mX0, mY0, screenZ,
+                mX1, mY1, screenZ + 0.001f,
+                40, 220, 255, light);
     }
 
     /**
@@ -234,7 +281,7 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
     }
 
     /** Draw an axis-aligned box with 6 shaded faces. */
-    private static void drawBox(VertexConsumer vc, Matrix4f mat, PoseStack.Pose last,
+    static void drawBox(VertexConsumer vc, Matrix4f mat, PoseStack.Pose last,
                                  float x0, float y0, float z0, float x1, float y1, float z1,
                                  int r, int g, int b, int light) {
         int a = 255, ds = 20;

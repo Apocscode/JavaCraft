@@ -19,7 +19,9 @@
   "item.byteblock.glasses": "Smart Glasses",
   "item.byteblock.gps_tool": "GPS Location Tool",
   "item.byteblock.robot_spawn_egg": "Robot",
+  "item.byteblock.unicycle_robot_spawn_egg": "Unicycle Robot",
   "item.byteblock.drone_spawn_egg": "Drone",
   "entity.byteblock.drone": "Drone",
-  "entity.byteblock.robot": "Robot"
+  "entity.byteblock.robot": "Robot",
+  "entity.byteblock.unicycle_robot": "Unicycle Robot"
 }
