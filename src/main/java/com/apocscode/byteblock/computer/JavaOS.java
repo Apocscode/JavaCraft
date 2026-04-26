@@ -818,6 +818,16 @@ public class JavaOS {
     public boolean isBooting() { return state == State.BOOT; }
     public boolean isShutdown() { return state == State.SHUTDOWN; }
 
+    /**
+     * True when a foreground user program (i.e. not the shell/desktop) is actively running.
+     * Used by entity renderers to recolor the robot's eyes green while a script executes.
+     */
+    public boolean isProgramRunning() {
+        return state == State.RUNNING
+                && foregroundProgram != null
+                && foregroundProgram.isRunning();
+    }
+
     // Clipboard (program → system)
     private String clipboard;
     private String clipboardOut;

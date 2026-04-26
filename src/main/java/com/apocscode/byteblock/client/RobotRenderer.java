@@ -28,8 +28,10 @@ import java.util.WeakHashMap;
  */
 public class RobotRenderer extends EntityRenderer<RobotEntity> {
 
+    // Pure 1×1 white texture so the per-quad vertex colors come through cleanly
+    // (the previous terminal.png caused visible UV artifacts across faces).
     private static final ResourceLocation TEXTURE =
-            ResourceLocation.fromNamespaceAndPath("byteblock", "textures/block/terminal.png");
+            ResourceLocation.withDefaultNamespace("textures/misc/white.png");
 
     /** Per-entity tread phase (in lug-spacings). Persists between frames so motion is smooth. */
     private static final WeakHashMap<RobotEntity, float[]> PHASE = new WeakHashMap<>();
@@ -184,11 +186,15 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
                 240, 242, 248, packedLight);
 
         // === FACE ===
-        // Cyan eyes
+        // Eyes: blue idle, green while a user program is running.
+        boolean programRunning = entity.getOS() != null && entity.getOS().isProgramRunning();
+        int eyeR = programRunning ?  60 :  40;
+        int eyeG = programRunning ? 255 : 220;
+        int eyeB = programRunning ? 100 : 255;
         drawBox(vc, mat, last, -0.15f, 0.82f, -0.21f, -0.06f, 0.92f, -0.20f,
-                40, 220, 255, packedLight);
+                eyeR, eyeG, eyeB, packedLight);
         drawBox(vc, mat, last, 0.06f, 0.82f, -0.21f, 0.15f, 0.92f, -0.20f,
-                40, 220, 255, packedLight);
+                eyeR, eyeG, eyeB, packedLight);
         // Mouth grille
         drawBox(vc, mat, last, -0.12f, 0.75f, -0.21f, 0.12f, 0.79f, -0.20f,
                 50, 50, 55, packedLight);
@@ -235,9 +241,18 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
         float lEyeCx = x0 + w * 0.30f + jitter;
         float rEyeCx = x0 + w * 0.70f + jitter;
         // Cyan eyes (bright when open, near-flat line when blinking).
-        int er = blinking ? 30 : 80;
-        int eg = blinking ? 200 : 240;
-        int eb = blinking ? 220 : 255;
+        // Green tint while a user program is running.
+        boolean programRunning = entity.getOS() != null && entity.getOS().isProgramRunning();
+        int er, eg, eb;
+        if (programRunning) {
+            er = blinking ?  40 :  60;
+            eg = blinking ? 200 : 255;
+            eb = blinking ?  90 : 100;
+        } else {
+            er = blinking ? 30 : 80;
+            eg = blinking ? 200 : 240;
+            eb = blinking ? 220 : 255;
+        }
         drawBox(vc, mat, last, lEyeCx - eyeW * 0.5f, eyeY0, screenZ,
                 lEyeCx + eyeW * 0.5f, eyeY1, screenZ + 0.001f,
                 er, eg, eb, light);

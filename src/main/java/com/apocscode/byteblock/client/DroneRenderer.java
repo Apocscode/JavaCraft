@@ -21,7 +21,7 @@ import org.joml.Matrix4f;
 public class DroneRenderer extends EntityRenderer<DroneEntity> {
 
     private static final ResourceLocation TEXTURE =
-            ResourceLocation.fromNamespaceAndPath("byteblock", "textures/block/terminal.png");
+            ResourceLocation.withDefaultNamespace("textures/misc/white.png");
 
     public DroneRenderer(EntityRendererProvider.Context context) {
         super(context);
