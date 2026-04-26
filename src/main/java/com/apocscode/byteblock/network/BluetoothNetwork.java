@@ -60,6 +60,12 @@ public class BluetoothNetwork {
     private static final Map<UUID, GpsEntry> gpsDevices = new ConcurrentHashMap<>();
 
     /**
+     * ByteChest label registry — deviceId → player-defined label.
+     * Empty / missing entries fall back to the default chest name.
+     */
+    private static final Map<UUID, String> chestLabels = new ConcurrentHashMap<>();
+
+    /**
      * Redstone signal cache: blockPos hash -> side -> power level (0-15).
      * Computers write here; the ComputerBlockEntity reads it for block updates.
      */
@@ -384,6 +390,73 @@ public class BluetoothNetwork {
             }
         }
         return nearest;
+    }
+
+    // --- ByteChest labels ---
+
+    /** Update the label for a ByteChest deviceId (empty string clears). */
+    public static void setChestLabel(UUID deviceId, String label) {
+        if (deviceId == null) return;
+        if (label == null || label.isEmpty()) chestLabels.remove(deviceId);
+        else chestLabels.put(deviceId, label);
+    }
+
+    /** Lookup the label for a ByteChest deviceId; "" if unset. */
+    public static String getChestLabel(UUID deviceId) {
+        if (deviceId == null) return "";
+        String s = chestLabels.get(deviceId);
+        return s == null ? "" : s;
+    }
+
+    /**
+     * Find the nearest ByteChest position with the given label (case-insensitive)
+     * within {@code range} blocks of {@code from} in the same dimension. Null if none.
+     */
+    public static BlockPos findChestPosByLabel(Level level, BlockPos from, int range, String label) {
+        if (level == null || label == null || label.isEmpty()) return null;
+        String dim = level.dimension().location().toString();
+        List<DeviceEntry> dimDevices = devices.getOrDefault(dim, List.of());
+        long rangeSq = (long) range * range;
+        BlockPos nearest = null;
+        double nearestDist = Double.MAX_VALUE;
+        synchronized (dimDevices) {
+            for (DeviceEntry d : dimDevices) {
+                if (d.type != DeviceType.BYTE_CHEST) continue;
+                String l = chestLabels.get(d.deviceId);
+                if (l == null || !l.equalsIgnoreCase(label)) continue;
+                double dist = d.pos.distSqr(from);
+                if (dist < nearestDist && dist <= rangeSq) {
+                    nearestDist = dist;
+                    nearest = d.pos;
+                }
+            }
+        }
+        return nearest;
+    }
+
+    /** Snapshot record for {@link #listLabeledChests}. */
+    public record LabeledChest(UUID deviceId, BlockPos pos, String label) {}
+
+    /**
+     * List every ByteChest in {@code range} of {@code from} (same dimension), labeled or not.
+     * Returned positions are sorted nearest-first.
+     */
+    public static List<LabeledChest> listLabeledChests(Level level, BlockPos from, int range) {
+        if (level == null) return List.of();
+        String dim = level.dimension().location().toString();
+        List<DeviceEntry> dimDevices = devices.getOrDefault(dim, List.of());
+        long rangeSq = (long) range * range;
+        List<LabeledChest> result = new ArrayList<>();
+        synchronized (dimDevices) {
+            for (DeviceEntry d : dimDevices) {
+                if (d.type != DeviceType.BYTE_CHEST) continue;
+                if (d.pos.distSqr(from) > rangeSq) continue;
+                String l = chestLabels.getOrDefault(d.deviceId, "");
+                result.add(new LabeledChest(d.deviceId, d.pos, l));
+            }
+        }
+        result.sort(Comparator.comparingDouble(c -> c.pos().distSqr(from)));
+        return result;
     }
 
     // --- Redstone Output ---

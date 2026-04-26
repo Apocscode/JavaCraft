@@ -62,9 +62,19 @@ public class ByteChestBlock extends Block implements EntityBlock {
                 : null;
     }
 
-    /** Right-click opens the 27-slot chest GUI. */
+    /** Right-click opens the 27-slot chest GUI; shift+right-click (empty hand) opens the rename UI. */
     @Override
     protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hitResult) {
+        boolean shiftRename = player.isShiftKeyDown() && player.getMainHandItem().isEmpty();
+        if (shiftRename) {
+            if (level.isClientSide()) {
+                BlockEntity be = level.getBlockEntity(pos);
+                String current = (be instanceof ByteChestBlockEntity chest) ? chest.getLabel() : "";
+                net.minecraft.client.Minecraft.getInstance().setScreen(
+                        new com.apocscode.byteblock.client.ByteChestRenameScreen(pos, current));
+            }
+            return InteractionResult.sidedSuccess(level.isClientSide());
+        }
         if (!level.isClientSide()) {
             BlockEntity be = level.getBlockEntity(pos);
             if (be instanceof ByteChestBlockEntity chest) {

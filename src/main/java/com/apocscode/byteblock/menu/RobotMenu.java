@@ -48,14 +48,18 @@ public class RobotMenu extends AbstractContainerMenu {
         addSlot(new EntitySlot(robot::getBatteryStack, robot::setBatteryStack,
                 s -> s.isEmpty() || s.getCapability(Capabilities.EnergyStorage.ITEM) != null,
                 8, 72));
+        // GPS Tool   (slot 19) — accessory column, y=54 (between right tool and battery)
+        addSlot(new EntitySlot(robot::getGpsToolStack, robot::setGpsToolStack,
+                s -> s.isEmpty() || s.getItem() instanceof com.apocscode.byteblock.item.GpsToolItem,
+                8, 54));
 
-        // Player inventory rows (slots 19..45)
+        // Player inventory rows (slots 20..46)
         for (int row = 0; row < 3; row++) {
             for (int col = 0; col < 9; col++) {
                 addSlot(new Slot(playerInv, col + row * 9 + 9, 8 + col * 18, 104 + row * 18));
             }
         }
-        // Hotbar (slots 46..54)
+        // Hotbar (slots 47..55)
         for (int col = 0; col < 9; col++) {
             addSlot(new Slot(playerInv, col, 8 + col * 18, 162));
         }
@@ -90,19 +94,22 @@ public class RobotMenu extends AbstractContainerMenu {
         ItemStack copy = stack.copy();
 
         final int cargoEnd     = CARGO_SLOTS;        // 16
-        final int accessoryEnd = cargoEnd + 3;       // 19
-        final int playerEnd    = accessoryEnd + 36;  // 55
+        final int accessoryEnd = cargoEnd + 4;       // 20 (3 tools/battery + 1 gps)
+        final int playerEnd    = accessoryEnd + 36;  // 56
 
         if (index < accessoryEnd) {
             // Robot -> player
             if (!moveItemStackTo(stack, accessoryEnd, playerEnd, true)) return ItemStack.EMPTY;
         } else {
-            // Player -> robot.  Try battery slot first if it's an FE item.
-            if (stack.getCapability(Capabilities.EnergyStorage.ITEM) != null
-                    && !moveItemStackTo(stack, accessoryEnd - 1, accessoryEnd, false)) {
+            // Player -> robot.  GPS tool first, then battery if FE, then cargo.
+            if (stack.getItem() instanceof com.apocscode.byteblock.item.GpsToolItem
+                    && moveItemStackTo(stack, accessoryEnd - 1, accessoryEnd, false)) {
+                // moved into GPS slot
+            } else if (stack.getCapability(Capabilities.EnergyStorage.ITEM) != null
+                    && !moveItemStackTo(stack, accessoryEnd - 2, accessoryEnd - 1, false)) {
                 // fall through
             }
-            if (!moveItemStackTo(stack, 0, cargoEnd, false)) return ItemStack.EMPTY;
+            if (!stack.isEmpty() && !moveItemStackTo(stack, 0, cargoEnd, false)) return ItemStack.EMPTY;
         }
         if (stack.isEmpty()) slot.set(ItemStack.EMPTY);
         else slot.setChanged();

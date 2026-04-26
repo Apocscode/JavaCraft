@@ -93,11 +93,13 @@ public class RobotScreen extends AbstractContainerScreen<RobotMenu> {
         // Accessory column (left)
         renderSlotBg(gui, x + 7, y + 17);  // left tool
         renderSlotBg(gui, x + 7, y + 35);  // right tool
-        renderSlotBg(gui, x + 7, y + 71);  // battery (gap = upgrade row reserved)
+        renderSlotBg(gui, x + 7, y + 53);  // GPS tool
+        renderSlotBg(gui, x + 7, y + 71);  // battery
 
         // Tool labels
         gui.drawString(font, "L", x + 26, y + 22, 0xFF404040, false);
         gui.drawString(font, "R", x + 26, y + 40, 0xFF404040, false);
+        gui.drawString(font, "G", x + 26, y + 58, 0xFF404040, false);
         gui.drawString(font, "FE", x + 26, y + 76, 0xFF404040, false);
 
         // Energy bar — right side of cargo grid

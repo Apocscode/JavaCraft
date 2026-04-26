@@ -58,6 +58,7 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
     private ItemStack equippedTool = ItemStack.EMPTY;       // LEFT hand (legacy field name kept for NBT back-compat)
     private ItemStack equippedToolRight = ItemStack.EMPTY;  // RIGHT hand (Phase 3)
     private ItemStack batteryStack = ItemStack.EMPTY;       // Battery / FE-storage upgrade slot
+    private ItemStack gpsToolStack = ItemStack.EMPTY;       // GPS Tool slot — programs read its NBT (B1)
     // dedicated tool slot (pick/axe/shovel/sword/shears)
     private final Queue<String> commandQueue = new LinkedList<>();
     private EnergyStorage energyStorage;
@@ -407,6 +408,32 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
             handleNavCommand(cmd);
             return;
         }
+        // Label-based chest navigation: goto_chest:Iron Storage  /  route_chest:Input:Output  /  gps:run
+        if (cmd.startsWith("goto_chest:")) {
+            String label = cmd.substring("goto_chest:".length());
+            BlockPos target = com.apocscode.byteblock.network.BluetoothNetwork
+                    .findChestPosByLabel(level(), blockPosition(), 256, label);
+            if (target != null) handleNavCommand("goto:" + target.getX() + ":" + target.getY() + ":" + target.getZ());
+            return;
+        }
+        if (cmd.startsWith("route_chest:")) {
+            String[] p = cmd.split(":", 3);
+            if (p.length >= 3) {
+                BlockPos src = com.apocscode.byteblock.network.BluetoothNetwork
+                        .findChestPosByLabel(level(), blockPosition(), 256, p[1]);
+                BlockPos dst = com.apocscode.byteblock.network.BluetoothNetwork
+                        .findChestPosByLabel(level(), blockPosition(), 256, p[2]);
+                if (src != null && dst != null) {
+                    handleNavCommand("route:" + src.getX() + ":" + src.getY() + ":" + src.getZ()
+                            + ":" + dst.getX() + ":" + dst.getY() + ":" + dst.getZ());
+                }
+            }
+            return;
+        }
+        if ("gps:run".equals(cmd)) {
+            runGpsToolStack();
+            return;
+        }
         switch (cmd) {
             case "forward" -> moveForward();
             case "back" -> moveBack();
@@ -476,6 +503,41 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
                 }
             }
         } catch (NumberFormatException ignored) { }
+    }
+
+    /**
+     * Read the GPS-Tool stack equipped in the robot's GPS slot and queue the
+     * appropriate nav command for its current mode. Used by Lua's
+     * {@code gps_tool.run()} and the {@code gps:run} command.
+     */
+    private void runGpsToolStack() {
+        ItemStack stack = gpsToolStack;
+        if (stack.isEmpty() || !(stack.getItem() instanceof com.apocscode.byteblock.item.GpsToolItem)) return;
+        com.apocscode.byteblock.item.GpsToolItem.Mode mode =
+                com.apocscode.byteblock.item.GpsToolItem.getMode(stack);
+        BlockPos a = com.apocscode.byteblock.item.GpsToolItem.getA(stack);
+        BlockPos b = com.apocscode.byteblock.item.GpsToolItem.getB(stack);
+        java.util.List<BlockPos> path = com.apocscode.byteblock.item.GpsToolItem.getPath(stack);
+        switch (mode) {
+            case WAYPOINT -> { if (a != null) handleNavCommand("goto:" + a.getX() + ":" + a.getY() + ":" + a.getZ()); }
+            case ROUTE -> {
+                if (a != null && b != null) handleNavCommand(
+                        "route:" + a.getX() + ":" + a.getY() + ":" + a.getZ()
+                        + ":" + b.getX() + ":" + b.getY() + ":" + b.getZ());
+            }
+            case AREA -> {
+                if (a != null && b != null) handleNavCommand(
+                        "patrol:" + a.getX() + ":" + a.getY() + ":" + a.getZ()
+                        + ":" + b.getX() + ":" + b.getY() + ":" + b.getZ());
+            }
+            case PATH -> {
+                if (!path.isEmpty()) {
+                    StringBuilder sb = new StringBuilder("path");
+                    for (BlockPos p : path) sb.append(':').append(p.getX()).append(':').append(p.getY()).append(':').append(p.getZ());
+                    handleNavCommand(sb.toString());
+                }
+            }
+        }
     }
 
     /**
@@ -905,6 +967,9 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
     public void setEquippedToolRight(ItemStack stack) { this.equippedToolRight = stack; }
     public void setBatteryStack(ItemStack stack) { this.batteryStack = stack; }
 
+    public ItemStack getGpsToolStack() { return gpsToolStack; }
+    public void setGpsToolStack(ItemStack stack) { this.gpsToolStack = stack == null ? ItemStack.EMPTY : stack; }
+
     /**
      * Pick the better mining tool for {@code state} from either hand. Empty hand if neither
      * is set. Higher destroy speed wins; ties favor the LEFT slot.
@@ -1029,6 +1094,9 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
         if (!batteryStack.isEmpty()) {
             tag.put("Battery", batteryStack.save(level().registryAccess()));
         }
+        if (!gpsToolStack.isEmpty()) {
+            tag.put("GpsTool", gpsToolStack.save(level().registryAccess()));
+        }
     }
 
     @Override
@@ -1069,6 +1137,10 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
         }
         if (tag.contains("Battery")) {
             batteryStack = ItemStack.parse(level().registryAccess(), tag.getCompound("Battery"))
+                    .orElse(ItemStack.EMPTY);
+        }
+        if (tag.contains("GpsTool")) {
+            gpsToolStack = ItemStack.parse(level().registryAccess(), tag.getCompound("GpsTool"))
                     .orElse(ItemStack.EMPTY);
         }
     }

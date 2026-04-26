@@ -65,12 +65,13 @@ public final class GpsToolOverlay {
                 if (a != null) drawBox(pose, lines, a, 0.00f, 0.80f, 1.00f, 0.9f);
             }
             case ROUTE -> {
-                if (a != null) drawBox(pose, lines, a, 0.15f, 0.85f, 0.15f, 0.9f);
-                if (b != null) drawBox(pose, lines, b, 0.90f, 0.15f, 0.15f, 0.9f);
+                // A = input  (green frame), B = output (blue frame), connector cyan.
+                if (a != null) drawBox(pose, lines, a, 0.15f, 0.95f, 0.20f, 0.9f);
+                if (b != null) drawBox(pose, lines, b, 0.15f, 0.55f, 1.00f, 0.9f);
                 if (a != null && b != null) drawLine(pose, lines,
                         a.getX() + 0.5, a.getY() + 0.5, a.getZ() + 0.5,
                         b.getX() + 0.5, b.getY() + 0.5, b.getZ() + 0.5,
-                        1.0f, 1.0f, 0.4f, 0.8f);
+                        0.30f, 0.85f, 0.95f, 0.8f);
             }
             case AREA -> {
                 if (a != null && b != null) drawAabb(pose, lines, a, b, 1.0f, 0.80f, 0.0f, 0.8f);

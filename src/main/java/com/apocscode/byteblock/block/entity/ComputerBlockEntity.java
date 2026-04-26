@@ -177,6 +177,21 @@ public class ComputerBlockEntity extends BlockEntity implements IButtonPanel {
     public boolean isPowered() { return powered; }
     public void setPowered(boolean powered) { this.powered = powered; setChanged(); }
 
+    /**
+     * Write a GPS-tool route JSON snapshot into this computer's virtual
+     * filesystem at /gps/route.json. Creates /gps if needed.
+     */
+    public void writeGpsRoute(String json) {
+        if (os == null || os.getFileSystem() == null) return;
+        try {
+            if (!os.getFileSystem().exists("/gps")) {
+                os.getFileSystem().mkdir("/gps");
+            }
+        } catch (Throwable ignored) {}
+        os.getFileSystem().writeFile("/gps/route.json", json == null ? "{}" : json);
+        setChanged();
+    }
+
     // ── IButtonPanel implementation ──────────────────────────────────────────
 
     @Override public int getButtonStates() { return buttonStates; }

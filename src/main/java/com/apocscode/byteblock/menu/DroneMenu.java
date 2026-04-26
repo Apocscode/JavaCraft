@@ -40,8 +40,12 @@ public class DroneMenu extends AbstractContainerMenu {
         addSlot(new EntitySlot(drone::getBatteryStack, drone::setBatteryStack,
                 s -> s.isEmpty() || s.getCapability(Capabilities.EnergyStorage.ITEM) != null,
                 8, 36));
+        // GPS Tool (slot 10)
+        addSlot(new EntitySlot(drone::getGpsToolStack, drone::setGpsToolStack,
+                s -> s.isEmpty() || s.getItem() instanceof com.apocscode.byteblock.item.GpsToolItem,
+                8, 56));
 
-        // Player inventory rows (slots 10..36)
+        // Player inventory rows (slots 11..37)
         for (int row = 0; row < 3; row++) {
             for (int col = 0; col < 9; col++) {
                 addSlot(new Slot(playerInv, col + row * 9 + 9, 8 + col * 18, 104 + row * 18));
@@ -77,14 +81,16 @@ public class DroneMenu extends AbstractContainerMenu {
         ItemStack copy = stack.copy();
 
         final int cargoEnd     = CARGO_SLOTS;     // 9
-        final int accessoryEnd = cargoEnd + 1;    // 10
+        final int accessoryEnd = cargoEnd + 2;    // 11 (battery + gps)
         final int playerEnd    = accessoryEnd + 36;
 
         if (index < accessoryEnd) {
             if (!moveItemStackTo(stack, accessoryEnd, playerEnd, true)) return ItemStack.EMPTY;
         } else {
-            if (stack.getCapability(Capabilities.EnergyStorage.ITEM) != null) {
-                moveItemStackTo(stack, cargoEnd, accessoryEnd, false);
+            if (stack.getItem() instanceof com.apocscode.byteblock.item.GpsToolItem) {
+                moveItemStackTo(stack, accessoryEnd - 1, accessoryEnd, false);
+            } else if (stack.getCapability(Capabilities.EnergyStorage.ITEM) != null) {
+                moveItemStackTo(stack, cargoEnd, accessoryEnd - 1, false);
             }
             if (!stack.isEmpty() && !moveItemStackTo(stack, 0, cargoEnd, false)) return ItemStack.EMPTY;
         }

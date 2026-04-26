@@ -222,6 +222,8 @@ public class LuaRuntime {
         installSpeakerAPI();
         installGlassesAPI();
         installCCExtensions();
+        installChestAPI();
+        installGpsToolAPI();
     }
 
     private void installTermAPI() {
@@ -6743,5 +6745,167 @@ public class LuaRuntime {
 
     private static void skipWs(String s, int[] idx) {
         while (idx[0] < s.length() && Character.isWhitespace(s.charAt(idx[0]))) idx[0]++;
+    }
+
+    // ------------------------------------------------------------------
+    // chest.* — discover & address ByteChests by their player-defined label.
+    //   chest.find(label)      -> {x=,y=,z=,id=}  | nil
+    //   chest.list([range])    -> { {label=,x=,y=,z=,id=}, ... } sorted nearest
+    //   chest.go(label)        -> robot.queueCommand("goto_chest:"..label)
+    //   chest.route(in, out)   -> robot.queueCommand("route_chest:"..in..":"..out)
+    // ------------------------------------------------------------------
+    private void installChestAPI() {
+        LuaTable chest = new LuaTable();
+
+        chest.set("find", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                String label = args.optjstring(1, "");
+                int range = args.optint(2, 256);
+                if (os.getLevel() == null || os.getBlockPos() == null || label.isEmpty()) return LuaValue.NIL;
+                net.minecraft.core.BlockPos p = com.apocscode.byteblock.network.BluetoothNetwork
+                        .findChestPosByLabel(os.getLevel(), os.getBlockPos(), range, label);
+                if (p == null) return LuaValue.NIL;
+                LuaTable t = new LuaTable();
+                t.set("x", LuaValue.valueOf(p.getX()));
+                t.set("y", LuaValue.valueOf(p.getY()));
+                t.set("z", LuaValue.valueOf(p.getZ()));
+                return t;
+            }
+        });
+
+        chest.set("list", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                int range = args.optint(1, 64);
+                LuaTable out = new LuaTable();
+                if (os.getLevel() == null || os.getBlockPos() == null) return out;
+                java.util.List<com.apocscode.byteblock.network.BluetoothNetwork.LabeledChest> list =
+                        com.apocscode.byteblock.network.BluetoothNetwork
+                                .listLabeledChests(os.getLevel(), os.getBlockPos(), range);
+                int i = 1;
+                for (var c : list) {
+                    LuaTable e = new LuaTable();
+                    e.set("label", LuaValue.valueOf(c.label() == null ? "" : c.label()));
+                    e.set("x", LuaValue.valueOf(c.pos().getX()));
+                    e.set("y", LuaValue.valueOf(c.pos().getY()));
+                    e.set("z", LuaValue.valueOf(c.pos().getZ()));
+                    e.set("id", LuaValue.valueOf(c.deviceId().toString()));
+                    out.set(i++, e);
+                }
+                return out;
+            }
+        });
+
+        chest.set("go", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue v) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                r.queueCommand("goto_chest:" + v.tojstring());
+                return LuaValue.TRUE;
+            }
+        });
+
+        chest.set("route", new TwoArgFunction() {
+            @Override public LuaValue call(LuaValue in, LuaValue out) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                r.queueCommand("route_chest:" + in.tojstring() + ":" + out.tojstring());
+                return LuaValue.TRUE;
+            }
+        });
+
+        globals.set("chest", chest);
+    }
+
+    // ------------------------------------------------------------------
+    // gps_tool.* — read the GPS Tool stack equipped in the robot's GPS slot,
+    // or (for non-robot computers) the most-recent gps_tool:* broadcast on
+    // Bluetooth channel 9100. Returns nil when no source is available.
+    //   gps_tool.read()  -> {mode=, a=, b=, path=, inputLabel=, outputLabel=}
+    //   gps_tool.run()   -> queues nav for the robot using its slotted GPS tool
+    //   gps_tool.clear() -> empties the robot's GPS slot
+    //   gps_tool.last()  -> latest broadcast received on channel 9100 (or nil)
+    // ------------------------------------------------------------------
+    private void installGpsToolAPI() {
+        LuaTable gt = new LuaTable();
+
+        gt.set("read", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.NIL;
+                net.minecraft.world.item.ItemStack stack = r.getGpsToolStack();
+                if (stack == null || stack.isEmpty()
+                        || !(stack.getItem() instanceof com.apocscode.byteblock.item.GpsToolItem)) return LuaValue.NIL;
+                return gpsStackToTable(stack);
+            }
+        });
+
+        gt.set("run", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                r.queueCommand("gps:run");
+                return LuaValue.TRUE;
+            }
+        });
+
+        gt.set("clear", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                r.setGpsToolStack(net.minecraft.world.item.ItemStack.EMPTY);
+                return LuaValue.TRUE;
+            }
+        });
+
+        gt.set("last", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                // Prefer the most recent in-memory broadcast captured on channel 9100.
+                if (os != null) {
+                    String s = os.getLastGpsToolBroadcast();
+                    if (s != null) return LuaValue.valueOf(s);
+                }
+                if (lastGpsToolBroadcast != null) return LuaValue.valueOf(lastGpsToolBroadcast);
+                // Otherwise fall back to /gps/route.json uploaded by the player (B2).
+                if (os != null && os.getFileSystem() != null && os.getFileSystem().exists("/gps/route.json")) {
+                    String content = os.getFileSystem().readFile("/gps/route.json");
+                    if (content != null) return LuaValue.valueOf(content);
+                }
+                return LuaValue.NIL;
+            }
+        });
+
+        globals.set("gps_tool", gt);
+    }
+
+    /** Most recent gps_tool:* JSON payload received on Bluetooth channel 9100. */
+    private volatile String lastGpsToolBroadcast = null;
+
+    /** Hook called by the bluetooth event pump to capture gps_tool:* broadcasts. */
+    public void onGpsToolBroadcast(String json) { this.lastGpsToolBroadcast = json; }
+
+    private LuaValue gpsStackToTable(net.minecraft.world.item.ItemStack stack) {
+        com.apocscode.byteblock.item.GpsToolItem.Mode mode =
+                com.apocscode.byteblock.item.GpsToolItem.getMode(stack);
+        net.minecraft.core.BlockPos a = com.apocscode.byteblock.item.GpsToolItem.getA(stack);
+        net.minecraft.core.BlockPos b = com.apocscode.byteblock.item.GpsToolItem.getB(stack);
+        java.util.List<net.minecraft.core.BlockPos> path = com.apocscode.byteblock.item.GpsToolItem.getPath(stack);
+        LuaTable t = new LuaTable();
+        t.set("mode", LuaValue.valueOf(mode.name()));
+        t.set("a", a == null ? LuaValue.NIL : posToTable(a));
+        t.set("b", b == null ? LuaValue.NIL : posToTable(b));
+        LuaTable lp = new LuaTable();
+        for (int i = 0; i < path.size(); i++) lp.set(i + 1, posToTable(path.get(i)));
+        t.set("path", lp);
+        t.set("inputLabel", LuaValue.valueOf(com.apocscode.byteblock.item.GpsToolItem.getInputLabel(stack)));
+        t.set("outputLabel", LuaValue.valueOf(com.apocscode.byteblock.item.GpsToolItem.getOutputLabel(stack)));
+        return t;
+    }
+
+    private static LuaValue posToTable(net.minecraft.core.BlockPos p) {
+        LuaTable t = new LuaTable();
+        t.set("x", LuaValue.valueOf(p.getX()));
+        t.set("y", LuaValue.valueOf(p.getY()));
+        t.set("z", LuaValue.valueOf(p.getZ()));
+        return t;
     }
 }

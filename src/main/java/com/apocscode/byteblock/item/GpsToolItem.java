@@ -139,6 +139,69 @@ public class GpsToolItem extends Item {
         writeTag(stack, tag);
     }
 
+    /** Stash a chest label associated with the green/input frame (route src or waypoint). */
+    public static void setInputLabel(ItemStack stack, String label) {
+        CompoundTag tag = readTag(stack);
+        if (label == null || label.isEmpty()) tag.remove("InputLabel");
+        else tag.putString("InputLabel", label);
+        writeTag(stack, tag);
+    }
+
+    /** Stash a chest label associated with the blue/output frame (route dst). */
+    public static void setOutputLabel(ItemStack stack, String label) {
+        CompoundTag tag = readTag(stack);
+        if (label == null || label.isEmpty()) tag.remove("OutputLabel");
+        else tag.putString("OutputLabel", label);
+        writeTag(stack, tag);
+    }
+
+    public static String getInputLabel(ItemStack stack) {
+        return readTag(stack).getString("InputLabel");
+    }
+
+    public static String getOutputLabel(ItemStack stack) {
+        return readTag(stack).getString("OutputLabel");
+    }
+
+    /**
+     * Serialize the GPS tool's NBT into a compact JSON string for upload to a
+     * computer's filesystem and for wireless broadcasts. Schema:
+     *   { "mode":"ROUTE", "a":{x,y,z}|null, "b":{x,y,z}|null,
+     *     "path":[{x,y,z},...], "inputLabel":"", "outputLabel":"" }
+     */
+    public static String serializeJson(ItemStack stack) {
+        StringBuilder sb = new StringBuilder(256);
+        Mode m = getMode(stack);
+        BlockPos a = getA(stack), b = getB(stack);
+        List<BlockPos> path = getPath(stack);
+        sb.append('{');
+        sb.append("\"mode\":\"").append(m.name()).append('"');
+        sb.append(",\"a\":");   appendPosJson(sb, a);
+        sb.append(",\"b\":");   appendPosJson(sb, b);
+        sb.append(",\"path\":[");
+        for (int i = 0; i < path.size(); i++) {
+            if (i > 0) sb.append(',');
+            appendPosJson(sb, path.get(i));
+        }
+        sb.append(']');
+        sb.append(",\"inputLabel\":\"").append(escape(getInputLabel(stack))).append('"');
+        sb.append(",\"outputLabel\":\"").append(escape(getOutputLabel(stack))).append('"');
+        sb.append('}');
+        return sb.toString();
+    }
+
+    private static void appendPosJson(StringBuilder sb, BlockPos p) {
+        if (p == null) { sb.append("null"); return; }
+        sb.append("{\"x\":").append(p.getX())
+          .append(",\"y\":").append(p.getY())
+          .append(",\"z\":").append(p.getZ()).append('}');
+    }
+
+    private static String escape(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
     public static void clearCurrentModeData(ItemStack stack) {
         CompoundTag tag = readTag(stack);
         Mode m = Mode.fromOrdinal(tag.getInt("Mode"));
@@ -146,12 +209,15 @@ public class GpsToolItem extends Item {
             case WAYPOINT -> {
                 tag.remove("X"); tag.remove("Y"); tag.remove("Z");
                 tag.putBoolean("HasA", false);
+                tag.remove("InputLabel");
             }
             case ROUTE, AREA -> {
                 tag.remove("X"); tag.remove("Y"); tag.remove("Z");
                 tag.remove("BX"); tag.remove("BY"); tag.remove("BZ");
                 tag.putBoolean("HasA", false);
                 tag.putBoolean("HasB", false);
+                tag.remove("InputLabel");
+                tag.remove("OutputLabel");
             }
             case PATH -> tag.remove("Path");
         }
@@ -175,23 +241,51 @@ public class GpsToolItem extends Item {
         ItemStack stack = context.getItemInHand();
         BlockPos pos = context.getClickedPos();
 
-        if (level.isClientSide()) return InteractionResult.SUCCESS;
         if (player == null) return InteractionResult.PASS;
+
+        // ── Computer block: upload current GPS data to /gps/route.json (B2 + B3 broadcast) ──
+        var blockState = level.getBlockState(pos);
+        if (blockState.getBlock() instanceof com.apocscode.byteblock.block.ComputerBlock) {
+            if (level.isClientSide()) {
+                String json = serializeJson(stack);
+                net.neoforged.neoforge.network.PacketDistributor.sendToServer(
+                        new com.apocscode.byteblock.network.UploadGpsToComputerPayload(pos, json));
+                feedback(player, "GPS route → /gps/route.json (BT ch 9100)", ChatFormatting.AQUA);
+            }
+            return InteractionResult.SUCCESS;
+        }
+
+        if (level.isClientSide()) return InteractionResult.SUCCESS;
+
+        // ── ByteChest: also capture its label so robots can resolve by name ──
+        String chestLabel = null;
+        if (level.getBlockEntity(pos) instanceof com.apocscode.byteblock.block.entity.ByteChestBlockEntity chest) {
+            String l = chest.getLabel();
+            if (!l.isEmpty()) chestLabel = l;
+        }
 
         Mode mode = getMode(stack);
         switch (mode) {
             case WAYPOINT -> {
                 setA(stack, pos);
-                feedback(player, "Waypoint set: " + formatPos(pos), ChatFormatting.AQUA);
+                if (chestLabel != null) setInputLabel(stack, chestLabel);
+                feedback(player, "Waypoint set: "
+                        + (chestLabel != null ? "\"" + chestLabel + "\" " : "") + formatPos(pos),
+                        ChatFormatting.AQUA);
             }
             case ROUTE -> {
                 if (!readTag(stack).getBoolean("HasA")) {
                     setA(stack, pos);
-                    feedback(player, "Route source: " + formatPos(pos), ChatFormatting.GREEN);
+                    if (chestLabel != null) setInputLabel(stack, chestLabel);
+                    feedback(player, "Input (green): "
+                            + (chestLabel != null ? "\"" + chestLabel + "\" " : "") + formatPos(pos),
+                            ChatFormatting.GREEN);
                 } else {
                     setB(stack, pos);
-                    feedback(player, "Route destination: " + formatPos(pos)
-                            + "  (shift+R-click drone/robot to apply)", ChatFormatting.RED);
+                    if (chestLabel != null) setOutputLabel(stack, chestLabel);
+                    feedback(player, "Output (blue): "
+                            + (chestLabel != null ? "\"" + chestLabel + "\" " : "") + formatPos(pos)
+                            + "  (shift+R-click drone/robot to apply)", ChatFormatting.BLUE);
                 }
             }
             case AREA -> {
@@ -248,6 +342,11 @@ public class GpsToolItem extends Item {
     }
 
     private void applyToDrone(Player player, ItemStack stack, DroneEntity drone) {
+        // B1: store a copy of the GPS tool on the drone so programs can read it later.
+        drone.setGpsToolStack(stack.copy());
+        // B3: also drop the full payload on channel 9100 so any listening program sees it.
+        BluetoothNetwork.broadcast(drone.level(), drone.blockPosition(), 9100,
+                "gps_tool:" + serializeJson(stack));
         Mode mode = getMode(stack);
         BlockPos a = getA(stack), b = getB(stack);
         List<BlockPos> path = getPath(stack);
@@ -283,6 +382,12 @@ public class GpsToolItem extends Item {
     }
 
     private void applyToRobot(Player player, ItemStack stack, RobotEntity robot) {
+        // Stash the route in the robot's GPS-tool slot (B1) so its programs can read it later.
+        robot.setGpsToolStack(stack.copy());
+        // Wireless broadcast on channel 9100 (B3): any nearby program listening picks it up.
+        BluetoothNetwork.broadcast(robot.level(), robot.blockPosition(), 9100,
+                "gps_tool:" + serializeJson(stack));
+
         Mode mode = getMode(stack);
         BlockPos a = getA(stack), b = getB(stack);
         List<BlockPos> path = getPath(stack);
@@ -349,7 +454,7 @@ public class GpsToolItem extends Item {
             }
             case ROUTE -> {
                 if (a != null) tooltip.add(Component.literal("  Src: " + formatPos(a)).withStyle(ChatFormatting.GREEN));
-                if (b != null) tooltip.add(Component.literal("  Dst: " + formatPos(b)).withStyle(ChatFormatting.RED));
+                if (b != null) tooltip.add(Component.literal("  Dst: " + formatPos(b)).withStyle(ChatFormatting.BLUE));
             }
             case AREA -> {
                 if (a != null) tooltip.add(Component.literal("  C1: " + formatPos(a)).withStyle(ChatFormatting.YELLOW));
@@ -363,7 +468,10 @@ public class GpsToolItem extends Item {
         tooltip.add(Component.empty());
         tooltip.add(Component.literal("Shift + Scroll: cycle mode").withStyle(ChatFormatting.DARK_GRAY));
         tooltip.add(Component.literal("R-click block: set point").withStyle(ChatFormatting.DARK_GRAY));
+        tooltip.add(Component.literal("R-click ByteChest: capture label").withStyle(ChatFormatting.DARK_GRAY));
+        tooltip.add(Component.literal("R-click Computer: upload to /gps/route.json").withStyle(ChatFormatting.DARK_GRAY));
         tooltip.add(Component.literal("Shift + R-click drone/robot: apply").withStyle(ChatFormatting.DARK_GRAY));
         tooltip.add(Component.literal("Shift + R-click air: clear").withStyle(ChatFormatting.DARK_GRAY));
+        tooltip.add(Component.literal("Broadcast on BT ch 9100").withStyle(ChatFormatting.DARK_AQUA));
     }
 }

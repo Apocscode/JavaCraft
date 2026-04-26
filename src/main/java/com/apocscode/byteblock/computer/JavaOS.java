@@ -37,6 +37,8 @@ public class JavaOS {
     private String label;
     private int bluetoothChannel;
     private float textScale = 2.0f;
+    /** Last gps_tool:* JSON payload received on channel 9100 (without the prefix). Null if none. */
+    private volatile String lastGpsToolBroadcast = null;
 
     // Drive mount system — maps drive letters (D, E, ...) to detected drives
     private final Map<Character, DriveBlockEntity> mountedDrives = new LinkedHashMap<>();
@@ -572,6 +574,10 @@ public class JavaOS {
         while (msg != null) {
             double dist = msg.senderPos() != null ? Math.sqrt(msg.senderPos().distSqr(new net.minecraft.core.BlockPos(0, 0, 0))) : 0;
             String senderId = msg.senderId() != null ? msg.senderId().toString() : "";
+            // B3: capture gps_tool:* broadcasts so gps_tool.last() can return them.
+            if (msg.channel() == 9100 && msg.content() != null && msg.content().startsWith("gps_tool:")) {
+                this.lastGpsToolBroadcast = msg.content().substring("gps_tool:".length());
+            }
             pushEvent(new OSEvent(OSEvent.Type.BLUETOOTH, msg.channel(), msg.content(), senderId));
             msg = BluetoothNetwork.receive(computerId);
         }
@@ -751,7 +757,8 @@ public class JavaOS {
     public PixelBuffer getPixelBuffer() { return pixelBuffer; }
     public VirtualFileSystem getFileSystem() { return fileSystem; }
     public UUID getComputerId() { return computerId; }
-    public State getState() { return state; }
+    /** Last gps_tool:* JSON broadcast received on channel 9100, or null. */
+    public String getLastGpsToolBroadcast() { return lastGpsToolBroadcast; }    public State getState() { return state; }
     public long getTickCount() { return tickCount; }
 
     public String getLabel() { return label; }

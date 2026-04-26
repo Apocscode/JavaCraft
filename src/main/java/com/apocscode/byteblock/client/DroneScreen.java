@@ -89,6 +89,8 @@ public class DroneScreen extends AbstractContainerScreen<DroneMenu> {
         // Battery
         renderSlotBg(gui, x + 7, y + 35);
         gui.drawString(font, "FE", x + 26, y + 40, 0xFF404040, false);
+        renderSlotBg(gui, x + 7, y + 55);
+        gui.drawString(font, "G", x + 26, y + 60, 0xFF404040, false);
 
         // Fuel bar
         int barX = x + 138, barY = y + 17, barW = 10, barH = 54;

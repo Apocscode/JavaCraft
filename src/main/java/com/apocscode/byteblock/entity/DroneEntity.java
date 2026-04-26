@@ -62,6 +62,7 @@ public class DroneEntity extends PathfinderMob implements net.minecraft.world.Me
     private int hoverDrainCounter = 0;
     private final SimpleContainer inventory = new SimpleContainer(9);
     private ItemStack batteryStack = ItemStack.EMPTY;
+    private ItemStack gpsToolStack = ItemStack.EMPTY;
     private BlockPos homePos = null;
     private boolean defender = false;  // attack nearby hostiles if true
     private int attackCooldown = 0;
@@ -506,6 +507,8 @@ public class DroneEntity extends PathfinderMob implements net.minecraft.world.Me
     public void addFuel(int ticks) { this.fuelTicks = Math.min(fuelTicks + ticks, MAX_FUEL); }
     public ItemStack getBatteryStack() { return batteryStack; }
     public void setBatteryStack(ItemStack stack) { this.batteryStack = stack; }
+    public ItemStack getGpsToolStack() { return gpsToolStack; }
+    public void setGpsToolStack(ItemStack stack) { this.gpsToolStack = stack == null ? ItemStack.EMPTY : stack; }
 
     /** Pull FE from any battery item in the upgrade slot, converting it into fuel ticks (10 FE = 1 tick). */
     private void tickBatteryDrain() {
@@ -656,6 +659,9 @@ public class DroneEntity extends PathfinderMob implements net.minecraft.world.Me
         if (!batteryStack.isEmpty()) {
             tag.put("Battery", batteryStack.save(level().registryAccess()));
         }
+        if (!gpsToolStack.isEmpty()) {
+            tag.put("GpsTool", gpsToolStack.save(level().registryAccess()));
+        }
     }
 
     @Override
@@ -687,6 +693,10 @@ public class DroneEntity extends PathfinderMob implements net.minecraft.world.Me
         }
         if (tag.contains("Battery")) {
             batteryStack = ItemStack.parse(level().registryAccess(), tag.getCompound("Battery"))
+                    .orElse(ItemStack.EMPTY);
+        }
+        if (tag.contains("GpsTool")) {
+            gpsToolStack = ItemStack.parse(level().registryAccess(), tag.getCompound("GpsTool"))
                     .orElse(ItemStack.EMPTY);
         }
     }
