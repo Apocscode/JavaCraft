@@ -17,77 +17,98 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Screen for the Charging Station. Shows current FE level (gradient bar matching the
- * robot/drone screens) and a scrolling list of compatible FE-providing neighbours
- * (covers any mod's cables, batteries, generators that expose the FE block cap).
+ * Screen for the Charging Station. Self-contained — no player-inventory display.
+ * Shows current FE level (gradient bar matching the robot/drone screens) and a
+ * compact list of compatible FE-providing neighbours.
  */
 public class ChargingStationScreen extends AbstractContainerScreen<ChargingStationMenu> {
 
-    private static final int MAX_FE = 100_000;
-
     public ChargingStationScreen(ChargingStationMenu menu, Inventory playerInv, Component title) {
         super(menu, playerInv, title);
-        this.imageWidth = 176;
-        this.imageHeight = 224;
-        this.inventoryLabelY = this.imageHeight - 94;
+        this.imageWidth = 220;
+        this.imageHeight = 160;
+        // Hide default labels (we draw everything ourselves).
+        this.titleLabelX = -9999;
+        this.titleLabelY = -9999;
+        this.inventoryLabelX = -9999;
+        this.inventoryLabelY = -9999;
     }
 
     @Override
     protected void renderBg(GuiGraphics gui, float partialTick, int mouseX, int mouseY) {
-        int x = leftPos, y = topPos;
-        // Vanilla-ish background.
-        gui.fill(x, y, x + imageWidth, y + imageHeight, 0xFFC6C6C6);
-        gui.fill(x, y, x + imageWidth, y + 1, 0xFFFFFFFF);
-        gui.fill(x, y, x + 1, y + imageHeight, 0xFFFFFFFF);
-        gui.fill(x + imageWidth - 1, y, x + imageWidth, y + imageHeight, 0xFF555555);
-        gui.fill(x, y + imageHeight - 1, x + imageWidth, y + imageHeight, 0xFF555555);
+        int x = leftPos, y = topPos, w = imageWidth, h = imageHeight;
 
-        // Title pad.
-        gui.drawString(this.font, this.title, x + 8, y + 6, 0x404040, false);
+        // Window background + bevel.
+        gui.fill(x, y, x + w, y + h, 0xFF1E1E22);
+        gui.fill(x + 1, y + 1, x + w - 1, y + 2, 0xFF3A3A40);
+        gui.fill(x + 1, y + 1, x + 2, y + h - 1, 0xFF3A3A40);
+        gui.fill(x + 1, y + h - 2, x + w - 1, y + h - 1, 0xFF101012);
+        gui.fill(x + w - 2, y + 1, x + w - 1, y + h - 1, 0xFF101012);
 
-        // ---- Gradient FE bar (vertical, on the left) ----
-        int barX = x + 14, barY = y + 22, barW = 14, barH = 50;
-        gui.fill(barX - 1, barY - 1, barX + barW + 1, barY + barH + 1, 0xFF222222);
-        gui.fill(barX, barY, barX + barW, barY + barH, 0xFF373737);
+        // Title bar.
+        gui.fill(x + 2, y + 2, x + w - 2, y + 14, 0xFF2A2A30);
+        gui.drawString(this.font, Component.literal("Charging Station"),
+                x + 6, y + 4, 0xFFE0E0E0, false);
+
         int stored = menu.getStation().getEnergyStored();
         int max = Math.max(1, menu.getStation().getMaxEnergy());
-        int pct = stored * barH / max;
-        for (int i = 0; i < pct; i++) {
+
+        // Vertical gradient FE bar on left.
+        int barX = x + 10, barY = y + 22, barW = 16, barH = 120;
+        gui.fill(barX - 1, barY - 1, barX + barW + 1, barY + barH + 1, 0xFF000000);
+        gui.fill(barX, barY, barX + barW, barY + barH, 0xFF222226);
+        int fill = stored * barH / max;
+        for (int i = 0; i < fill; i++) {
             float frac = i / (float) barH;
             int color = RobotScreen.chargeColor(frac);
             int yRow = barY + barH - 1 - i;
             gui.fill(barX + 1, yRow, barX + barW - 1, yRow + 1, color);
         }
-        // Numeric readout.
-        String pctText = (stored * 100 / max) + "%";
-        String feText = formatFE(stored) + " / " + formatFE(max) + " FE";
-        gui.drawString(this.font, pctText, x + 36, y + 24, 0x202020, false);
-        gui.drawString(this.font, feText, x + 36, y + 36, 0x404040, false);
 
-        // ---- Compatible neighbour list ----
-        gui.drawString(this.font, Component.literal("Connected sources:"), x + 8, y + 78, 0x404040, false);
+        // Numeric readouts.
+        int textX = barX + barW + 8;
+        int pct = (int) (stored * 100L / max);
+        gui.drawString(this.font, Component.literal(pct + "%"),
+                textX, y + 22, 0xFFFFFFFF, false);
+        gui.drawString(this.font, Component.literal(formatFE(stored) + " / " + formatFE(max) + " FE"),
+                textX, y + 34, 0xFFB0B0B0, false);
+        gui.drawString(this.font, Component.literal("Input:  1000 FE/t"),
+                textX, y + 50, 0xFF80B0FF, false);
+        gui.drawString(this.font, Component.literal("Output: 200 FE/t"),
+                textX, y + 60, 0xFF80FFB0, false);
+
+        // Compatible neighbour list.
+        int listX = textX;
+        int listY = y + 78;
+        gui.drawString(this.font, Component.literal("Connected sources:"),
+                listX, listY, 0xFFE0E0E0, false);
+        listY += 11;
+
         List<NeighbourInfo> neighbours = scanNeighbours();
-        int rowY = y + 90;
         if (neighbours.isEmpty()) {
-            gui.drawString(this.font, Component.literal("  (none — place an FE source adjacent)"),
-                    x + 8, rowY, 0x808080, false);
+            gui.drawString(this.font, Component.literal("(none — place FE"),
+                    listX, listY, 0xFF808080, false);
+            gui.drawString(this.font, Component.literal(" source adjacent)"),
+                    listX, listY + 10, 0xFF808080, false);
         } else {
-            for (NeighbourInfo n : neighbours) {
-                if (rowY > y + 130) break;
-                int color = n.canExtract() ? 0xFF20A040 : 0xFF808080;
-                gui.fill(x + 8, rowY + 1, x + 12, rowY + 9, color);
-                String text = n.dirLabel() + ": " + n.kind() + (n.canExtract() ? " ✓" : " (no output)");
-                gui.drawString(this.font, text, x + 16, rowY + 1, 0x202020, false);
-                rowY += 11;
+            int rows = Math.min(neighbours.size(), 5);
+            for (int i = 0; i < rows; i++) {
+                NeighbourInfo n = neighbours.get(i);
+                int color = n.canExtract() ? 0xFF40D060 : 0xFF707070;
+                gui.fill(listX, listY + 1, listX + 4, listY + 9, color);
+                String name = n.shortName();
+                int maxChars = 22;
+                if (name.length() > maxChars) name = name.substring(0, maxChars - 1) + "…";
+                gui.drawString(this.font, Component.literal(n.dirLabel() + " " + name),
+                        listX + 8, listY + 1, 0xFFD0D0D0, false);
+                listY += 10;
             }
         }
     }
 
     @Override
     protected void renderLabels(GuiGraphics gui, int mouseX, int mouseY) {
-        // Suppress default title at top-left of slots area.
-        gui.drawString(this.font, this.playerInventoryTitle,
-                this.inventoryLabelX, this.inventoryLabelY, 0x404040, false);
+        // Suppressed — drawn in renderBg.
     }
 
     @Override
@@ -95,19 +116,19 @@ public class ChargingStationScreen extends AbstractContainerScreen<ChargingStati
         renderBackground(gui, mouseX, mouseY, partialTick);
         super.render(gui, mouseX, mouseY, partialTick);
 
-        // Tooltip on the FE bar.
-        int barX = leftPos + 14, barY = topPos + 22, barW = 14, barH = 50;
+        int barX = leftPos + 10, barY = topPos + 22, barW = 16, barH = 120;
         if (mouseX >= barX && mouseX < barX + barW && mouseY >= barY && mouseY < barY + barH) {
             int stored = menu.getStation().getEnergyStored();
             int max = menu.getStation().getMaxEnergy();
-            gui.renderTooltip(this.font, Component.literal(stored + " / " + max + " FE"), mouseX, mouseY);
+            gui.renderTooltip(this.font,
+                    Component.literal(stored + " / " + max + " FE"),
+                    mouseX, mouseY);
         }
-        renderTooltip(gui, mouseX, mouseY);
     }
 
     private static String formatFE(int v) {
-        if (v >= 1_000_000) return (v / 1_000_000) + "M";
-        if (v >= 1_000) return (v / 1_000) + "k";
+        if (v >= 1_000_000) return String.format("%.1fM", v / 1_000_000.0);
+        if (v >= 1_000) return String.format("%.1fk", v / 1_000.0);
         return Integer.toString(v);
     }
 
@@ -123,8 +144,8 @@ public class ChargingStationScreen extends AbstractContainerScreen<ChargingStati
             IEnergyStorage cap = lvl.getCapability(
                     Capabilities.EnergyStorage.BLOCK, n, d.getOpposite());
             if (cap == null) continue;
-            String kind = be.getType().builtInRegistryHolder().key().location().toString();
-            out.add(new NeighbourInfo(d, kind, cap.canExtract()));
+            String id = be.getType().builtInRegistryHolder().key().location().toString();
+            out.add(new NeighbourInfo(d, id, cap.canExtract()));
         }
         return out;
     }
@@ -132,13 +153,18 @@ public class ChargingStationScreen extends AbstractContainerScreen<ChargingStati
     private record NeighbourInfo(Direction dir, String kind, boolean canExtract) {
         String dirLabel() {
             return switch (dir) {
-                case UP -> "Top";
-                case DOWN -> "Btm";
+                case UP -> "U";
+                case DOWN -> "D";
                 case NORTH -> "N";
                 case SOUTH -> "S";
                 case EAST -> "E";
                 case WEST -> "W";
             };
+        }
+        String shortName() {
+            int colon = kind.indexOf(':');
+            String name = colon >= 0 ? kind.substring(colon + 1) : kind;
+            return name.replace('_', ' ');
         }
     }
 }

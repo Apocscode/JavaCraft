@@ -89,6 +89,10 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
     // Low-battery homing — when energy < 5%, robot pathfinds to nearest charging pad.
     private BlockPos cachedChargingPad = null;
     private int chargingPadScanCooldown = 0;
+    // Stuck detection while homing.
+    private double homingLastX, homingLastZ;
+    private int homingStuckTicks = 0;
+    private int homingRepathCooldown = 0;
 
     public RobotEntity(EntityType<? extends RobotEntity> type, Level level) {
         super(type, level);
@@ -102,6 +106,18 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
                 .add(Attributes.MAX_HEALTH, 30.0)
                 .add(Attributes.MOVEMENT_SPEED, 0.2)
                 .add(Attributes.ATTACK_DAMAGE, 3.0);
+    }
+
+    @Override
+    protected net.minecraft.world.entity.ai.navigation.PathNavigation createNavigation(Level level) {
+        net.minecraft.world.entity.ai.navigation.GroundPathNavigation nav =
+                new net.minecraft.world.entity.ai.navigation.GroundPathNavigation(this, level);
+        nav.setCanOpenDoors(true);
+        nav.setCanPassDoors(true);
+        nav.setCanFloat(true); // float in water rather than drowning while pathing
+        // Allow a wider search radius so the robot can navigate complex bases.
+        nav.setMaxVisitedNodesMultiplier(4.0f);
+        return nav;
     }
 
     @Override
@@ -221,33 +237,115 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
         boolean low = em > 0 && (e * 100 / em) < 5;
         if (!low) {
             cachedChargingPad = null;
+            homingStuckTicks = 0;
+            homingRepathCooldown = 0;
             return;
         }
         // Don't override active scripted nav.
         if (!commandQueue.isEmpty() || routeActive || patrolActive || navTarget != null) return;
 
         if (chargingPadScanCooldown > 0) chargingPadScanCooldown--;
+        if (homingRepathCooldown > 0) homingRepathCooldown--;
+
         // Validate cached pad still exists and is in range.
         if (cachedChargingPad != null) {
             BlockState st = level().getBlockState(cachedChargingPad);
             if (!(st.getBlock() instanceof com.apocscode.byteblock.block.ChargingStationBlock)) {
                 cachedChargingPad = null;
-            } else if (cachedChargingPad.distSqr(blockPosition()) > 80 * 80) {
+            } else if (cachedChargingPad.distSqr(blockPosition()) > 96 * 96) {
                 cachedChargingPad = null;
             }
         }
         if (cachedChargingPad == null && chargingPadScanCooldown <= 0) {
-            cachedChargingPad = findNearestChargingPad(32);
-            chargingPadScanCooldown = 100; // 5s between scans when nothing found
+            cachedChargingPad = findNearestChargingPad(64);
+            chargingPadScanCooldown = 100;
         }
-        if (cachedChargingPad != null) {
-            // Path to the pad each second so we recover from getting stuck.
-            if (level().getGameTime() % 20 == 0) {
-                getNavigation().moveTo(cachedChargingPad.getX() + 0.5,
-                        cachedChargingPad.getY() + 0.2,
-                        cachedChargingPad.getZ() + 0.5, 1.0);
+        if (cachedChargingPad == null) return;
+
+        // Stuck detection: if XZ position barely changed, retry / nudge / teleport.
+        double dx = getX() - homingLastX;
+        double dz = getZ() - homingLastZ;
+        homingLastX = getX();
+        homingLastZ = getZ();
+        boolean moving = (dx * dx + dz * dz) > 0.0025; // > 0.05 blocks/tick
+        if (moving) {
+            homingStuckTicks = 0;
+        } else {
+            homingStuckTicks++;
+        }
+
+        // Push neighbouring entities out of the way (so other robots/mobs don't block us).
+        if (homingStuckTicks > 0 && homingStuckTicks % 10 == 0) {
+            net.minecraft.world.phys.AABB box = getBoundingBox().inflate(0.4);
+            for (net.minecraft.world.entity.Entity other : level().getEntities(this, box)) {
+                if (other.isPushable()) {
+                    double pdx = other.getX() - getX();
+                    double pdz = other.getZ() - getZ();
+                    double len = Math.sqrt(pdx * pdx + pdz * pdz);
+                    if (len < 0.01) { pdx = 0.5; pdz = 0; len = 0.5; }
+                    other.push(pdx / len * 0.3, 0.0, pdz / len * 0.3);
+                }
             }
         }
+
+        // Jump-assist: solid block in front and air above? Try a hop.
+        if (homingStuckTicks > 20 && homingStuckTicks % 10 == 0 && onGround()) {
+            Direction facing = Direction.getNearest((float) (cachedChargingPad.getX() + 0.5 - getX()),
+                    0f,
+                    (float) (cachedChargingPad.getZ() + 0.5 - getZ()));
+            BlockPos front = blockPosition().relative(facing);
+            BlockState frontState = level().getBlockState(front);
+            BlockState aboveFront = level().getBlockState(front.above());
+            if (!frontState.isAir() && aboveFront.isAir()) {
+                getJumpControl().jump();
+            }
+        }
+
+        // Re-path each second, or sooner if stuck.
+        boolean shouldRepath = level().getGameTime() % 20 == 0
+                || (homingStuckTicks >= 40 && homingRepathCooldown <= 0)
+                || getNavigation().isDone();
+        if (shouldRepath) {
+            getNavigation().moveTo(cachedChargingPad.getX() + 0.5,
+                    cachedChargingPad.getY() + 0.2,
+                    cachedChargingPad.getZ() + 0.5, 1.0);
+            homingRepathCooldown = 20;
+        }
+
+        // Last-resort: stuck for 15s and have line-of-sight clearance? Short teleport hop.
+        if (homingStuckTicks >= 300 && level() instanceof ServerLevel sl) {
+            BlockPos here = blockPosition();
+            BlockPos target = cachedChargingPad;
+            double tdx = target.getX() - here.getX();
+            double tdz = target.getZ() - here.getZ();
+            double tlen = Math.sqrt(tdx * tdx + tdz * tdz);
+            if (tlen > 0.5) {
+                int hopX = here.getX() + (int) Math.round(tdx / tlen * 4);
+                int hopZ = here.getZ() + (int) Math.round(tdz / tlen * 4);
+                BlockPos hopPos = findStandableY(sl, hopX, here.getY(), hopZ);
+                if (hopPos != null) {
+                    teleportTo(hopPos.getX() + 0.5, hopPos.getY(), hopPos.getZ() + 0.5);
+                    homingStuckTicks = 0;
+                }
+            }
+        }
+    }
+
+    /** Find a Y near {@code yHint} at (x,z) where the robot can stand (air feet+head, solid floor). */
+    private static BlockPos findStandableY(net.minecraft.world.level.LevelReader lr, int x, int yHint, int z) {
+        for (int dy = 0; dy <= 6; dy++) {
+            for (int sign : new int[] { 0, -1, 1 }) {
+                int y = yHint + dy * sign;
+                BlockPos foot = new BlockPos(x, y, z);
+                if (lr.getBlockState(foot).isAir()
+                        && lr.getBlockState(foot.above()).isAir()
+                        && !lr.getBlockState(foot.below()).isAir()) {
+                    return foot;
+                }
+                if (sign == 0) break;
+            }
+        }
+        return null;
     }
 
     private BlockPos findNearestChargingPad(int radius) {
