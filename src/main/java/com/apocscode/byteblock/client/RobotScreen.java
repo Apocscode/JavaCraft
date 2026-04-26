@@ -2,9 +2,11 @@ package com.apocscode.byteblock.client;
 
 import com.apocscode.byteblock.menu.RobotMenu;
 import com.apocscode.byteblock.network.SetEntityLabelPayload;
+import com.apocscode.byteblock.network.SetEntityMutePayload;
 
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Checkbox;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
@@ -49,6 +51,15 @@ public class RobotScreen extends AbstractContainerScreen<RobotMenu> {
             .pos(leftPos + imageWidth - 44, topPos + 2)
             .size(40, 14)
             .build());
+
+        // Mute toggle — sends C2S each time the box flips state.
+        Checkbox mute = Checkbox.builder(Component.literal("Mute"), this.font)
+            .pos(leftPos + 4, topPos + imageHeight - 14)
+            .selected(menu.getRobot().isMuted())
+            .onValueChange((cb, sel) -> PacketDistributor.sendToServer(
+                new SetEntityMutePayload(menu.getRobot().getId(), sel)))
+            .build();
+        addRenderableWidget(mute);
     }
 
     @Override

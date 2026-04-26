@@ -43,6 +43,7 @@ public class ByteBlock {
         ModEntities.ENTITIES.register(modEventBus);
         ModCreativeTabs.TABS.register(modEventBus);
         ModMenuTypes.MENUS.register(modEventBus);
+        com.apocscode.byteblock.init.ModSounds.SOUNDS.register(modEventBus);
 
         // Entity attributes
         modEventBus.addListener(this::registerEntityAttributes);
@@ -132,6 +133,11 @@ public class ByteBlock {
             com.apocscode.byteblock.network.EntityPaintSyncPayload.TYPE,
             com.apocscode.byteblock.network.EntityPaintSyncPayload.STREAM_CODEC,
             com.apocscode.byteblock.network.EntityPaintSyncPayload::handle
+        );
+        registrar.playToServer(
+            com.apocscode.byteblock.network.SetEntityMutePayload.TYPE,
+            com.apocscode.byteblock.network.SetEntityMutePayload.STREAM_CODEC,
+            com.apocscode.byteblock.network.SetEntityMutePayload::handle
         );
     }
     private void registerEntityAttributes(EntityAttributeCreationEvent event) {

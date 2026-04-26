@@ -83,6 +83,8 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
     private int nextChirpTick = 120;
     private int chirpBurstRemaining = 0;
     private int chirpBurstNextTick = 0;
+    /** When true, suppress voice chirps and tool sounds. */
+    private boolean muted = false;
 
     // Charging state — incremented by ChargingStationBlockEntity each tick of contact;
     // counts down here, so isCharging() returns true for ~1s after last contact.
@@ -368,38 +370,44 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
         return best;
     }
 
-    /**
-     * Periodically emit a short burst of randomly-pitched note-block sounds to give
-     * the robot an R2D2-like voice. Bursts contain 2..5 notes spaced 3..6 ticks apart.
-     * Only runs server-side; clients hear it via {@link Level#playSound}.
-     */
+    /** Periodically emit a short burst of robot voice samples (R1/R2 talk) for character. */
     private void tickChirps() {
+        if (muted) return;
         // Currently in a burst — keep emitting notes.
         if (chirpBurstRemaining > 0) {
             if (--chirpBurstNextTick <= 0) {
                 playChirp();
                 chirpBurstRemaining--;
-                chirpBurstNextTick = 3 + random.nextInt(4); // 3..6 ticks between notes
+                chirpBurstNextTick = 8 + random.nextInt(8); // 8..15 ticks between samples
             }
             return;
         }
         // Between bursts — count down to next one.
         if (--nextChirpTick > 0) return;
-        chirpBurstRemaining = 2 + random.nextInt(4); // 2..5 notes
+        chirpBurstRemaining = 1 + random.nextInt(2); // 1..2 samples per burst
         chirpBurstNextTick = 0;
-        nextChirpTick = 80 + random.nextInt(160);     // 4..12s until next burst
+        nextChirpTick = 160 + random.nextInt(240);    // 8..20s until next burst
     }
 
-    /** Play one random-pitch note (NOTE_BLOCK_BIT for the digital "beep"). */
+    /** Play one R1 or R2 voice clip at a slightly randomised pitch. */
     private void playChirp() {
         if (level() == null || level().isClientSide()) return;
-        // Pitch range 0.6..2.0 covers the squeaky/grumbly R2 character.
-        float pitch = 0.6f + random.nextFloat() * 1.4f;
-        // Alternate between "BIT" (square) and "PLING" (chime) for variety.
+        // Pitch range 0.85..1.15 keeps the clip recognisable but varied.
+        float pitch = 0.85f + random.nextFloat() * 0.30f;
         SoundEvent voice = random.nextBoolean()
-                ? SoundEvents.NOTE_BLOCK_BIT.value()
-                : SoundEvents.NOTE_BLOCK_PLING.value();
-        level().playSound(null, blockPosition(), voice, SoundSource.NEUTRAL, 0.35f, pitch);
+                ? com.apocscode.byteblock.init.ModSounds.ROBOT_R2_TALK.get()
+                : com.apocscode.byteblock.init.ModSounds.ROBOT_R1_TALK.get();
+        level().playSound(null, blockPosition(), voice, SoundSource.NEUTRAL, 0.5f, pitch);
+    }
+
+    /** Play the R2 hand-tool whir for dig/place/attack actions. */
+    private void playHandtoolSound() {
+        if (muted) return;
+        if (level() == null || level().isClientSide()) return;
+        float pitch = 0.9f + random.nextFloat() * 0.2f;
+        level().playSound(null, blockPosition(),
+                com.apocscode.byteblock.init.ModSounds.ROBOT_R2_HANDTOOL.get(),
+                SoundSource.NEUTRAL, 0.4f, pitch);
     }
 
     private void executeCommand(String cmd) {
@@ -457,6 +465,12 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
             case "suck" -> suck(blockPosition().relative(facing));
             case "suckUp" -> suck(blockPosition().above());
             case "suckDown" -> suck(blockPosition().below());
+        }
+
+        // Hand-tool whir for any tool action (dig/place/attack/drop/suck).
+        if (cmd.startsWith("dig") || cmd.startsWith("place") || cmd.startsWith("attack")
+                || cmd.startsWith("drop") || cmd.startsWith("suck")) {
+            playHandtoolSound();
         }
     }
 
@@ -975,6 +989,9 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
     public com.apocscode.byteblock.entity.EntityPaint getPaint() { return paint; }
     public void setPaint(com.apocscode.byteblock.entity.EntityPaint p) { this.paint = p == null ? new com.apocscode.byteblock.entity.EntityPaint() : p; }
 
+    public boolean isMuted() { return muted; }
+    public void setMuted(boolean m) { this.muted = m; }
+
     /**
      * Pick the better mining tool for {@code state} from either hand. Empty hand if neither
      * is set. Higher destroy speed wins; ties favor the LEFT slot.
@@ -1103,6 +1120,7 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
             tag.put("GpsTool", gpsToolStack.save(level().registryAccess()));
         }
         if (!paint.isEmpty()) tag.put("Paint", paint.save());
+        tag.putBoolean("Muted", muted);
     }
 
     @Override
@@ -1150,6 +1168,7 @@ public class RobotEntity extends PathfinderMob implements net.minecraft.world.Me
                     .orElse(ItemStack.EMPTY);
         }
         if (tag.contains("Paint")) paint = com.apocscode.byteblock.entity.EntityPaint.load(tag.getCompound("Paint"));
+        if (tag.contains("Muted")) muted = tag.getBoolean("Muted");
     }
 
     // --- MenuProvider ---

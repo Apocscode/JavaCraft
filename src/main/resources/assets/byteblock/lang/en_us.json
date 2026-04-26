@@ -1,6 +1,9 @@
 {
   "itemGroup.byteblock": "ByteBlock",
 
+  "byteblock.subtitle.robot.talk": "Robot beeps",
+  "byteblock.subtitle.robot.handtool": "Robot tool whirs",
+
   "block.byteblock.computer": "Computer Terminal",
   "block.byteblock.peripheral": "Universal Peripheral",
   "block.byteblock.gps": "GPS Beacon",

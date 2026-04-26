@@ -1,0 +1,17 @@
+{
+  "robot.r1_talk": {
+    "category": "neutral",
+    "subtitle": "byteblock.subtitle.robot.talk",
+    "sounds": [ { "name": "byteblock:r1_talk", "stream": false } ]
+  },
+  "robot.r2_talk": {
+    "category": "neutral",
+    "subtitle": "byteblock.subtitle.robot.talk",
+    "sounds": [ { "name": "byteblock:r2_talk", "stream": false } ]
+  },
+  "robot.r2_handtool": {
+    "category": "neutral",
+    "subtitle": "byteblock.subtitle.robot.handtool",
+    "sounds": [ { "name": "byteblock:r2_handtool", "stream": false } ]
+  }
+}
