@@ -30,7 +30,7 @@ import java.util.WeakHashMap;
 public class UnicycleRobotRenderer extends EntityRenderer<UnicycleRobotEntity> {
 
     private static final ResourceLocation TEXTURE =
-            ResourceLocation.withDefaultNamespace("textures/block/iron_block.png");
+            ResourceLocation.fromNamespaceAndPath("byteblock", "textures/block/terminal.png");
 
     /** Per-entity smoothed state: {wheelAngleDeg, leanDeg}. */
     private static final WeakHashMap<UnicycleRobotEntity, float[]> STATE = new WeakHashMap<>();

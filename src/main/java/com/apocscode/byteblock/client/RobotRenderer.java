@@ -29,7 +29,7 @@ import java.util.WeakHashMap;
 public class RobotRenderer extends EntityRenderer<RobotEntity> {
 
     private static final ResourceLocation TEXTURE =
-            ResourceLocation.withDefaultNamespace("textures/block/iron_block.png");
+            ResourceLocation.fromNamespaceAndPath("byteblock", "textures/block/terminal.png");
 
     /** Per-entity tread phase (in lug-spacings). Persists between frames so motion is smooth. */
     private static final WeakHashMap<RobotEntity, float[]> PHASE = new WeakHashMap<>();
