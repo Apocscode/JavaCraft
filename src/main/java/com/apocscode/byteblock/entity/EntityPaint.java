@@ -25,6 +25,10 @@ public final class EntityPaint {
     };
 
     private final Map<String, Integer> slots = new LinkedHashMap<>();
+    /** Face preset key, e.g. "classic", "happy", "custom". Default = "classic". */
+    private String faceId = "classic";
+    /** Custom 8x8 face bitmap (1 bit per pixel, row-major LSB = pixel (0,0)). Used when faceId == "custom". */
+    private long faceBits = 0L;
 
     public EntityPaint() {}
 
@@ -40,25 +44,38 @@ public final class EntityPaint {
         else slots.put(slot, rgb & 0xFFFFFF);
     }
 
-    public boolean isEmpty() { return slots.isEmpty(); }
+    public String getFaceId() { return faceId; }
+    public void setFaceId(String id) { this.faceId = id == null || id.isEmpty() ? "classic" : id; }
+    public long getFaceBits() { return faceBits; }
+    public void setFaceBits(long bits) { this.faceBits = bits; }
+
+    public boolean isEmpty() { return slots.isEmpty() && "classic".equals(faceId) && faceBits == 0L; }
     public Map<String, Integer> view() { return java.util.Collections.unmodifiableMap(slots); }
 
     public CompoundTag save() {
         CompoundTag tag = new CompoundTag();
         for (var e : slots.entrySet()) tag.putInt(e.getKey(), e.getValue());
+        if (faceId != null && !"classic".equals(faceId)) tag.putString("$face", faceId);
+        if (faceBits != 0L) tag.putLong("$faceBits", faceBits);
         return tag;
     }
 
     public static EntityPaint load(CompoundTag tag) {
         EntityPaint p = new EntityPaint();
         if (tag == null) return p;
-        for (String key : tag.getAllKeys()) p.slots.put(key, tag.getInt(key));
+        for (String key : tag.getAllKeys()) {
+            if ("$face".equals(key)) p.faceId = tag.getString(key);
+            else if ("$faceBits".equals(key)) p.faceBits = tag.getLong(key);
+            else p.slots.put(key, tag.getInt(key));
+        }
         return p;
     }
 
     public EntityPaint copy() {
         EntityPaint p = new EntityPaint();
         p.slots.putAll(this.slots);
+        p.faceId = this.faceId;
+        p.faceBits = this.faceBits;
         return p;
     }
 

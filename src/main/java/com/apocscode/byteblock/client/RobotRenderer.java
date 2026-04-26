@@ -207,13 +207,12 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
             int eyeR = programRunning ?  60 : cEye[0];
             int eyeG = programRunning ? 255 : cEye[1];
             int eyeB = programRunning ? 100 : cEye[2];
-            drawBox(vc, mat, last, -0.15f, 0.82f, -0.21f, -0.06f, 0.92f, -0.20f,
-                    eyeR, eyeG, eyeB, packedLight);
-            drawBox(vc, mat, last, 0.06f, 0.82f, -0.21f, 0.15f, 0.92f, -0.20f,
-                    eyeR, eyeG, eyeB, packedLight);
-            // Mouth grille
-            drawBox(vc, mat, last, -0.12f, 0.75f, -0.21f, 0.12f, 0.79f, -0.20f,
-                    50, 50, 55, packedLight);
+            // Pick face bitmap: custom if set, else preset by id (default "classic").
+            String fid = paint.getFaceId();
+            long bits = "custom".equals(fid) ? paint.getFaceBits() : FacePresets.get(fid);
+            renderFaceBitmap(vc, mat, last, packedLight,
+                    -0.20f, 0.74f, 0.20f, 0.98f, -0.205f,
+                    bits, eyeR, eyeG, eyeB);
         }
 
         // === ANTENNA ===
@@ -482,4 +481,31 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
 
     private static int rgb(int r, int g, int b) { return ((r & 0xFF) << 16) | ((g & 0xFF) << 8) | (b & 0xFF); }
     private static int[] unpack(int rgb) { return new int[]{(rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF}; }
+
+    /**
+     * Render an 8x8 face bitmap onto the head's front plane. Bit (y*8 + x) of
+     * {@code bits} = 1 means the pixel at column x, row y is lit (y=0 = bottom).
+     * The plane is bounded in head-local space by [x0..x1] × [y0..y1] at z=zFront.
+     */
+    private static void renderFaceBitmap(VertexConsumer vc, Matrix4f mat, PoseStack.Pose last,
+                                          int packedLight,
+                                          float x0, float y0, float x1, float y1, float zFront,
+                                          long bits, int r, int g, int b) {
+        float pxW = (x1 - x0) / 8f;
+        float pxH = (y1 - y0) / 8f;
+        float depth = 0.005f;
+        for (int y = 0; y < 8; y++) {
+            for (int x = 0; x < 8; x++) {
+                if (((bits >> (y * 8 + x)) & 1L) == 0L) continue;
+                // x in head-local: head's RIGHT is +x; bitmap column 0 is leftmost
+                // pixel viewed from the front, which is head-local +x.
+                float px0 = x0 + x * pxW;
+                float py0 = y0 + y * pxH;
+                drawBox(vc, mat, last,
+                        px0, py0, zFront,
+                        px0 + pxW, py0 + pxH, zFront + depth,
+                        r, g, b, packedLight);
+            }
+        }
+    }
 }

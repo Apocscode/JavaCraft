@@ -2169,6 +2169,39 @@ public class LuaRuntime {
             }
         });
 
+        // robot.setFace(id) — change R2 face preset (server-side, syncs to clients).
+        // Valid ids: classic, happy, smile, angry, sad, sleepy, surprised, cool,
+        // heart, ko, cyclops, r2, pixel_grin, star, question, skull.
+        robot.set("setFace", new OneArgFunction() {
+            @Override
+            public LuaValue call(LuaValue id) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                com.apocscode.byteblock.entity.EntityPaint p = r.getPaint();
+                p.setFaceId(id.tojstring());
+                p.setFaceBits(0L);
+                r.setPaint(p);
+                // Broadcast paint sync to tracking clients.
+                if (r.level() instanceof net.minecraft.server.level.ServerLevel) {
+                    net.neoforged.neoforge.network.PacketDistributor.sendToPlayersTrackingEntity(
+                        r,
+                        new com.apocscode.byteblock.network.EntityPaintSyncPayload(r.getId(), p.save())
+                    );
+                }
+                return LuaValue.TRUE;
+            }
+        });
+
+        // robot.getFace() — returns current face preset id string.
+        robot.set("getFace", new ZeroArgFunction() {
+            @Override
+            public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.NIL;
+                return LuaValue.valueOf(r.getPaint().getFaceId());
+            }
+        });
+
         globals.set("robot", robot);
     }
 

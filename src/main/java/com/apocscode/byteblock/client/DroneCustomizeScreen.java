@@ -7,7 +7,7 @@ import net.minecraft.network.chat.Component;
 
 public class DroneCustomizeScreen extends EntityPaintScreen {
     public DroneCustomizeScreen(DroneEntity entity) {
-        super(entity, entity.getPaint(), EntityPaint.SLOTS_DRONE,
+        super(entity, entity.getPaint(), EntityPaint.SLOTS_DRONE, false,
               Component.literal("Customize Drone"));
     }
 }
