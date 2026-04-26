@@ -184,6 +184,59 @@ public class ByteBlock {
         }
     }
 
+    @SubscribeEvent
+    public void onRegisterCommands(net.neoforged.neoforge.event.RegisterCommandsEvent event) {
+        // /byteblock fspath  → prints the disk-mirror folder for the
+        // computer the player is looking at (or standing on).
+        event.getDispatcher().register(
+            com.mojang.brigadier.builder.LiteralArgumentBuilder
+                .<net.minecraft.commands.CommandSourceStack>literal("byteblock")
+                .then(com.mojang.brigadier.builder.LiteralArgumentBuilder
+                    .<net.minecraft.commands.CommandSourceStack>literal("fspath")
+                    .executes(ctx -> {
+                        var src = ctx.getSource();
+                        var player = src.getPlayer();
+                        if (player == null) {
+                            src.sendFailure(net.minecraft.network.chat.Component.literal("Player only"));
+                            return 0;
+                        }
+                        var level = player.level();
+                        // Find a ComputerBlockEntity within 5 blocks of the player.
+                        net.minecraft.core.BlockPos origin = player.blockPosition();
+                        com.apocscode.byteblock.block.entity.ComputerBlockEntity found = null;
+                        int radius = 5;
+                        outer:
+                        for (int dx = -radius; dx <= radius; dx++) {
+                            for (int dy = -radius; dy <= radius; dy++) {
+                                for (int dz = -radius; dz <= radius; dz++) {
+                                    var pos = origin.offset(dx, dy, dz);
+                                    if (level.getBlockEntity(pos) instanceof
+                                            com.apocscode.byteblock.block.entity.ComputerBlockEntity cbe) {
+                                        found = cbe;
+                                        break outer;
+                                    }
+                                }
+                            }
+                        }
+                        if (found == null) {
+                            src.sendFailure(net.minecraft.network.chat.Component.literal(
+                                "No Computer block within " + radius + " blocks"));
+                            return 0;
+                        }
+                        java.nio.file.Path root = found.getDiskMirrorRoot();
+                        if (root == null) {
+                            src.sendFailure(net.minecraft.network.chat.Component.literal(
+                                "Disk mirror unavailable on this side"));
+                            return 0;
+                        }
+                        String path = root.toAbsolutePath().toString();
+                        src.sendSuccess(() -> net.minecraft.network.chat.Component.literal(
+                            "Computer FS: " + path), false);
+                        return 1;
+                    }))
+        );
+    }
+
     @EventBusSubscriber(modid = MODID, bus = EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
     public static class ClientModEvents {
         @SubscribeEvent

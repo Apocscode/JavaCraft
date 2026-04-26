@@ -47,6 +47,16 @@ public class ComputerBlockEntity extends BlockEntity implements IButtonPanel {
     private String panelLabel = "This Computer";
     private int panelChannel = 1;
 
+    // ── On-disk filesystem mirror ────────────────────────────────────────────
+    /** Last time we polled the disk for external edits (epoch ms). */
+    private long lastDiskPollMs = 0L;
+    /** Last time we pushed VFS contents to disk (epoch ms). */
+    private long lastDiskPushMs = 0L;
+    /** Cached disk root for this computer's mirror dir. */
+    private java.nio.file.Path diskMirrorRoot = null;
+    /** True after the first successful pull from disk on load. */
+    private boolean diskMirrorInitialized = false;
+
     private static final String[] COLOR_NAMES = {
         "White", "Orange", "Magenta", "Light Blue", "Yellow", "Lime",
         "Pink", "Gray", "Light Gray", "Cyan", "Purple", "Blue",
@@ -75,6 +85,26 @@ public class ComputerBlockEntity extends BlockEntity implements IButtonPanel {
         if (level != null && !level.isClientSide() && os.getFileSystem().isDirty()) {
             os.getFileSystem().clearDirty();
             setChanged();
+            // Push freshly-modified VFS contents to the on-disk mirror so
+            // external editors see the changes.
+            pushVfsToDisk();
+        }
+        // Periodically poll the on-disk mirror for external edits and merge
+        // them back into the running OS. Runs every ~2 seconds.
+        if (level != null && !level.isClientSide()) {
+            long now = System.currentTimeMillis();
+            if (!diskMirrorInitialized) {
+                pullVfsFromDisk();
+                pushVfsToDisk(); // seed disk with whatever loaded from NBT
+                diskMirrorInitialized = true;
+            } else if (now - lastDiskPollMs > 2000L) {
+                lastDiskPollMs = now;
+                if (com.apocscode.byteblock.computer.VfsDiskMirror.hasExternalChanges(
+                        getDiskMirrorRoot(), lastDiskPushMs)) {
+                    pullVfsFromDisk();
+                    setChanged();
+                }
+            }
         }
         BluetoothNetwork.register(level, computerId, worldPosition, os.getBluetoothChannel(), BluetoothNetwork.DeviceType.COMPUTER);
 
@@ -176,6 +206,35 @@ public class ComputerBlockEntity extends BlockEntity implements IButtonPanel {
     public UUID getComputerId() { return computerId; }
     public boolean isPowered() { return powered; }
     public void setPowered(boolean powered) { this.powered = powered; setChanged(); }
+
+    // ── Disk-mirror helpers ──────────────────────────────────────────────────
+
+    /**
+     * Resolve and cache the on-disk mirror root for this computer.
+     * Returns null on the client (no save folder).
+     */
+    public java.nio.file.Path getDiskMirrorRoot() {
+        if (diskMirrorRoot != null) return diskMirrorRoot;
+        diskMirrorRoot = com.apocscode.byteblock.computer.VfsDiskMirror.computerDir(level, computerId);
+        return diskMirrorRoot;
+    }
+
+    private void pushVfsToDisk() {
+        if (level == null || level.isClientSide() || os == null) return;
+        java.nio.file.Path root = getDiskMirrorRoot();
+        if (root == null) return;
+        com.apocscode.byteblock.computer.VfsDiskMirror.pushToDisk(os.getFileSystem(), root);
+        lastDiskPushMs = System.currentTimeMillis();
+    }
+
+    private void pullVfsFromDisk() {
+        if (level == null || level.isClientSide() || os == null) return;
+        java.nio.file.Path root = getDiskMirrorRoot();
+        if (root == null) return;
+        com.apocscode.byteblock.computer.VfsDiskMirror.pullFromDisk(os.getFileSystem(), root);
+        os.getFileSystem().clearDirty(); // changes came from disk, don't echo back
+        lastDiskPushMs = System.currentTimeMillis();
+    }
 
     /**
      * Write a GPS-tool route JSON snapshot into this computer's virtual
