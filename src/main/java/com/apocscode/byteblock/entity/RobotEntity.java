@@ -126,6 +126,11 @@ public class RobotEntity extends PathfinderMob {
             case "digUp" -> digUp();
             case "digDown" -> digDown();
             case "place" -> place();
+            case "placeUp" -> placeUp();
+            case "placeDown" -> placeDown();
+            case "attack" -> attack(0);
+            case "attackUp" -> attack(1);
+            case "attackDown" -> attack(-1);
             case "drop" -> drop(blockPosition().relative(facing));
             case "dropUp" -> drop(blockPosition().above());
             case "dropDown" -> drop(blockPosition().below());
@@ -332,8 +337,11 @@ public class RobotEntity extends PathfinderMob {
 
     // --- Placement ---
 
-    private void place() {
-        BlockPos target = blockPosition().relative(facing);
+    private void place() { placeAt(blockPosition().relative(facing)); }
+    private void placeUp() { placeAt(blockPosition().above()); }
+    private void placeDown() { placeAt(blockPosition().below()); }
+
+    private void placeAt(BlockPos target) {
         ItemStack held = inventory.getItem(selectedSlot);
         if (held.isEmpty()) return;
 
@@ -344,6 +352,84 @@ public class RobotEntity extends PathfinderMob {
                 held.shrink(1);
             }
         }
+    }
+
+    // --- Combat ---
+
+    /** Damage the first living entity at the target offset (0=ahead, +1=above, -1=below). */
+    private void attack(int yOffset) {
+        if (!(level() instanceof ServerLevel server)) return;
+        BlockPos target;
+        if (yOffset == 0) target = blockPosition().relative(facing);
+        else if (yOffset > 0) target = blockPosition().above();
+        else target = blockPosition().below();
+        net.minecraft.world.phys.AABB box =
+                new net.minecraft.world.phys.AABB(target).inflate(0.2);
+        java.util.List<net.minecraft.world.entity.LivingEntity> targets =
+                server.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class, box,
+                        e -> e != this && e.isAlive());
+        if (targets.isEmpty()) return;
+        net.minecraft.world.entity.LivingEntity victim = targets.get(0);
+        float damage = 1.0f;
+        if (!equippedTool.isEmpty()) {
+            net.minecraft.world.item.Item it = equippedTool.getItem();
+            if (it instanceof net.minecraft.world.item.SwordItem) damage = 4.0f;
+            else if (it instanceof net.minecraft.world.item.DiggerItem) damage = 2.5f;
+        }
+        victim.hurt(server.damageSources().mobAttack(this), damage);
+        if (!equippedTool.isEmpty() && equippedTool.isDamageableItem()) {
+            equippedTool.hurtAndBreak(1, server, null, it -> equippedTool = ItemStack.EMPTY);
+        }
+    }
+
+    /** Inspect the block at the given offset. Returns null if air, else the BlockState. */
+    public BlockState inspectBlock(int yOffset) {
+        if (level() == null) return null;
+        BlockPos pos;
+        if (yOffset == 0) pos = blockPosition().relative(facing);
+        else if (yOffset > 0) pos = blockPosition().above();
+        else pos = blockPosition().below();
+        BlockState s = level().getBlockState(pos);
+        return s.isAir() ? null : s;
+    }
+
+    /**
+     * Move {@code count} items from {@code srcSlot} into {@code dstSlot}, merging
+     * stacks where possible. Returns the actual number moved.
+     */
+    public int transferTo(int srcSlot, int dstSlot, int count) {
+        if (srcSlot < 0 || srcSlot >= inventory.getContainerSize()) return 0;
+        if (dstSlot < 0 || dstSlot >= inventory.getContainerSize()) return 0;
+        if (srcSlot == dstSlot || count <= 0) return 0;
+        ItemStack src = inventory.getItem(srcSlot);
+        if (src.isEmpty()) return 0;
+        ItemStack dst = inventory.getItem(dstSlot);
+        int moved;
+        if (dst.isEmpty()) {
+            moved = Math.min(count, src.getCount());
+            ItemStack copy = src.copy();
+            copy.setCount(moved);
+            inventory.setItem(dstSlot, copy);
+            src.shrink(moved);
+        } else if (ItemStack.isSameItemSameComponents(src, dst)) {
+            int space = Math.min(dst.getMaxStackSize(), inventory.getMaxStackSize()) - dst.getCount();
+            moved = Math.min(Math.min(count, src.getCount()), space);
+            if (moved <= 0) return 0;
+            dst.grow(moved);
+            src.shrink(moved);
+        } else {
+            return 0;
+        }
+        if (src.isEmpty()) inventory.setItem(srcSlot, ItemStack.EMPTY);
+        return moved;
+    }
+
+    /** Free space remaining in {@code slot} (max stack size minus current count). */
+    public int getItemSpace(int slot) {
+        if (slot < 0 || slot >= inventory.getContainerSize()) return 0;
+        ItemStack s = inventory.getItem(slot);
+        if (s.isEmpty()) return inventory.getMaxStackSize();
+        return Math.min(s.getMaxStackSize(), inventory.getMaxStackSize()) - s.getCount();
     }
 
     // --- Inventory transfer (drop/suck into adjacent containers) ---

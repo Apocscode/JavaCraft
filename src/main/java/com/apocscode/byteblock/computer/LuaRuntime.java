@@ -1698,7 +1698,9 @@ public class LuaRuntime {
 
         // Movement commands
         String[] moves = {"forward", "back", "up", "down", "turnLeft", "turnRight",
-                          "dig", "digUp", "digDown", "place",
+                          "dig", "digUp", "digDown",
+                          "place", "placeUp", "placeDown",
+                          "attack", "attackUp", "attackDown",
                           "drop", "dropUp", "dropDown",
                           "suck", "suckUp", "suckDown"};
         for (String m : moves) {
@@ -1949,8 +1951,159 @@ public class LuaRuntime {
             }
         });
 
+        // ===== CC turtle.* parity additions =====
+
+        // turtle.getFuelLevel()/getFuelLimit() — aliases over our FE energy storage.
+        robot.set("getFuelLevel", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.valueOf(0);
+                return LuaValue.valueOf(r.getEnergyStorage().getEnergyStored());
+            }
+        });
+        robot.set("getFuelLimit", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.valueOf(0);
+                return LuaValue.valueOf(r.getEnergyStorage().getMaxEnergyStored());
+            }
+        });
+
+        // turtle.getItemSpace(slot) — free space in slot (1-indexed).
+        robot.set("getItemSpace", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue slot) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.valueOf(0);
+                return LuaValue.valueOf(r.getItemSpace(slot.checkint() - 1));
+            }
+        });
+
+        // turtle.getItemDetail([slot[, detailed]]) — table of name/count or nil.
+        robot.set("getItemDetail", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.NIL;
+                int s = args.narg() >= 1 ? args.checkint(1) - 1 : r.getSelectedSlot();
+                if (s < 0 || s >= r.getInventory().getContainerSize()) return LuaValue.NIL;
+                net.minecraft.world.item.ItemStack stack = r.getInventory().getItem(s);
+                if (stack.isEmpty()) return LuaValue.NIL;
+                LuaTable t = new LuaTable();
+                t.set("name", LuaValue.valueOf(net.minecraft.core.registries.BuiltInRegistries.ITEM
+                        .getKey(stack.getItem()).toString()));
+                t.set("count", LuaValue.valueOf(stack.getCount()));
+                t.set("displayName", LuaValue.valueOf(stack.getHoverName().getString()));
+                t.set("maxCount", LuaValue.valueOf(stack.getMaxStackSize()));
+                if (stack.isDamageableItem()) {
+                    t.set("damage", LuaValue.valueOf(stack.getDamageValue()));
+                    t.set("maxDamage", LuaValue.valueOf(stack.getMaxDamage()));
+                }
+                return t;
+            }
+        });
+
+        // turtle.transferTo(slot[, count]) — move from selected slot to dest slot.
+        robot.set("transferTo", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                int dst = args.checkint(1) - 1;
+                int count = args.narg() >= 2 ? args.checkint(2) : 64;
+                int moved = r.transferTo(r.getSelectedSlot(), dst, count);
+                return LuaValue.valueOf(moved > 0);
+            }
+        });
+
+        // turtle.compareTo(slot) — compare selected stack with another slot.
+        robot.set("compareTo", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue slot) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                int s = slot.checkint() - 1;
+                if (s < 0 || s >= r.getInventory().getContainerSize()) return LuaValue.FALSE;
+                net.minecraft.world.item.ItemStack a = r.getInventory().getItem(r.getSelectedSlot());
+                net.minecraft.world.item.ItemStack b = r.getInventory().getItem(s);
+                if (a.isEmpty() && b.isEmpty()) return LuaValue.TRUE;
+                if (a.isEmpty() || b.isEmpty()) return LuaValue.FALSE;
+                return LuaValue.valueOf(net.minecraft.world.item.ItemStack.isSameItemSameComponents(a, b));
+            }
+        });
+
+        // turtle.inspect()/inspectUp()/inspectDown() — returns (true, table{name,state}) or (false, "no block").
+        robot.set("inspect", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return inspectAt(0); }
+        });
+        robot.set("inspectUp", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return inspectAt(1); }
+        });
+        robot.set("inspectDown", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) { return inspectAt(-1); }
+        });
+
+        // turtle.getName()/setName() — robot's display label (stored on JavaOS).
+        robot.set("getName", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null || r.getOS() == null) return LuaValue.NIL;
+                String n = r.getOS().getLabel();
+                return (n == null || n.isEmpty()) ? LuaValue.NIL : LuaValue.valueOf(n);
+            }
+        });
+        robot.set("setName", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue name) {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null || r.getOS() == null) return LuaValue.FALSE;
+                r.getOS().setLabel(name.isnil() ? "" : name.tojstring());
+                return LuaValue.TRUE;
+            }
+        });
+
+        // turtle.craft([limit]) — not yet implemented (no recipe pipeline). Stub returns false.
+        robot.set("craft", new VarArgFunction() {
+            @Override public Varargs invoke(Varargs args) {
+                return LuaValue.varargsOf(LuaValue.FALSE,
+                        LuaValue.valueOf("crafting not yet supported"));
+            }
+        });
+
+        // equipLeft/equipRight — both currently route to the single tool slot.
+        // (Phase 3 will add a real left/right hand split.)
+        robot.set("equipLeft", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                return LuaValue.valueOf(r.equipTool(r.getSelectedSlot()));
+            }
+        });
+        robot.set("equipRight", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+                if (r == null) return LuaValue.FALSE;
+                return LuaValue.valueOf(r.equipTool(r.getSelectedSlot()));
+            }
+        });
+
         globals.set("robot", robot);
     }
+
+    /** Build the inspect-result varargs (true, table) or (false, "No block to inspect"). */
+    private Varargs inspectAt(int yOffset) {
+        com.apocscode.byteblock.entity.RobotEntity r = asRobot();
+        if (r == null) return LuaValue.varargsOf(LuaValue.FALSE, LuaValue.valueOf("no robot"));
+        net.minecraft.world.level.block.state.BlockState s = r.inspectBlock(yOffset);
+        if (s == null) return LuaValue.varargsOf(LuaValue.FALSE, LuaValue.valueOf("No block to inspect"));
+        LuaTable t = new LuaTable();
+        t.set("name", LuaValue.valueOf(net.minecraft.core.registries.BuiltInRegistries.BLOCK
+                .getKey(s.getBlock()).toString()));
+        // Encode block state properties into a sub-table.
+        LuaTable state = new LuaTable();
+        for (net.minecraft.world.level.block.state.properties.Property<?> p : s.getProperties()) {
+            state.set(p.getName(), LuaValue.valueOf(s.getValue(p).toString()));
+        }
+        t.set("state", state);
+        t.set("tags", new LuaTable()); // CC parity: empty tags table
+        return LuaValue.varargsOf(LuaValue.TRUE, t);
+    }
+
 
     /** Shared scan helper used by robot.scan() and the drone BT scan response. */
     private LuaValue doEntityScan(net.minecraft.world.level.Level lvl,
