@@ -140,16 +140,12 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
         // === BODY (clean white chassis, slight cool tint) ===
         drawBox(vc, mat, last, -0.35f, 0.2f, -0.3f, 0.35f, 0.65f, 0.3f,
                 232, 234, 240, packedLight);
-        // Chest computer screen — black bezel, dark inner screen, animated face on top.
-        // Bezel (dark gray frame around the screen)
-        drawBox(vc, mat, last, -0.27f, 0.30f, -0.31f, 0.27f, 0.58f, -0.305f,
-                30, 32, 38, packedLight);
-        // Screen surface (slightly lighter — receives the face quads on its front)
-        drawBox(vc, mat, last, -0.24f, 0.32f, -0.315f, 0.24f, 0.56f, -0.310f,
-                12, 16, 22, packedLight);
-        // --- Animated face on the chest screen ---
-        renderFace(vc, mat, last, packedLight, entity, partialTick,
-                   -0.24f, 0.32f, 0.24f, 0.56f, -0.316f);
+        // Front chest plate (cyan accent — matches ByteBlock theme)
+        drawBox(vc, mat, last, -0.25f, 0.3f, -0.31f, 0.25f, 0.58f, -0.30f,
+                210, 232, 240, packedLight);
+        // Green power LED
+        drawBox(vc, mat, last, -0.05f, 0.48f, -0.32f, 0.05f, 0.55f, -0.31f,
+                30, 220, 80, packedLight);
         // Rear vent (mid-gray)
         drawBox(vc, mat, last, -0.2f, 0.35f, 0.30f, 0.2f, 0.55f, 0.31f,
                 170, 172, 178, packedLight);
@@ -183,18 +179,25 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
         drawBox(vc, mat, last, -0.08f, 0.65f, -0.08f, 0.08f, 0.72f, 0.08f,
                 40, 200, 230, packedLight);
 
-        // === HEAD (small camera dome — face is now on the chest screen) ===
-        drawBox(vc, mat, last, -0.18f, 0.72f, -0.18f, 0.18f, 0.92f, 0.18f,
+        // === HEAD (bright white) ===
+        drawBox(vc, mat, last, -0.22f, 0.72f, -0.2f, 0.22f, 1.0f, 0.2f,
                 240, 242, 248, packedLight);
-        // Camera lens (cyan disc-like front face)
-        drawBox(vc, mat, last, -0.08f, 0.78f, -0.19f, 0.08f, 0.86f, -0.181f,
+
+        // === FACE ===
+        // Cyan eyes
+        drawBox(vc, mat, last, -0.15f, 0.82f, -0.21f, -0.06f, 0.92f, -0.20f,
                 40, 220, 255, packedLight);
+        drawBox(vc, mat, last, 0.06f, 0.82f, -0.21f, 0.15f, 0.92f, -0.20f,
+                40, 220, 255, packedLight);
+        // Mouth grille
+        drawBox(vc, mat, last, -0.12f, 0.75f, -0.21f, 0.12f, 0.79f, -0.20f,
+                50, 50, 55, packedLight);
 
         // === ANTENNA ===
-        drawBox(vc, mat, last, -0.02f, 0.92f, -0.02f, 0.02f, 1.04f, 0.02f,
+        drawBox(vc, mat, last, -0.02f, 1.0f, -0.02f, 0.02f, 1.12f, 0.02f,
                 80, 80, 85, packedLight);
         // Red LED tip
-        drawBox(vc, mat, last, -0.03f, 1.04f, -0.03f, 0.03f, 1.07f, 0.03f,
+        drawBox(vc, mat, last, -0.03f, 1.12f, -0.03f, 0.03f, 1.15f, 0.03f,
                 220, 30, 30, packedLight);
 
         pose.popPose();
