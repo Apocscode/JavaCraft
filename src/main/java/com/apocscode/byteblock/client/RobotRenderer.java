@@ -330,4 +330,17 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
     public ResourceLocation getTextureLocation(RobotEntity entity) {
         return TEXTURE;
     }
+
+    @Override
+    protected void renderNameTag(RobotEntity entity, net.minecraft.network.chat.Component displayName,
+                                  PoseStack poseStack, net.minecraft.client.renderer.MultiBufferSource buffer,
+                                  int packedLight, float partialTick) {
+        // Top line — vanilla custom name (only when player has named it via Name Tag).
+        super.renderNameTag(entity, displayName, poseStack, buffer, packedLight, partialTick);
+        // Second line — health + charge stats, drawn slightly below.
+        poseStack.pushPose();
+        poseStack.translate(0.0, -0.27, 0.0);
+        super.renderNameTag(entity, entity.getStatsLine(), poseStack, buffer, packedLight, partialTick);
+        poseStack.popPose();
+    }
 }

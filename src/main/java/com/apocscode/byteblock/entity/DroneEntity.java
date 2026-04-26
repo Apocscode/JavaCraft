@@ -458,6 +458,19 @@ public class DroneEntity extends PathfinderMob {
     public void linkComputer(UUID computerId) { this.linkedComputerId = computerId; }
     public UUID getDroneId() { return droneId; }
     public int getBluetoothChannel() { return bluetoothChannel; }
+
+    /**
+     * Build the second-line nameplate stat string, e.g. "♥ 18/20  ⚡ 64%".
+     * Energy here represents fuel as a percentage of MAX_FUEL.
+     */
+    public Component getStatsLine() {
+        int hp  = (int) Math.ceil(getHealth());
+        int max = (int) getMaxHealth();
+        int pct = MAX_FUEL > 0 ? (fuelTicks * 100 / MAX_FUEL) : 0;
+        String pctColor = pct < 20 ? "§c" : pct < 50 ? "§e" : pct < 80 ? "§b" : "§a";
+        String hpColor  = hp < max / 3 ? "§c" : hp < max * 2 / 3 ? "§e" : "§a";
+        return Component.literal(hpColor + "♥ " + hp + "/" + max + "  §r" + pctColor + "⚡ " + pct + "%");
+    }
     public void setBluetoothChannel(int ch) { this.bluetoothChannel = Math.max(1, Math.min(65535, ch)); }
     public int getWaypointCount() { return waypoints.size(); }
     public SimpleContainer getInventory() { return inventory; }

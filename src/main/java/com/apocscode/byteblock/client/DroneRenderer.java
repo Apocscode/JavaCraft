@@ -224,4 +224,15 @@ public class DroneRenderer extends EntityRenderer<DroneEntity> {
     public ResourceLocation getTextureLocation(DroneEntity entity) {
         return TEXTURE;
     }
+
+    @Override
+    protected void renderNameTag(DroneEntity entity, net.minecraft.network.chat.Component displayName,
+                                  PoseStack poseStack, MultiBufferSource buffer,
+                                  int packedLight, float partialTick) {
+        super.renderNameTag(entity, displayName, poseStack, buffer, packedLight, partialTick);
+        poseStack.pushPose();
+        poseStack.translate(0.0, -0.27, 0.0);
+        super.renderNameTag(entity, entity.getStatsLine(), poseStack, buffer, packedLight, partialTick);
+        poseStack.popPose();
+    }
 }

@@ -46,6 +46,17 @@ public class UnicycleRobotRenderer extends EntityRenderer<UnicycleRobotEntity> {
     }
 
     @Override
+    protected void renderNameTag(UnicycleRobotEntity entity, net.minecraft.network.chat.Component displayName,
+                                  PoseStack poseStack, MultiBufferSource buffer,
+                                  int packedLight, float partialTick) {
+        super.renderNameTag(entity, displayName, poseStack, buffer, packedLight, partialTick);
+        poseStack.pushPose();
+        poseStack.translate(0.0, -0.27, 0.0);
+        super.renderNameTag(entity, entity.getStatsLine(), poseStack, buffer, packedLight, partialTick);
+        poseStack.popPose();
+    }
+
+    @Override
     public void render(UnicycleRobotEntity entity, float yaw, float partialTick,
                        PoseStack pose, MultiBufferSource buffers, int packedLight) {
         // ---- Compute movement-driven values ----

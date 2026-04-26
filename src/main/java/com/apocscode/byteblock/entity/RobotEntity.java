@@ -7,6 +7,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
@@ -742,6 +743,21 @@ public class RobotEntity extends PathfinderMob {
     public EnergyStorage getEnergyStorage() { return energyStorage; }
     public JavaOS getOS() { return os; }
     public UUID getComputerId() { return computerId; }
+
+    /**
+     * Build the second-line nameplate stat string, e.g. "♥ 24/30  ⚡ 78%".
+     * Health uses red §c, charge uses yellow §e (low), aqua §b (mid), green §a (high).
+     */
+    public Component getStatsLine() {
+        int hp  = (int) Math.ceil(getHealth());
+        int max = (int) getMaxHealth();
+        int e   = energyStorage.getEnergyStored();
+        int em  = energyStorage.getMaxEnergyStored();
+        int pct = em > 0 ? (e * 100 / em) : 0;
+        String pctColor = pct < 20 ? "§c" : pct < 50 ? "§e" : pct < 80 ? "§b" : "§a";
+        String hpColor  = hp < max / 3 ? "§c" : hp < max * 2 / 3 ? "§e" : "§a";
+        return Component.literal(hpColor + "♥ " + hp + "/" + max + "  §r" + pctColor + "⚡ " + pct + "%");
+    }
 
     @Override
     public void addAdditionalSaveData(CompoundTag tag) {
