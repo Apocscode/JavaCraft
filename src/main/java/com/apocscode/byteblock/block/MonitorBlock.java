@@ -135,6 +135,15 @@ public class MonitorBlock extends Block implements EntityBlock {
     @Override
     protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos,
                                                Player player, BlockHitResult hitResult) {
+        // If the player is holding a monitor BlockItem, defer to default item handling so the
+        // BlockItem can place an adjacent monitor (formation extension). Without this PASS,
+        // every right-click would be consumed by the touch/GUI/config logic below, blocking
+        // placement.
+        net.minecraft.world.item.ItemStack held = player.getMainHandItem();
+        if (held.getItem() instanceof net.minecraft.world.item.BlockItem bi
+                && bi.getBlock() == this) {
+            return InteractionResult.PASS;
+        }
         BlockEntity be = level.getBlockEntity(pos);
         if (!(be instanceof MonitorBlockEntity monitor)) {
             return InteractionResult.PASS;
