@@ -484,29 +484,43 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
 
         // Top side (y=1-BI) — only if this block is at the top edge. Inset 0.001 along Y
         // so it doesn't co-plane with the bottom face of the block above.
-        // Wound CCW when viewed from +Y (outside) so it survives backface culling.
+        // Drawn double-sided (both windings) so the strip is visible regardless of which
+        // side the player views it from. entitySolid backface-culls single-sided quads,
+        // and these thin slab edges need to be visible from outside the slab.
         if (!hasTop) {
             addQuadTinted(frame, mat, pose,
                     0, 1 - BI, backZ,   1, 1 - BI, backZ,   1, 1 - BI, frontZ,   0, 1 - BI, frontZ,
                     0, 0, 1, 1, 0, 1, 0, fr, fg_, fb);
+            addQuadTinted(frame, mat, pose,
+                    0, 1 - BI, frontZ,   1, 1 - BI, frontZ,   1, 1 - BI, backZ,   0, 1 - BI, backZ,
+                    0, 0, 1, 1, 0, -1, 0, fr, fg_, fb);
         }
-        // Bottom side (y=BI). Wound CCW from -Y so backface culling keeps it visible.
+        // Bottom side (y=BI). Drawn double-sided.
         if (!hasBottom) {
             addQuadTinted(frame, mat, pose,
                     0, BI, frontZ,   1, BI, frontZ,   1, BI, backZ,   0, BI, backZ,
                     0, 0, 1, 1, 0, -1, 0, fr, fg_, fb);
+            addQuadTinted(frame, mat, pose,
+                    0, BI, backZ,   1, BI, backZ,   1, BI, frontZ,   0, BI, frontZ,
+                    0, 0, 1, 1, 0, 1, 0, fr, fg_, fb);
         }
-        // Left side (x=BI). Wound CCW from -X.
+        // Left side (x=BI). Drawn double-sided.
         if (!hasLeft) {
             addQuadTinted(frame, mat, pose,
                     BI, 0, frontZ,   BI, 0, backZ,   BI, 1, backZ,   BI, 1, frontZ,
                     0, 0, 1, 1, -1, 0, 0, fr, fg_, fb);
+            addQuadTinted(frame, mat, pose,
+                    BI, 0, backZ,   BI, 0, frontZ,   BI, 1, frontZ,   BI, 1, backZ,
+                    0, 0, 1, 1, 1, 0, 0, fr, fg_, fb);
         }
-        // Right side (x=1-BI). Wound CCW from +X.
+        // Right side (x=1-BI). Drawn double-sided.
         if (!hasRight) {
             addQuadTinted(frame, mat, pose,
                     1 - BI, 0, backZ,   1 - BI, 0, frontZ,   1 - BI, 1, frontZ,   1 - BI, 1, backZ,
                     0, 0, 1, 1, 1, 0, 0, fr, fg_, fb);
+            addQuadTinted(frame, mat, pose,
+                    1 - BI, 0, frontZ,   1 - BI, 0, backZ,   1 - BI, 1, backZ,   1 - BI, 1, frontZ,
+                    0, 0, 1, 1, -1, 0, 0, fr, fg_, fb);
         }
 
         // Front bezel — black border only on outer formation edges. Inner edges have no
