@@ -58,7 +58,8 @@ public class MonitorBlock extends Block implements EntityBlock {
         // that block (toward the player). Monitors only support horizontal (wall) placement.
         net.minecraft.core.Direction clicked = context.getClickedFace();
         net.minecraft.world.level.Level level = context.getLevel();
-        net.minecraft.core.BlockPos clickedPos = context.getClickedPos().relative(clicked.getOpposite());
+        net.minecraft.core.BlockPos newPos = context.getClickedPos();
+        net.minecraft.core.BlockPos clickedPos = newPos.relative(clicked.getOpposite());
 
         // Create-mod-style extension: if the clicked face belongs to an existing MonitorBlock,
         // inherit its FACING so the new block joins that monitor's formation. This lets players
@@ -66,15 +67,28 @@ public class MonitorBlock extends Block implements EntityBlock {
         BlockState clickedState = level.getBlockState(clickedPos);
         if (clickedState.getBlock() instanceof MonitorBlock) {
             net.minecraft.core.Direction existingFacing = clickedState.getValue(FACING);
-            // The new position must be coplanar (same depth) with the existing monitor —
-            // i.e. the player clicked a face perpendicular to the monitor's facing axis,
-            // not its front or back. Allowing only same-plane neighbors keeps the formation flat.
             if (clicked.getAxis() != existingFacing.getAxis()) {
                 return this.defaultBlockState().setValue(FACING, existingFacing);
             }
         }
 
+        // Coplanar-neighbor extension: monitors have a thin slab collision shape, so the
+        // player can't click directly on a monitor's narrow side. Instead, when placing
+        // against a wall block (front-facing click), scan the four cardinal neighbors of
+        // the new position for an existing monitor whose facing direction matches the
+        // clicked face. If found, inherit that facing so the new block joins the formation.
         if (clicked.getAxis().isHorizontal()) {
+            for (net.minecraft.core.Direction d : new net.minecraft.core.Direction[]{
+                    net.minecraft.core.Direction.UP, net.minecraft.core.Direction.DOWN,
+                    net.minecraft.core.Direction.NORTH, net.minecraft.core.Direction.SOUTH,
+                    net.minecraft.core.Direction.EAST, net.minecraft.core.Direction.WEST}) {
+                if (d.getAxis() == clicked.getAxis()) continue; // skip front/back of new monitor
+                BlockState neighbor = level.getBlockState(newPos.relative(d));
+                if (neighbor.getBlock() instanceof MonitorBlock
+                        && neighbor.getValue(FACING) == clicked) {
+                    return this.defaultBlockState().setValue(FACING, clicked);
+                }
+            }
             return this.defaultBlockState().setValue(FACING, clicked);
         }
         // Clicked on top or bottom face of a non-monitor block: not supported — reject placement

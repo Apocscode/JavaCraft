@@ -490,22 +490,22 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
                     0, 1 - BI, backZ,   1, 1 - BI, backZ,   1, 1 - BI, frontZ,   0, 1 - BI, frontZ,
                     0, 0, 1, 1, 0, 1, 0, fr, fg_, fb);
         }
-        // Bottom side (y=BI)
+        // Bottom side (y=BI). Wound CCW from -Y so backface culling keeps it visible.
         if (!hasBottom) {
             addQuadTinted(frame, mat, pose,
-                    0, BI, backZ,   1, BI, backZ,   1, BI, frontZ,   0, BI, frontZ,
+                    0, BI, frontZ,   1, BI, frontZ,   1, BI, backZ,   0, BI, backZ,
                     0, 0, 1, 1, 0, -1, 0, fr, fg_, fb);
         }
-        // Left side (x=BI)
+        // Left side (x=BI). Wound CCW from -X.
         if (!hasLeft) {
             addQuadTinted(frame, mat, pose,
-                    BI, 0, backZ,   BI, 0, frontZ,   BI, 1, frontZ,   BI, 1, backZ,
+                    BI, 0, frontZ,   BI, 0, backZ,   BI, 1, backZ,   BI, 1, frontZ,
                     0, 0, 1, 1, -1, 0, 0, fr, fg_, fb);
         }
-        // Right side (x=1-BI)
+        // Right side (x=1-BI). Wound CCW from +X.
         if (!hasRight) {
             addQuadTinted(frame, mat, pose,
-                    1 - BI, 0, frontZ,   1 - BI, 0, backZ,   1 - BI, 1, backZ,   1 - BI, 1, frontZ,
+                    1 - BI, 0, backZ,   1 - BI, 0, frontZ,   1 - BI, 1, frontZ,   1 - BI, 1, backZ,
                     0, 0, 1, 1, 1, 0, 0, fr, fg_, fb);
         }
 
