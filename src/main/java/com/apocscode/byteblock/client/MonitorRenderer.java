@@ -460,7 +460,10 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         float mr = hasLeft   ? 0f : m;   // player-left edge of this block (renderer x=1)
         float mb = hasBottom ? 0f : m;
         float mt = hasTop    ? 0f : m;
-        VertexConsumer frame = buffers.getBuffer(RenderType.entityCutoutNoCull(FRAME_TEXTURE));
+        // Use entitySolid (no alpha test) so the slab sides stay opaque at oblique angles.
+        // entityCutoutNoCull's alpha-test drops mipmapped edge pixels, making thin sides look
+        // transparent when the monitor is tilted/yawed.
+        VertexConsumer frame = buffers.getBuffer(RenderType.entitySolid(FRAME_TEXTURE));
 
         // Frame tint (player-paintable). Bezel uses a darker shade of the same color so the
         // inner border stays visually distinct from the outer slab.
@@ -506,7 +509,7 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
 
         // Front bezel — black border only on outer formation edges. Inner edges have no
         // bezel so adjacent screens form one seamless display.
-        VertexConsumer bezel = buffers.getBuffer(RenderType.entityCutoutNoCull(BEZEL_TEXTURE));
+        VertexConsumer bezel = buffers.getBuffer(RenderType.entitySolid(BEZEL_TEXTURE));
         // Bottom strip (player-bottom edge, renderer y=0..mb)
         if (mb > 0) {
             addQuadTinted(bezel, mat, pose,
