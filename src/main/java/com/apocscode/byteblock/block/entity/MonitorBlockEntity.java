@@ -79,6 +79,24 @@ public class MonitorBlockEntity extends BlockEntity {
     // Last-known label of the linked computer; rendered on the "no signal" tombstone.
     private String lastKnownComputerLabel = "";
 
+    // ── User-assigned label for this monitor (formation-wide; stored on origin) ──
+    /**
+     * Optional human-readable name set via the shift-click GUI or {@code monitor.setLabel(name)}.
+     * Used by the Monitor terminal app to display friendly names and by Lua programs filtering
+     * peripherals — e.g. {@code peripheral.find("monitor", function(_, m) return m.getLabel() == "main" end)}.
+     * Always read/written through {@link #getOriginEntity()}.
+     */
+    private String label = "";
+
+    // ── User-assigned bezel/frame color (formation-wide; stored on origin, ARGB) ──
+    /**
+     * Tint applied to the slab frame and bezel quads. {@code 0xFFFFFFFF} (white) preserves the
+     * original gray_concrete/black_concrete textures; any other value multiplies them, allowing
+     * players to "paint" the monitor housing from the shift-click config GUI. The screen pixels
+     * themselves are NEVER tinted.
+     */
+    private int frameColor = 0xFFFFFFFF;
+
     // ── Display geometry (Nuclear-Control-style thin panel + tilt/yaw) ──
     /** Slab thickness in pixels (1..4). 2 = thin panel default. */
     private int   thicknessPx = 2;
@@ -175,6 +193,9 @@ public class MonitorBlockEntity extends BlockEntity {
                     syncToClient();
                 }
             } catch (NumberFormatException ignored) {}
+        } else if (content.startsWith("label:")) {
+            // Format: "label:<name>" — sets the user-assigned label (formation-wide)
+            setLabel(content.substring("label:".length()));
         }
     }
 
@@ -402,6 +423,60 @@ public class MonitorBlockEntity extends BlockEntity {
     public int getLastTouchX() { return lastTouchX; }
     public int getLastTouchY() { return lastTouchY; }
     public String getLastKnownComputerLabel() { return lastKnownComputerLabel; }
+
+    /** Get the user-assigned label for this monitor formation (always read from origin). */
+    public String getLabel() {
+        MonitorBlockEntity o = getOriginEntity();
+        return (o == null) ? "" : (o.label == null ? "" : o.label);
+    }
+
+    /**
+     * Set the user-assigned label on the origin block entity (label is formation-wide).
+     * Empty string clears the label. Server-side only; syncs to clients.
+     */
+    public void setLabel(String newLabel) {
+        if (level == null || level.isClientSide()) return;
+        MonitorBlockEntity o = getOriginEntity();
+        if (o == null) return;
+        String s = newLabel == null ? "" : newLabel.trim();
+        if (s.length() > 32) s = s.substring(0, 32);
+        if (s.equals(o.label)) return;
+        o.label = s;
+        o.setChanged();
+        o.syncToClient();
+    }
+
+    /** Get the user-assigned frame/bezel ARGB color for this monitor formation. */
+    public int getFrameColor() {
+        MonitorBlockEntity o = getOriginEntity();
+        return (o == null) ? 0xFFFFFFFF : o.frameColor;
+    }
+
+    /**
+     * Set the frame/bezel tint on the origin (formation-wide). Alpha is forced to 0xFF so
+     * the housing stays opaque. Server-side only; syncs all formation members.
+     */
+    public void setFrameColor(int argb) {
+        if (level == null || level.isClientSide()) return;
+        MonitorBlockEntity o = getOriginEntity();
+        if (o == null) return;
+        int c = 0xFF000000 | (argb & 0x00FFFFFF);
+        if (c == o.frameColor) return;
+        o.frameColor = c;
+        // Propagate to all formation members so each block syncs the new tint to clients
+        // (the renderer reads the tint from the origin, but every BE needs a fresh packet
+        // to trigger client cache invalidation in MonitorRenderer).
+        for (int ox = 0; ox < o.multiWidth; ox++) {
+            for (int oy = 0; oy < o.multiHeight; oy++) {
+                BlockPos memberPos = o.getWorldPosForOffset(ox, oy);
+                BlockEntity be = level.getBlockEntity(memberPos);
+                if (be instanceof MonitorBlockEntity m) {
+                    m.setChanged();
+                    m.syncToClient();
+                }
+            }
+        }
+    }
 
     public int   getThicknessPx() { return thicknessPx; }
     public float getTiltDegrees() { return tiltDegrees; }
@@ -791,6 +866,10 @@ public class MonitorBlockEntity extends BlockEntity {
         tag.putInt("ThicknessPx", thicknessPx);
         tag.putFloat("TiltDeg",    tiltDegrees);
         tag.putFloat("YawDeg",     yawDegrees);
+        if (label != null && !label.isEmpty()) {
+            tag.putString("Label", label);
+        }
+        tag.putInt("FrameColor", frameColor);
     }
 
     @Override
@@ -841,5 +920,7 @@ public class MonitorBlockEntity extends BlockEntity {
         if (tag.contains("ThicknessPx")) thicknessPx = (int) clamp(tag.getInt("ThicknessPx"), 1, 6);
         if (tag.contains("TiltDeg"))     tiltDegrees = clamp(tag.getFloat("TiltDeg"), -45f, 45f);
         if (tag.contains("YawDeg"))      yawDegrees  = clamp(tag.getFloat("YawDeg"),  -45f, 45f);
+        if (tag.contains("Label"))       label = tag.getString("Label");
+        if (tag.contains("FrameColor"))  frameColor = 0xFF000000 | (tag.getInt("FrameColor") & 0x00FFFFFF);
     }
 }

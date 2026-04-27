@@ -14,9 +14,11 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 /**
  * Client → Server packet sent from {@link com.apocscode.byteblock.client.MonitorConfigScreen}
- * to update a monitor's geometry (panel thickness, tilt, yaw).
+ * to update a monitor's geometry (panel thickness, tilt, yaw), user-assigned label, and
+ * frame/bezel paint color.
  */
-public record MonitorConfigPayload(BlockPos pos, int thicknessPx, float tiltDeg, float yawDeg)
+public record MonitorConfigPayload(BlockPos pos, int thicknessPx, float tiltDeg, float yawDeg,
+                                   String label, int frameColor)
         implements CustomPacketPayload {
 
     public static final CustomPacketPayload.Type<MonitorConfigPayload> TYPE =
@@ -30,10 +32,13 @@ public record MonitorConfigPayload(BlockPos pos, int thicknessPx, float tiltDeg,
         buf.writeInt(p.thicknessPx);
         buf.writeFloat(p.tiltDeg);
         buf.writeFloat(p.yawDeg);
+        buf.writeUtf(p.label == null ? "" : p.label, 64);
+        buf.writeInt(p.frameColor);
     }
 
     private static MonitorConfigPayload read(RegistryFriendlyByteBuf buf) {
-        return new MonitorConfigPayload(buf.readBlockPos(), buf.readInt(), buf.readFloat(), buf.readFloat());
+        return new MonitorConfigPayload(buf.readBlockPos(), buf.readInt(), buf.readFloat(), buf.readFloat(),
+                buf.readUtf(64), buf.readInt());
     }
 
     public static void handle(MonitorConfigPayload payload, IPayloadContext context) {
@@ -47,6 +52,8 @@ public record MonitorConfigPayload(BlockPos pos, int thicknessPx, float tiltDeg,
                         java.util.Locale.ROOT,
                         "thickness=%d,tilt=%.2f,yaw=%.2f",
                         payload.thicknessPx, payload.tiltDeg, payload.yawDeg));
+                m.setLabel(payload.label);
+                m.setFrameColor(payload.frameColor);
             }
         });
     }

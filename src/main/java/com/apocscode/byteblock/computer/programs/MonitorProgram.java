@@ -75,7 +75,8 @@ public class MonitorProgram extends OSProgram {
     };
 
     private record MonitorInfo(BlockPos pos, String shortId, double distance,
-                               int width, int height, String mode, java.util.UUID fullId) {}
+                               int width, int height, String mode, java.util.UUID fullId,
+                               String label) {}
 
     public MonitorProgram() {
         super("Monitor");
@@ -112,16 +113,19 @@ public class MonitorProgram extends OSProgram {
             // Try to read formation info from the block entity
             int fw = 1, fh = 1;
             String mode = "mirror";
+            String label = "";
             if (os.getLevel().getBlockEntity(d.pos()) instanceof MonitorBlockEntity mbe) {
                 fw = mbe.getMultiWidth();
                 fh = mbe.getMultiHeight();
                 mode = mbe.getDisplayMode();
+                label = mbe.getLabel();
             }
 
             monitors.add(new MonitorInfo(
                 d.pos(),
                 d.deviceId().toString().substring(0, 8),
-                dist, fw, fh, mode, d.deviceId()
+                dist, fw, fh, mode, d.deviceId(),
+                label == null ? "" : label
             ));
         }
 
@@ -274,10 +278,10 @@ public class MonitorProgram extends OSProgram {
         // Column header
         int colY = HEADER_H;
         pb.fillRect(0, colY, halfW, 16, COL_HDR_BG);
-        pb.drawString(4, colY, "ID", COL_HDR_TXT);
-        pb.drawString(80, colY, "Size", COL_HDR_TXT);
-        pb.drawString(130, colY, "Dist", COL_HDR_TXT);
-        pb.drawString(190, colY, "Mode", COL_HDR_TXT);
+        pb.drawString(4, colY, "Label / ID", COL_HDR_TXT);
+        pb.drawString(110, colY, "Size", COL_HDR_TXT);
+        pb.drawString(150, colY, "Dist", COL_HDR_TXT);
+        pb.drawString(200, colY, "Mode", COL_HDR_TXT);
 
         // Rows
         int maxVisible = (h - LIST_TOP - 4) / ROW_H;
@@ -289,12 +293,15 @@ public class MonitorProgram extends OSProgram {
             int bg = (idx == selectedIndex) ? ROW_SEL : (idx % 2 == 0 ? ROW_EVEN : ROW_ODD);
             pb.fillRect(0, rowY, halfW, ROW_H, bg);
 
-            pb.drawString(4, rowY, mon.shortId, TEXT_NORM);
-            pb.drawString(80, rowY, mon.width + "x" + mon.height, CYAN);
-            pb.drawString(130, rowY, String.format("%.0fm", mon.distance), TEXT_DIM);
+            // Show label if assigned (yellow), otherwise short device id (gray)
+            String name = (mon.label != null && !mon.label.isEmpty()) ? mon.label : mon.shortId;
+            int nameColor = (mon.label != null && !mon.label.isEmpty()) ? 0xFFFFCC66 : TEXT_NORM;
+            pb.drawString(4, rowY, name, nameColor);
+            pb.drawString(110, rowY, mon.width + "x" + mon.height, CYAN);
+            pb.drawString(150, rowY, String.format("%.0fm", mon.distance), TEXT_DIM);
 
             int modeColor = "mirror".equals(mon.mode) ? GREEN : 0xFFDDCC44;
-            pb.drawString(190, rowY, mon.mode, modeColor);
+            pb.drawString(200, rowY, mon.mode, modeColor);
         }
 
         // Divider
@@ -339,6 +346,11 @@ public class MonitorProgram extends OSProgram {
             MonitorInfo sel = monitors.get(selectedIndex);
             int infoY = clearBtnY + BTN_H + 16;
             pb.drawString(halfW + 4, infoY, "Selected Monitor:", ACCENT);
+            infoY += 16;
+            String labelLine = (sel.label != null && !sel.label.isEmpty())
+                    ? ("Label: " + sel.label) : "Label: (unset)";
+            int labelColor = (sel.label != null && !sel.label.isEmpty()) ? 0xFFFFCC66 : TEXT_DIM;
+            pb.drawString(halfW + 8, infoY, labelLine, labelColor);
             infoY += 16;
             pb.drawString(halfW + 8, infoY, "ID: " + sel.shortId, TEXT_DIM);
             infoY += 16;

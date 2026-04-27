@@ -5,14 +5,16 @@ import com.apocscode.byteblock.network.MonitorConfigPayload;
 
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 /**
- * Standalone screen for configuring a monitor block's geometry — thickness, tilt, yaw.
- * Opened by right-clicking a monitor with an empty hand while sneaking.
+ * Standalone screen for configuring a monitor block's geometry — thickness, tilt, yaw —
+ * and assigning a user-friendly label. Opened by right-clicking a monitor with an empty
+ * hand while sneaking.
  */
 public class MonitorConfigScreen extends Screen {
 
@@ -21,30 +23,46 @@ public class MonitorConfigScreen extends Screen {
     private int thicknessPx;
     private float tiltDeg;
     private float yawDeg;
+    private String initialLabel;
+    private int frameColor;
 
     private Button thickMinus2, thickMinus1, thickPlus1, thickPlus2;
     private Button tiltMinus15, tiltMinus5, tiltPlus5, tiltPlus15;
     private Button yawMinus15, yawMinus5, yawPlus5, yawPlus15;
     private Button applyBtn;
+    private Button paintBtn;
+    private EditBox labelBox;
 
-    public MonitorConfigScreen(BlockPos monitorPos, int thicknessPx, float tiltDeg, float yawDeg) {
-        super(Component.literal("Monitor Geometry"));
+    public MonitorConfigScreen(BlockPos monitorPos, int thicknessPx, float tiltDeg, float yawDeg,
+                               String label, int frameColor) {
+        super(Component.literal("Monitor Configuration"));
         this.monitorPos = monitorPos;
         this.thicknessPx = clampInt(thicknessPx, 1, 6);
         this.tiltDeg = clampF(tiltDeg, -45f, 45f);
         this.yawDeg = clampF(yawDeg, -45f, 45f);
+        this.initialLabel = label == null ? "" : label;
+        this.frameColor = 0xFF000000 | (frameColor & 0x00FFFFFF);
     }
 
     /** Convenience: build a screen pre-populated from the live BE on the client side. */
     public static MonitorConfigScreen forMonitor(MonitorBlockEntity m) {
         return new MonitorConfigScreen(m.getBlockPos(),
-                m.getThicknessPx(), m.getTiltDegrees(), m.getYawDegrees());
+                m.getThicknessPx(), m.getTiltDegrees(), m.getYawDegrees(), m.getLabel(), m.getFrameColor());
     }
 
     @Override
     protected void init() {
         super.init();
         int cx = this.width / 2;
+
+        // ── Label row (text input) ──
+        int rowYLabel = this.height / 2 - 110;
+        labelBox = new EditBox(this.font, cx - 90, rowYLabel, 180, 18,
+                Component.literal("Label"));
+        labelBox.setMaxLength(32);
+        labelBox.setHint(Component.literal("Monitor name (e.g. main, dashboard)"));
+        labelBox.setValue(initialLabel);
+        addRenderableWidget(labelBox);
 
         // ── Thickness row ──
         int rowYThick = this.height / 2 - 70;
@@ -67,13 +85,23 @@ public class MonitorConfigScreen extends Screen {
         yawPlus5   = addAdjusterButton(cx +  50, rowYYaw, "+5°",  b -> { yawDeg = clampF(yawDeg + 5f,  -45f, 45f); });
         yawPlus15  = addAdjusterButton(cx +  90, rowYYaw, "+15°", b -> { yawDeg = clampF(yawDeg + 15f, -45f, 45f); });
 
-        // ── Apply / Done ──
+        // ── Apply / Paint / Done ──
         applyBtn = Button.builder(Component.literal("Apply"), b -> apply())
-                .bounds(cx - 100, this.height / 2 + 70, 90, 20).build();
+                .bounds(cx - 140, this.height / 2 + 70, 80, 20).build();
         addRenderableWidget(applyBtn);
+        paintBtn = Button.builder(Component.literal("Paint"), b -> openPaintPicker())
+                .bounds(cx - 50, this.height / 2 + 70, 100, 20).build();
+        addRenderableWidget(paintBtn);
         Button doneBtn = Button.builder(Component.literal("Done"), b -> this.onClose())
-                .bounds(cx + 10, this.height / 2 + 70, 90, 20).build();
+                .bounds(cx + 60, this.height / 2 + 70, 80, 20).build();
         addRenderableWidget(doneBtn);
+    }
+
+    private void openPaintPicker() {
+        if (this.minecraft == null) return;
+        this.minecraft.setScreen(new MonitorPaintScreen(this, frameColor, chosen -> {
+            this.frameColor = chosen;
+        }));
     }
 
     private Button addAdjusterButton(int x, int y, String label, Button.OnPress onPress) {
@@ -83,7 +111,8 @@ public class MonitorConfigScreen extends Screen {
     }
 
     private void apply() {
-        PacketDistributor.sendToServer(new MonitorConfigPayload(monitorPos, thicknessPx, tiltDeg, yawDeg));
+        String lbl = labelBox != null ? labelBox.getValue() : initialLabel;
+        PacketDistributor.sendToServer(new MonitorConfigPayload(monitorPos, thicknessPx, tiltDeg, yawDeg, lbl, frameColor));
     }
 
     @Override
@@ -91,11 +120,15 @@ public class MonitorConfigScreen extends Screen {
         super.render(gfx, mouseX, mouseY, partialTick);
         int cx = this.width / 2;
 
-        // Title
-        gfx.drawCenteredString(this.font, this.title, cx, this.height / 2 - 110, 0xFFFFFFFF);
+        // Title (above label row)
+        gfx.drawCenteredString(this.font, this.title, cx, this.height / 2 - 140, 0xFFFFFFFF);
         gfx.drawCenteredString(this.font,
                 Component.literal("Monitor at " + monitorPos.toShortString()).withStyle(s -> s.withColor(0xAAAAAA)),
-                cx, this.height / 2 - 95, 0xFFAAAAAA);
+                cx, this.height / 2 - 128, 0xFFAAAAAA);
+
+        // Label caption (left of the EditBox)
+        int rowYLabel = this.height / 2 - 110;
+        gfx.drawString(this.font, "Label", cx - 200, rowYLabel + 5, 0xFF80E0FF, false);
 
         // ── Thickness label + value ──
         int rowYThick = this.height / 2 - 70;
@@ -111,6 +144,17 @@ public class MonitorConfigScreen extends Screen {
         int rowYYaw = this.height / 2 + 20;
         gfx.drawString(this.font, "Yaw (Y)", cx - 200, rowYYaw + 6, 0xFF80E0FF, false);
         drawValueBox(gfx, cx - 45, rowYYaw, 90, 20, String.format(java.util.Locale.ROOT, "%+.1f°", yawDeg));
+
+        // ── Frame color swatch (between yaw row and apply buttons) ──
+        int rowYColor = this.height / 2 + 48;
+        gfx.drawString(this.font, "Frame Color", cx - 200, rowYColor + 4, 0xFF80E0FF, false);
+        // Color swatch box
+        int swX = cx - 45;
+        int swW = 90;
+        gfx.fill(swX, rowYColor, swX + swW, rowYColor + 14, 0xFF000000);
+        gfx.fill(swX + 1, rowYColor + 1, swX + swW - 1, rowYColor + 13, frameColor);
+        gfx.drawString(this.font, String.format("#%06X", frameColor & 0xFFFFFF),
+                swX + swW + 6, rowYColor + 4, 0xFFAAAAAA, false);
 
         // Hint
         gfx.drawCenteredString(this.font,

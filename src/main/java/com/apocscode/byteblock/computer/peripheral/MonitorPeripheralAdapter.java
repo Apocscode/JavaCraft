@@ -45,15 +45,16 @@ public class MonitorPeripheralAdapter implements IPeripheralAdapter {
         final MonitorBlockEntity raw = (MonitorBlockEntity) be;
         final MonitorBlockEntity origin = raw.getOriginEntity() != null ? raw.getOriginEntity() : raw;
 
-        // Switch to text mode automatically on first peripheral access (only if currently mirroring)
-        if ("mirror".equals(origin.getDisplayMode())) {
-            origin.setDisplayMode("text");
-        }
+        // Note: the monitor is NOT auto-switched to text mode on wrap/find. Mode flips happen
+        // lazily inside write/draw methods (see {@link #ensureTextMode}) so that read-only or
+        // metadata calls like getLabel(), getSize(), peripheral.find filters etc. don't
+        // disturb monitors that were already in mirror or graphics mode.
 
         LuaTable t = new LuaTable();
 
         t.set("write", new OneArgFunction() {
             @Override public LuaValue call(LuaValue v) {
+                ensureTextMode(origin);
                 origin.termWrite(v.tojstring());
                 origin.termFlush();
                 return LuaValue.NIL;
@@ -62,6 +63,7 @@ public class MonitorPeripheralAdapter implements IPeripheralAdapter {
 
         t.set("clear", new ZeroArgFunction() {
             @Override public LuaValue call() {
+                ensureTextMode(origin);
                 origin.termClear();
                 origin.termFlush();
                 return LuaValue.NIL;
@@ -70,6 +72,7 @@ public class MonitorPeripheralAdapter implements IPeripheralAdapter {
 
         t.set("clearLine", new ZeroArgFunction() {
             @Override public LuaValue call() {
+                ensureTextMode(origin);
                 origin.termClearLine();
                 origin.termFlush();
                 return LuaValue.NIL;
@@ -86,6 +89,7 @@ public class MonitorPeripheralAdapter implements IPeripheralAdapter {
 
         t.set("setCursorPos", new TwoArgFunction() {
             @Override public LuaValue call(LuaValue x, LuaValue y) {
+                ensureTextMode(origin);
                 origin.termSetCursorPos(x.checkint() - 1, y.checkint() - 1);
                 return LuaValue.NIL;
             }
@@ -101,6 +105,7 @@ public class MonitorPeripheralAdapter implements IPeripheralAdapter {
 
         t.set("setTextColor", new OneArgFunction() {
             @Override public LuaValue call(LuaValue v) {
+                ensureTextMode(origin);
                 origin.termSetTextColor(paletteFromLua(v));
                 return LuaValue.NIL;
             }
@@ -109,6 +114,7 @@ public class MonitorPeripheralAdapter implements IPeripheralAdapter {
 
         t.set("setBackgroundColor", new OneArgFunction() {
             @Override public LuaValue call(LuaValue v) {
+                ensureTextMode(origin);
                 origin.termSetBackgroundColor(paletteFromLua(v));
                 return LuaValue.NIL;
             }
@@ -131,6 +137,7 @@ public class MonitorPeripheralAdapter implements IPeripheralAdapter {
 
         t.set("setTextScale", new OneArgFunction() {
             @Override public LuaValue call(LuaValue v) {
+                ensureTextMode(origin);
                 origin.termSetTextScale(v.todouble());
                 origin.termFlush();
                 return LuaValue.NIL;
@@ -143,6 +150,7 @@ public class MonitorPeripheralAdapter implements IPeripheralAdapter {
 
         t.set("scroll", new OneArgFunction() {
             @Override public LuaValue call(LuaValue v) {
+                ensureTextMode(origin);
                 origin.termScroll(v.checkint());
                 origin.termFlush();
                 return LuaValue.NIL;
@@ -164,6 +172,7 @@ public class MonitorPeripheralAdapter implements IPeripheralAdapter {
         // monitor.blit(text, fgHex, bgHex) — CC-style colored write at the cursor.
         t.set("blit", new VarArgFunction() {
             @Override public Varargs invoke(Varargs a) {
+                ensureTextMode(origin);
                 origin.termBlit(a.checkjstring(1), a.checkjstring(2), a.checkjstring(3));
                 origin.termFlush();
                 return LuaValue.NIL;
@@ -285,6 +294,21 @@ public class MonitorPeripheralAdapter implements IPeripheralAdapter {
             }
         });
 
+        // ── User-assigned monitor label ──────────────────────────────────
+        // monitor.getLabel() -> string|nil   |   monitor.setLabel(name) -> nil
+        t.set("getLabel", new ZeroArgFunction() {
+            @Override public LuaValue call() {
+                String lbl = origin.getLabel();
+                return (lbl == null || lbl.isEmpty()) ? LuaValue.NIL : LuaValue.valueOf(lbl);
+            }
+        });
+        t.set("setLabel", new OneArgFunction() {
+            @Override public LuaValue call(LuaValue v) {
+                origin.setLabel(v.isnil() ? "" : v.tojstring());
+                return LuaValue.NIL;
+            }
+        });
+
         // ── savePNG(path) — render the current visible buffer to a PNG ───
         if (callingOs != null) {
             final com.apocscode.byteblock.computer.JavaOS fs = callingOs;
@@ -357,5 +381,17 @@ public class MonitorPeripheralAdapter implements IPeripheralAdapter {
             if ((n & (1 << i)) != 0) return i;
         }
         return 0;
+    }
+
+    /**
+     * Lazily switch the monitor into "text" mode the first time a Lua write/draw method
+     * actually targets the text buffer. Read-only metadata calls (getLabel, getSize, etc.)
+     * intentionally skip this so that simply wrapping or filtering with {@code peripheral.find}
+     * doesn't disturb monitors that were already in mirror or graphics mode.
+     */
+    private static void ensureTextMode(MonitorBlockEntity origin) {
+        if ("mirror".equals(origin.getDisplayMode())) {
+            origin.setDisplayMode("text");
+        }
     }
 }

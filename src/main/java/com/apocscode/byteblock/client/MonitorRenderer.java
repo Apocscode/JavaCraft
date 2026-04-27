@@ -419,6 +419,11 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         float screenZ = 1.0f - (thickness / 16.0f) - 0.005f;
         float frontZ  = 1.0f - (thickness / 16.0f);   // bezel front plane
         float m = 0.01f;    // tiny margin to prevent edge artifacts
+        // Pull the slab perimeter slightly inward to prevent Z-fighting with the wall behind
+        // the monitor and any blocks adjacent to its sides. The inset is small enough to be
+        // visually indistinguishable but past the depth-buffer precision threshold.
+        final float BI = 0.001f;
+        final float backZ = 1.0f - BI;
 
         // Apply per-BE tilt (X axis) and yaw (Y axis) around the screen face center.
         // Edge blocks in a multi-block formation use the formation-wide center so the
@@ -457,34 +462,46 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         float mt = hasTop    ? 0f : m;
         VertexConsumer frame = buffers.getBuffer(RenderType.entityCutoutNoCull(FRAME_TEXTURE));
 
-        // Back face (z=1) — facing +Z (away from screen)
-        addQuad(frame, mat, pose,
-                0, 0, 1f,   1, 0, 1f,   1, 1, 1f,   0, 1, 1f,
-                0, 0, 1, 1, 0, 0, 1);
+        // Frame tint (player-paintable). Bezel uses a darker shade of the same color so the
+        // inner border stays visually distinct from the outer slab.
+        int fcARGB = origin.getFrameColor();
+        int fr = (fcARGB >> 16) & 0xFF;
+        int fg_ = (fcARGB >> 8) & 0xFF;
+        int fb = fcARGB & 0xFF;
+        int br = (int) (fr * 0.25f);
+        int bg = (int) (fg_ * 0.25f);
+        int bb = (int) (fb * 0.25f);
 
-        // Top side (y=1) — only if this block is at the top edge
+        // Back face (z=backZ ≈ 1-0.001) — facing +Z (away from screen). Inset 0.001 to avoid
+        // Z-fighting with the wall block the monitor is mounted against.
+        addQuadTinted(frame, mat, pose,
+                0, 0, backZ,   1, 0, backZ,   1, 1, backZ,   0, 1, backZ,
+                0, 0, 1, 1, 0, 0, 1, fr, fg_, fb);
+
+        // Top side (y=1-BI) — only if this block is at the top edge. Inset 0.001 along Y
+        // so it doesn't co-plane with the bottom face of the block above.
         if (!hasTop) {
-            addQuad(frame, mat, pose,
-                    0, 1, frontZ,   1, 1, frontZ,   1, 1, 1f,   0, 1, 1f,
-                    0, 0, 1, 1, 0, 1, 0);
+            addQuadTinted(frame, mat, pose,
+                    0, 1 - BI, frontZ,   1, 1 - BI, frontZ,   1, 1 - BI, backZ,   0, 1 - BI, backZ,
+                    0, 0, 1, 1, 0, 1, 0, fr, fg_, fb);
         }
-        // Bottom side (y=0)
+        // Bottom side (y=BI)
         if (!hasBottom) {
-            addQuad(frame, mat, pose,
-                    0, 0, 1f,   1, 0, 1f,   1, 0, frontZ,   0, 0, frontZ,
-                    0, 0, 1, 1, 0, -1, 0);
+            addQuadTinted(frame, mat, pose,
+                    0, BI, backZ,   1, BI, backZ,   1, BI, frontZ,   0, BI, frontZ,
+                    0, 0, 1, 1, 0, -1, 0, fr, fg_, fb);
         }
-        // Left side (x=0)
+        // Left side (x=BI)
         if (!hasLeft) {
-            addQuad(frame, mat, pose,
-                    0, 0, 1f,   0, 0, frontZ,   0, 1, frontZ,   0, 1, 1f,
-                    0, 0, 1, 1, -1, 0, 0);
+            addQuadTinted(frame, mat, pose,
+                    BI, 0, backZ,   BI, 0, frontZ,   BI, 1, frontZ,   BI, 1, backZ,
+                    0, 0, 1, 1, -1, 0, 0, fr, fg_, fb);
         }
-        // Right side (x=1)
+        // Right side (x=1-BI)
         if (!hasRight) {
-            addQuad(frame, mat, pose,
-                    1, 0, frontZ,   1, 0, 1f,   1, 1, 1f,   1, 1, frontZ,
-                    0, 0, 1, 1, 1, 0, 0);
+            addQuadTinted(frame, mat, pose,
+                    1 - BI, 0, frontZ,   1 - BI, 0, backZ,   1 - BI, 1, backZ,   1 - BI, 1, frontZ,
+                    0, 0, 1, 1, 1, 0, 0, fr, fg_, fb);
         }
 
         // Front bezel — black border only on outer formation edges. Inner edges have no
@@ -492,28 +509,28 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         VertexConsumer bezel = buffers.getBuffer(RenderType.entityCutoutNoCull(BEZEL_TEXTURE));
         // Bottom strip (player-bottom edge, renderer y=0..mb)
         if (mb > 0) {
-            addQuad(bezel, mat, pose,
+            addQuadTinted(bezel, mat, pose,
                     0, 0, frontZ,   1, 0, frontZ,   1, mb, frontZ,   0, mb, frontZ,
-                    0, 0, 1, 1, 0, 0, -1);
+                    0, 0, 1, 1, 0, 0, -1, br, bg, bb);
         }
         // Top strip (renderer y=1-mt..1)
         if (mt > 0) {
-            addQuad(bezel, mat, pose,
+            addQuadTinted(bezel, mat, pose,
                     0, 1 - mt, frontZ,   1, 1 - mt, frontZ,   1, 1, frontZ,   0, 1, frontZ,
-                    0, 0, 1, 1, 0, 0, -1);
+                    0, 0, 1, 1, 0, 0, -1, br, bg, bb);
         }
         // Renderer-left strip (player's RIGHT edge, x=0..ml). Only fills the area not
         // already covered by top/bottom strips (y from mb to 1-mt).
         if (ml > 0) {
-            addQuad(bezel, mat, pose,
+            addQuadTinted(bezel, mat, pose,
                     0, mb, frontZ,   ml, mb, frontZ,   ml, 1 - mt, frontZ,   0, 1 - mt, frontZ,
-                    0, 0, 1, 1, 0, 0, -1);
+                    0, 0, 1, 1, 0, 0, -1, br, bg, bb);
         }
         // Renderer-right strip (player's LEFT edge, x=1-mr..1)
         if (mr > 0) {
-            addQuad(bezel, mat, pose,
+            addQuadTinted(bezel, mat, pose,
                     1 - mr, mb, frontZ,   1, mb, frontZ,   1, 1 - mt, frontZ,   1 - mr, 1 - mt, frontZ,
-                    0, 0, 1, 1, 0, 0, -1);
+                    0, 0, 1, 1, 0, 0, -1, br, bg, bb);
         }
         // -----------------------------------------------------------.
 
@@ -551,16 +568,29 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
                                 float x4, float y4, float z4,
                                 float u0, float v0, float u1, float v1,
                                 float nx, float ny, float nz) {
-        vc.addVertex(mat, x1, y1, z1).setColor(255, 255, 255, 255).setUv(u0, v1)
+        addQuadTinted(vc, mat, pose, x1, y1, z1, x2, y2, z2, x3, y3, z3, x4, y4, z4,
+                u0, v0, u1, v1, nx, ny, nz, 255, 255, 255);
+    }
+
+    /** Same as {@link #addQuad} but with a custom RGB tint multiplied into the texture. */
+    private static void addQuadTinted(VertexConsumer vc, Matrix4f mat, PoseStack pose,
+                                      float x1, float y1, float z1,
+                                      float x2, float y2, float z2,
+                                      float x3, float y3, float z3,
+                                      float x4, float y4, float z4,
+                                      float u0, float v0, float u1, float v1,
+                                      float nx, float ny, float nz,
+                                      int r, int g, int b) {
+        vc.addVertex(mat, x1, y1, z1).setColor(r, g, b, 255).setUv(u0, v1)
                 .setOverlay(OverlayTexture.NO_OVERLAY).setLight(FULLBRIGHT)
                 .setNormal(pose.last(), nx, ny, nz);
-        vc.addVertex(mat, x2, y2, z2).setColor(255, 255, 255, 255).setUv(u1, v1)
+        vc.addVertex(mat, x2, y2, z2).setColor(r, g, b, 255).setUv(u1, v1)
                 .setOverlay(OverlayTexture.NO_OVERLAY).setLight(FULLBRIGHT)
                 .setNormal(pose.last(), nx, ny, nz);
-        vc.addVertex(mat, x3, y3, z3).setColor(255, 255, 255, 255).setUv(u1, v0)
+        vc.addVertex(mat, x3, y3, z3).setColor(r, g, b, 255).setUv(u1, v0)
                 .setOverlay(OverlayTexture.NO_OVERLAY).setLight(FULLBRIGHT)
                 .setNormal(pose.last(), nx, ny, nz);
-        vc.addVertex(mat, x4, y4, z4).setColor(255, 255, 255, 255).setUv(u0, v0)
+        vc.addVertex(mat, x4, y4, z4).setColor(r, g, b, 255).setUv(u0, v0)
                 .setOverlay(OverlayTexture.NO_OVERLAY).setLight(FULLBRIGHT)
                 .setNormal(pose.last(), nx, ny, nz);
     }

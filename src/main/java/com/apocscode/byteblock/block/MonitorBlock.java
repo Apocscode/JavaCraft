@@ -57,10 +57,27 @@ public class MonitorBlock extends Block implements EntityBlock {
         // Mount against the clicked block's face. The monitor's front points AWAY from
         // that block (toward the player). Monitors only support horizontal (wall) placement.
         net.minecraft.core.Direction clicked = context.getClickedFace();
+        net.minecraft.world.level.Level level = context.getLevel();
+        net.minecraft.core.BlockPos clickedPos = context.getClickedPos().relative(clicked.getOpposite());
+
+        // Create-mod-style extension: if the clicked face belongs to an existing MonitorBlock,
+        // inherit its FACING so the new block joins that monitor's formation. This lets players
+        // extend a wall of monitors without first placing a backing block on every cell.
+        BlockState clickedState = level.getBlockState(clickedPos);
+        if (clickedState.getBlock() instanceof MonitorBlock) {
+            net.minecraft.core.Direction existingFacing = clickedState.getValue(FACING);
+            // The new position must be coplanar (same depth) with the existing monitor —
+            // i.e. the player clicked a face perpendicular to the monitor's facing axis,
+            // not its front or back. Allowing only same-plane neighbors keeps the formation flat.
+            if (clicked.getAxis() != existingFacing.getAxis()) {
+                return this.defaultBlockState().setValue(FACING, existingFacing);
+            }
+        }
+
         if (clicked.getAxis().isHorizontal()) {
             return this.defaultBlockState().setValue(FACING, clicked);
         }
-        // Clicked on top or bottom face: not supported \u2014 reject placement
+        // Clicked on top or bottom face of a non-monitor block: not supported — reject placement
         return null;
     }
 
