@@ -504,8 +504,10 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
                     0, BI, backZ,   1, BI, backZ,   1, BI, frontZ,   0, BI, frontZ,
                     0, 0, 1, 1, 0, 1, 0, fr, fg_, fb);
         }
-        // Left side (x=BI). Drawn double-sided.
-        if (!hasLeft) {
+        // Renderer-left side (x=BI) — this is the player's RIGHT edge of the block
+        // (renderer +X = player's LEFT, so x=0 lies on the player's RIGHT).
+        // Suppress when a neighbor exists on the player's right (hasRight). Drawn double-sided.
+        if (!hasRight) {
             addQuadTinted(frame, mat, pose,
                     BI, 0, frontZ,   BI, 0, backZ,   BI, 1, backZ,   BI, 1, frontZ,
                     0, 0, 1, 1, -1, 0, 0, fr, fg_, fb);
@@ -513,8 +515,9 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
                     BI, 0, backZ,   BI, 0, frontZ,   BI, 1, frontZ,   BI, 1, backZ,
                     0, 0, 1, 1, 1, 0, 0, fr, fg_, fb);
         }
-        // Right side (x=1-BI). Drawn double-sided.
-        if (!hasRight) {
+        // Renderer-right side (x=1-BI) — this is the player's LEFT edge of the block.
+        // Suppress when a neighbor exists on the player's left (hasLeft). Drawn double-sided.
+        if (!hasLeft) {
             addQuadTinted(frame, mat, pose,
                     1 - BI, 0, backZ,   1 - BI, 0, frontZ,   1 - BI, 1, frontZ,   1 - BI, 1, backZ,
                     0, 0, 1, 1, 1, 0, 0, fr, fg_, fb);
