@@ -467,14 +467,26 @@ public class RobotRenderer extends EntityRenderer<RobotEntity> {
     }
 
     @Override
+    protected boolean shouldShowName(RobotEntity entity) {
+        // Always render the name-tag layer so the stats line shows even when the entity
+        // has no custom name. The displayName line itself is gated below.
+        return true;
+    }
+
+    @Override
     protected void renderNameTag(RobotEntity entity, net.minecraft.network.chat.Component displayName,
                                   PoseStack poseStack, net.minecraft.client.renderer.MultiBufferSource buffer,
                                   int packedLight, float partialTick) {
         // Top line — vanilla custom name (only when player has named it via Name Tag).
-        super.renderNameTag(entity, displayName, poseStack, buffer, packedLight, partialTick);
-        // Second line — health + charge stats, drawn slightly below.
+        if (entity.hasCustomName()) {
+            super.renderNameTag(entity, displayName, poseStack, buffer, packedLight, partialTick);
+        }
+        // Second line — health + charge stats, drawn slightly below the custom name (or at
+        // the normal name position if there is no custom name).
         poseStack.pushPose();
-        poseStack.translate(0.0, -0.27, 0.0);
+        if (entity.hasCustomName()) {
+            poseStack.translate(0.0, -0.27, 0.0);
+        }
         super.renderNameTag(entity, entity.getStatsLine(), poseStack, buffer, packedLight, partialTick);
         poseStack.popPose();
     }

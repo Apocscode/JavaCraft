@@ -460,9 +460,10 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
         float mr = hasLeft   ? 0f : m;   // player-left edge of this block (renderer x=1)
         float mb = hasBottom ? 0f : m;
         float mt = hasTop    ? 0f : m;
-        // Use entitySolid (no alpha test) so the slab sides stay opaque at oblique angles.
-        // entityCutoutNoCull's alpha-test drops mipmapped edge pixels, making thin sides look
-        // transparent when the monitor is tilted/yawed.
+        // entitySolid: opaque pass with no alpha test — guarantees side quads stay fully
+        // visible at oblique viewing angles where mipmap+alpha-cutout would otherwise drop
+        // edge pixels. Side quad windings are corrected below to be CCW from each face
+        // normal so backface culling doesn't discard them.
         VertexConsumer frame = buffers.getBuffer(RenderType.entitySolid(FRAME_TEXTURE));
 
         // Frame tint (player-paintable). Bezel uses a darker shade of the same color so the
@@ -483,9 +484,10 @@ public class MonitorRenderer implements BlockEntityRenderer<MonitorBlockEntity> 
 
         // Top side (y=1-BI) — only if this block is at the top edge. Inset 0.001 along Y
         // so it doesn't co-plane with the bottom face of the block above.
+        // Wound CCW when viewed from +Y (outside) so it survives backface culling.
         if (!hasTop) {
             addQuadTinted(frame, mat, pose,
-                    0, 1 - BI, frontZ,   1, 1 - BI, frontZ,   1, 1 - BI, backZ,   0, 1 - BI, backZ,
+                    0, 1 - BI, backZ,   1, 1 - BI, backZ,   1, 1 - BI, frontZ,   0, 1 - BI, frontZ,
                     0, 0, 1, 1, 0, 1, 0, fr, fg_, fb);
         }
         // Bottom side (y=BI)

@@ -234,12 +234,21 @@ public class DroneRenderer extends EntityRenderer<DroneEntity> {
     }
 
     @Override
+    protected boolean shouldShowName(DroneEntity entity) {
+        return true;
+    }
+
+    @Override
     protected void renderNameTag(DroneEntity entity, net.minecraft.network.chat.Component displayName,
                                   PoseStack poseStack, MultiBufferSource buffer,
                                   int packedLight, float partialTick) {
-        super.renderNameTag(entity, displayName, poseStack, buffer, packedLight, partialTick);
+        if (entity.hasCustomName()) {
+            super.renderNameTag(entity, displayName, poseStack, buffer, packedLight, partialTick);
+        }
         poseStack.pushPose();
-        poseStack.translate(0.0, -0.27, 0.0);
+        if (entity.hasCustomName()) {
+            poseStack.translate(0.0, -0.27, 0.0);
+        }
         super.renderNameTag(entity, entity.getStatsLine(), poseStack, buffer, packedLight, partialTick);
         poseStack.popPose();
     }
